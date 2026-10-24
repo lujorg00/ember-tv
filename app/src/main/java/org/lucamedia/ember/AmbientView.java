@@ -23,12 +23,12 @@ import java.util.Random;
  *   NIGHT    deep blue, twinkling stars, the odd shooting star, and tonight's real moon phase
  * Built for the Chromecast's small GPU: everything soft (sky, sun, clouds, firelight, moonlight) is drawn
  * into a quarter-resolution buffer and scaled up (it's all blurry anyway), and only the small crisp
- * things (stars, moon, embers, snow) are drawn at full resolution. ~20fps, only while on screen,
+ * things (stars, moon, embers, snow) are drawn at full resolution. ~30fps, only while on screen,
  * and it can be switched to a still picture in Ember settings.
  */
 final class AmbientView extends View {
 
-    private static final long FRAME_MS = 50;
+    private static final long FRAME_MS = 33;
     private static final float SOFT_SCALE = 0.25f;
 
     private SunClock.Mode mode = SunClock.Mode.NIGHT;
