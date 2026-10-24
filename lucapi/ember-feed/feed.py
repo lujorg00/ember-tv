@@ -187,6 +187,8 @@ def _systemd_services():
                 continue  # backup jobs etc. finish and stop; they aren't "down"
         except OSError:
             pass
+        if (base / f"{unit}.timer").exists() or Path(f"/lib/systemd/system/{unit}.timer").exists():
+            continue  # run by a timer (updaters and the like), so not meant to stay running
         if _run(["systemctl", "is-enabled", unit]) not in ("enabled", "static"):
             continue
         state = _run(["systemctl", "is-active", unit])
@@ -319,10 +321,14 @@ def _ago(value):
 def _cats():
     """Reads the cat tracker and normalises it to [{name, home, detail}].
     Accepts a list, or a dict keyed by cat name, with fields like home/present/state/location/since."""
-    url = CFG["cats"]["url"]
-    if not url:
+    url = CFG["cats"].get("url", "")
+    path = CFG["cats"].get("file", "")
+    if path and os.path.exists(path):
+        raw = json.loads(Path(path).read_text())
+    elif url:
+        raw = json.loads(http_get(url, timeout=5))
+    else:
         return []
-    raw = json.loads(http_get(url, timeout=5))
     if isinstance(raw, dict) and "cats" in raw:
         raw = raw["cats"]
     items = [dict(v, name=v.get("name", k)) for k, v in raw.items()] if isinstance(raw, dict) else list(raw)
