@@ -35,7 +35,21 @@ final class ImageLoader {
 
     private final LruCache<String, Bitmap> memory;
     private final File diskDir;
-    private final ExecutorService pool = Executors.newFixedThreadPool(4);
+    // Two low-priority threads: posters keep loading, but never at the expense of smooth scrolling.
+    private final ExecutorService pool = Executors.newFixedThreadPool(2, new java.util.concurrent.ThreadFactory() {
+        @Override
+        public Thread newThread(final Runnable r) {
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                    r.run();
+                }
+            }, "ember-images");
+            t.setDaemon(true);
+            return t;
+        }
+    });
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private ImageLoader(Context ctx) {

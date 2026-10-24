@@ -80,6 +80,13 @@ final class AmbientView extends View {
         moonY = fy;
     }
 
+    private long stillUntil;
+
+    /** Freezes the animation for a moment (e.g. while the remote is being used), then carries on. */
+    void holdStill(long ms) {
+        stillUntil = SystemClock.uptimeMillis() + ms;
+    }
+
     /** false = draw one still frame and stop (lighter on the Chromecast). */
     void setAnimate(boolean on) {
         animate = on;
@@ -271,7 +278,16 @@ final class AmbientView extends View {
     @Override
     protected void onDraw(Canvas c) {
         if (w == 0 || h == 0 || soft == null) return;
-        float t = (SystemClock.uptimeMillis() - start) / 1000f;
+        long nowMs = SystemClock.uptimeMillis();
+        if (nowMs < stillUntil && lastT >= 0) {
+            // Holding still: show the last frame and check back when the hold ends.
+            c.drawBitmap(soft, null, full, paint);
+            drawCrisp(c, lastT);
+            if (animate && isShown() && windowVisible) postInvalidateDelayed(stillUntil - nowMs);
+            return;
+        }
+        float t = (nowMs - start) / 1000f;
+        lastT = t;
         paint.setShader(null);
         paint.setAlpha(255);
 
@@ -285,12 +301,18 @@ final class AmbientView extends View {
         c.drawBitmap(soft, null, full, paint); // scaled up with filtering
 
         // 2. Crisp details, at full resolution.
-        if (mode == SunClock.Mode.EVENING) drawEmbers(c, t);
-        else if (mode == SunClock.Mode.NIGHT) drawSky(c, t);
-        if (isDecember()) drawSnow(c, t);
+        drawCrisp(c, t);
 
         // Only keep animating while actually visible: never while an app is open over Ember.
         if (animate && isShown() && windowVisible) postInvalidateDelayed(FRAME_MS);
+    }
+
+    private float lastT = -1;
+
+    private void drawCrisp(Canvas c, float t) {
+        if (mode == SunClock.Mode.EVENING) drawEmbers(c, t);
+        else if (mode == SunClock.Mode.NIGHT) drawSky(c, t);
+        if (isDecember()) drawSnow(c, t);
     }
 
     private boolean windowVisible = true;

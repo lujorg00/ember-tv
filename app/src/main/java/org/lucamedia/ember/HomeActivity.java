@@ -351,6 +351,7 @@ public class HomeActivity extends Activity {
         cataloguePage.addView(homeAmbient, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         backdrop = new FadedImageView(this);
+        backdrop.setLayerType(View.LAYER_TYPE_HARDWARE, null); // fade is rendered once per picture, not every frame
         backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);
         backdrop.setAlpha(0.85f);
         FrameLayout.LayoutParams bdLp = new FrameLayout.LayoutParams((int) (screenW * 0.72f), (int) (screenH * 0.72f));
@@ -512,7 +513,10 @@ public class HomeActivity extends Activity {
                 @Override
                 public void onFocusChange(View v, boolean has) {
                     focusAnim(v, has);
-                    if (has) showMetaHero(m);
+                    if (has) {
+                        showMetaHero(m);
+                        homeAmbient.holdStill(900);
+                    }
                 }
             });
             strip.addView(card, cardLp(w, h));
@@ -852,6 +856,7 @@ public class HomeActivity extends Activity {
                     if (has) {
                         appFocusKey = String.valueOf(v.getTag());
                         appsFocusName.setText(app.label);
+                        ambient.holdStill(900);
                         glows.focusApp(app.pkg, app.banner != null ? app.banner : app.icon);
                     }
                 }
@@ -1004,11 +1009,11 @@ public class HomeActivity extends Activity {
             ring.setCornerRadius(dp(8));
             ring.setStroke(dp(2), apAccent);
             v.setForeground(ring);
-            v.animate().scaleX(1.08f).scaleY(1.08f).translationZ(dp(8)).setDuration(140).start();
+            v.animate().scaleX(1.08f).scaleY(1.08f).setDuration(140).start();
             scrollRowToTop(v);
         } else {
             v.setForeground(null);
-            v.animate().scaleX(1f).scaleY(1f).translationZ(0).setDuration(140).start();
+            v.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
         }
     }
 
