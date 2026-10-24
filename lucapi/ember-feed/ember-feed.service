@@ -1,0 +1,14 @@
+[Unit]
+Description=Ember feed (calendar, Pi status and photos for the TV)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=luca
+WorkingDirectory=/home/luca/ember-feed
+ExecStart=/home/luca/ember-feed/venv/bin/python /home/luca/ember-feed/feed.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

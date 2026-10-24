@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.lucamedia.ember'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.lucamedia.ember'
+        minSdk 26
+        targetSdk 34
+        // CI sets these from the build number so every build installs over the last one.
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+        versionName "1.0." + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+    }
+
+    signingConfigs {
+        ember {
+            storeFile rootProject.file('keystore/ember.keystore')
+            storePassword 'emberember'
+            keyAlias 'ember'
+            keyPassword 'emberember'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.ember
+        }
+        debug {
+            signingConfig signingConfigs.ember
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

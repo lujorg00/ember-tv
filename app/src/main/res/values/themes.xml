@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ember_bg">#FF0E0B09</color>
+    <color name="ember_surface">#FF1C1612</color>
+    <color name="ember_text">#FFF3E7DA</color>
+    <color name="ember_muted">#FFA8968A</color>
+    <color name="ember_accent">#FFF0A04B</color>
+
+    <style name="Theme.Ember" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/ember_bg</item>
+        <item name="android:colorBackground">@color/ember_bg</item>
+        <item name="android:colorAccent">@color/ember_accent</item>
+        <item name="android:textColor">@color/ember_text</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:statusBarColor">@color/ember_bg</item>
+        <item name="android:navigationBarColor">@color/ember_bg</item>
+    </style>
+</resources>

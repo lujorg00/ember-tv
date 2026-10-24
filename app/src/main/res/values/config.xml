@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  EDIT THIS FILE BEFORE YOUR FIRST BUILD.
+  Everything here can also be changed later on the TV in Ember's settings.
+-->
+<resources>
+    <!-- Your Omni / Stremio addon's manifest URL. Every catalogue it lists becomes a row on the home screen. -->
+    <string name="default_addon_url">https://REPLACE-ME.lucamedia.org/manifest.json</string>
+
+    <!-- What opens when you press a title. {type} and {id} are filled in (e.g. movie / tt1234567). -->
+    <string name="default_open_uri">stremio:///detail/{type}/{id}</string>
+
+    <!-- Address of ember-feed on lucapi (see lucapi/ember-feed). Powers the screensaver and the
+         projects strip on the Apps page. Leave empty to turn both off. -->
+    <string name="default_feed_url">http://192.168.4.141:8090</string>
+
+    <!-- Where you are, for the Apps page's day / evening / night looks (sunrise and sunset are worked out on the TV). -->
+    <string name="sun_latitude">53.48</string>
+    <string name="sun_longitude">-2.29</string>
+
+    <!-- Name shown in the corner greeting -->
+    <string name="owner_name">Luca</string>
+</resources>

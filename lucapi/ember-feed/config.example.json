@@ -1,0 +1,32 @@
+{
+  "port": 8090,
+  "timezone": "Europe/London",
+
+  "calendars": [
+    { "name": "Shifts",     "url": "webcal://pXX-caldav.icloud.com/published/2/REPLACE-ME", "colour": "#F0A04B", "shifts": true },
+    { "name": "Dog walks",  "url": "webcal://pXX-caldav.icloud.com/published/2/REPLACE-ME", "colour": "#E8833A" },
+    { "name": "Personal",   "url": "webcal://pXX-caldav.icloud.com/published/2/REPLACE-ME", "colour": "#C9B6A6" }
+  ],
+  "days_ahead": 7,
+  "max_events": 10,
+
+  "services": {
+    "auto": true,
+    "hide": [],
+    "names": { "rotation": "Gym tracker", "cloudflared": "Cloudflare tunnel" },
+    "http": []
+  },
+
+  "photos": {
+    "folder": "/mnt/storage/ember-photos",
+    "bing": true,
+    "mix_bing": false,
+    "seconds_per_photo": 30
+  },
+
+  "ticker_others": 3,
+
+  "cats": { "url": "" },
+
+  "extra_cards_urls": []
+}
