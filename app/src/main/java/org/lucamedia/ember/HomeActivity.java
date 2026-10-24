@@ -137,6 +137,7 @@ public class HomeActivity extends Activity {
     private String addonError;
     private boolean fetching;
     private String pendingBackdrop;
+    private String pendingPoster;
 
     private final Runnable clockTick = new Runnable() {
         @Override
@@ -151,7 +152,8 @@ public class HomeActivity extends Activity {
         public void run() {
             final String url = pendingBackdrop;
             if (url == null || url.isEmpty()) return;
-            images.load(url, screenW / 2, screenH / 2, new ImageLoader.Callback() {
+            // Background art first; if that title has none (or it fails), use its poster instead.
+            images.loadHero(new String[]{url, pendingPoster}, screenW / 2, screenH / 2, new ImageLoader.Callback() {
                 @Override
                 public void onLoaded(Bitmap bmp) {
                     if (!url.equals(pendingBackdrop)) return;
@@ -1104,6 +1106,7 @@ public class HomeActivity extends Activity {
         heroSub.setText(m.subtitle());
         heroDesc.setText(m.description);
         pendingBackdrop = m.background;
+        pendingPoster = m.poster;
         main.removeCallbacks(backdropLoader);
         main.postDelayed(backdropLoader, 250); // don't thrash while scrolling fast
     }
