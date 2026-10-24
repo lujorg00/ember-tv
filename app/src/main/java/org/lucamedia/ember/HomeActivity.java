@@ -346,6 +346,7 @@ public class HomeActivity extends Activity {
         // The day / evening / night scene fills the page; the title's backdrop fades into it.
         homeAmbient = new AmbientView(this);
         homeAmbient.setMode(apMode);
+        homeAmbient.setAnimate(prefs.motion());
         homeAmbient.setMoonPosition(0.07f, 0.065f); // top-left, clear of the title and the clock
         cataloguePage.addView(homeAmbient, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -690,6 +691,7 @@ public class HomeActivity extends Activity {
         // Background: day / evening / night scene following the real sun, under a glow in the focused app's colour.
         ambient = new AmbientView(this);
         ambient.setMode(apMode);
+        ambient.setAnimate(prefs.motion());
         page.addView(ambient, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         View appLayer = new View(this);
         page.addView(appLayer, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));

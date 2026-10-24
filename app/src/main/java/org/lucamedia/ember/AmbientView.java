@@ -21,11 +21,15 @@ import java.util.Random;
  *   DAY      warm paper under a pale sky, a bright sun top-right, soft clouds drifting across
  *   EVENING  a dark wall lit by a fire just out of view (bottom-left), flickering, with stray embers
  *   NIGHT    deep blue, twinkling stars, the odd shooting star, and tonight's real moon phase
- * Runs at ~30fps only while it's on screen.
+ * Built for the Chromecast's small GPU: everything soft (sky, sun, clouds, firelight, moonlight) is drawn
+ * into a quarter-resolution buffer and scaled up (it's all blurry anyway), and only the small crisp
+ * things (stars, moon, embers, snow) are drawn at full resolution. ~20fps, only while on screen,
+ * and it can be switched to a still picture in Ember settings.
  */
 final class AmbientView extends View {
 
-    private static final long FRAME_MS = 33;
+    private static final long FRAME_MS = 50;
+    private static final float SOFT_SCALE = 0.25f;
 
     private SunClock.Mode mode = SunClock.Mode.NIGHT;
     private final Random rnd = new Random();
@@ -33,6 +37,13 @@ final class AmbientView extends View {
     private final long start = SystemClock.uptimeMillis();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private int w, h;
+    private boolean animate = true;
+
+    // Quarter-resolution buffer for the soft layers, plus each mode's unchanging base, pre-rendered once.
+    private Bitmap soft;
+    private Canvas softCanvas;
+    private Bitmap baseDay, baseEvening, baseNight;
+    private final RectF full = new RectF();
 
     // Day
     private Shader skyShader, sunShader;
@@ -67,6 +78,12 @@ final class AmbientView extends View {
     void setMoonPosition(float fx, float fy) {
         moonX = fx;
         moonY = fy;
+    }
+
+    /** false = draw one still frame and stop (lighter on the Chromecast). */
+    void setAnimate(boolean on) {
+        animate = on;
+        invalidate();
     }
 
     void setMode(SunClock.Mode m) {
@@ -132,6 +149,28 @@ final class AmbientView extends View {
         }
         softFlake = makeSoftFlake();
         crystal = makeCrystal();
+
+        int lw = Math.max(1, Math.round(w * SOFT_SCALE)), lh = Math.max(1, Math.round(h * SOFT_SCALE));
+        soft = Bitmap.createBitmap(lw, lh, Bitmap.Config.ARGB_8888);
+        softCanvas = new Canvas(soft);
+        softCanvas.scale(SOFT_SCALE, SOFT_SCALE); // so drawing code can keep using full-screen coordinates
+        full.set(0, 0, w, h);
+        baseDay = makeBase(lw, lh, 0xFFEADFCF, skyShader, sunShader);
+        baseEvening = makeBase(lw, lh, 0xFF110A07);
+        baseNight = makeBase(lw, lh, 0xFF0A0A10, moonlightShader);
+    }
+
+    private Bitmap makeBase(int lw, int lh, int colour, Shader... layers) {
+        Bitmap b = Bitmap.createBitmap(lw, lh, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        c.scale(SOFT_SCALE, SOFT_SCALE);
+        c.drawColor(colour);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        for (Shader sh : layers) {
+            p.setShader(sh);
+            c.drawRect(0, 0, w, h, p);
+        }
+        return b;
     }
 
     /** A fluffy, soft-edged flake: white fading out to nothing. */
@@ -231,24 +270,27 @@ final class AmbientView extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        if (w == 0 || h == 0) return;
+        if (w == 0 || h == 0 || soft == null) return;
         float t = (SystemClock.uptimeMillis() - start) / 1000f;
         paint.setShader(null);
         paint.setAlpha(255);
-        switch (mode) {
-            case DAY:
-                drawDay(c, t);
-                break;
-            case EVENING:
-                drawEvening(c, t);
-                break;
-            default:
-                drawNight(c, t);
-                break;
-        }
+
+        // 1. Soft layers, at quarter resolution.
+        Bitmap base = mode == SunClock.Mode.DAY ? baseDay : mode == SunClock.Mode.EVENING ? baseEvening : baseNight;
+        softCanvas.drawBitmap(base, null, full, null);
+        if (mode == SunClock.Mode.DAY) drawClouds(softCanvas, t);
+        else if (mode == SunClock.Mode.EVENING) drawFirelight(softCanvas, t);
+        paint.setShader(null);
+        paint.setAlpha(255);
+        c.drawBitmap(soft, null, full, paint); // scaled up with filtering
+
+        // 2. Crisp details, at full resolution.
+        if (mode == SunClock.Mode.EVENING) drawEmbers(c, t);
+        else if (mode == SunClock.Mode.NIGHT) drawSky(c, t);
         if (isDecember()) drawSnow(c, t);
+
         // Only keep animating while actually visible: never while an app is open over Ember.
-        if (isShown() && windowVisible) postInvalidateDelayed(FRAME_MS);
+        if (animate && isShown() && windowVisible) postInvalidateDelayed(FRAME_MS);
     }
 
     private boolean windowVisible = true;
@@ -266,11 +308,7 @@ final class AmbientView extends View {
         if (visibility == VISIBLE) invalidate(); // restart the loop when the Apps page comes back
     }
 
-    private void drawDay(Canvas c, float t) {
-        paint.setShader(skyShader);
-        c.drawRect(0, 0, w, h, paint);
-        paint.setShader(sunShader);
-        c.drawRect(0, 0, w, h, paint);
+    private void drawClouds(Canvas c, float t) {
         paint.setShader(null);
         Rect src = new Rect(0, 0, 48, 20);
         RectF dst = new RectF();
@@ -287,8 +325,7 @@ final class AmbientView extends View {
         paint.setAlpha(255);
     }
 
-    private void drawEvening(Canvas c, float t) {
-        c.drawColor(0xFF110A07);
+    private void drawFirelight(Canvas c, float t) {
         // Each pool of light flickers on its own rhythm, which is what makes firelight feel alive.
         float[][] beat = {{2.7f, 6.3f, 11f}, {4.1f, 8.9f, 13.7f}, {6.6f, 12.4f, 17.3f}};
         for (int i = 0; i < fireShaders.length; i++) {
@@ -309,7 +346,10 @@ final class AmbientView extends View {
         c.drawRect(-20 * density, 0, w + 20 * density, h, paint);
         c.restore();
         paint.setShader(null);
+        paint.setAlpha(255);
+    }
 
+    private void drawEmbers(Canvas c, float t) {
         // Stray embers drifting up and across from the fire's side, cooling from yellow to red.
         for (float[] e : embers) {
             float life = ((t / e[2]) + e[3]) % 1f;
@@ -329,12 +369,8 @@ final class AmbientView extends View {
         paint.setColor(Color.WHITE);
     }
 
-    private void drawNight(Canvas c, float t) {
-        c.drawColor(0xFF0A0A10);
-        paint.setShader(moonlightShader);
-        c.drawRect(0, 0, w, h, paint);
+    private void drawSky(Canvas c, float t) {
         paint.setShader(null);
-
         paint.setColor(0xFFE8ECFF);
         for (float[] s : stars) {
             float tw = 0.25f + 0.75f * (0.5f + 0.5f * (float) Math.sin(t * s[3] + s[4]));

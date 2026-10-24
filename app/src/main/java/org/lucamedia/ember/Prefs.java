@@ -60,6 +60,15 @@ final class Prefs {
         return feedUrl().startsWith("http");
     }
 
+    /** Moving backgrounds on (default) or a still picture. */
+    boolean motion() {
+        return sp.getBoolean("motion", true);
+    }
+
+    void setMotion(boolean on) {
+        sp.edit().putBoolean("motion", on).apply();
+    }
+
     Set<String> hiddenApps() {
         return new HashSet<>(sp.getStringSet(K_HIDDEN, new HashSet<String>()));
     }

@@ -133,6 +133,18 @@ public class SettingsActivity extends Activity {
             }
         }));
 
+        col.addView(section("Moving backgrounds"));
+        col.addView(text("The clouds, firelight, stars and snow. Switch off for a still picture if the Chromecast feels slow.", 13, MUTED, false));
+        final Button motionButton = button(prefs.motion() ? "On" : "Off", null);
+        motionButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.setMotion(!prefs.motion());
+                motionButton.setText(prefs.motion() ? "On" : "Off");
+            }
+        });
+        col.addView(motionButton);
+
         col.addView(section("Home button"));
         col.addView(text("Google TV doesn't let other apps be the home screen. Switch on \"Ember home button\" under Accessibility and Ember will replace the Google TV home screen whenever it appears.", 13, MUTED, false));
         overrideState = text("", 14, TEXT, true);
