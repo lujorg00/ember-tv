@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +51,7 @@ def load_config():
     cfg.setdefault("cats", {})
     cfg["cats"].setdefault("url", "")
     cfg.setdefault("ticker_others", 3)
+    cfg.setdefault("addon_upstream", "http://127.0.0.1:7010")
     return cfg
 
 
@@ -419,12 +421,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(status_cards())
             elif path == "/screensaver":
                 self._json(screensaver(self._base()))
+            elif path == "/addon" or path.startswith("/addon/"):
+                self._addon(self.path[len("/addon"):] or "/")
             elif path.startswith("/photo/"):
                 self._photo(urllib.parse.unquote(path[len("/photo/"):]))
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:
             self._json({"error": str(e)}, 500)
+
+    def _addon(self, rest):
+        """Passes requests through to your Stremio addon, which only listens inside the Pi."""
+        up = CFG["addon_upstream"].rstrip("/")
+        try:
+            req = urllib.request.Request(up + rest, headers={"User-Agent": "ember-feed/1.0", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                body = r.read()
+                ctype = r.headers.get("Content-Type", "application/json")
+                code = r.status
+        except urllib.error.HTTPError as e:
+            body, ctype, code = e.read(), e.headers.get("Content-Type", "text/plain"), e.code
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _photo(self, name):
         folder = CFG["photos"]["folder"]

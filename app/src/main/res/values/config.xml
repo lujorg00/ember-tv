@@ -5,7 +5,7 @@
 -->
 <resources>
     <!-- Your Omni / Stremio addon's manifest URL. Every catalogue it lists becomes a row on the home screen. -->
-    <string name="default_addon_url">https://REPLACE-ME.lucamedia.org/manifest.json</string>
+    <string name="default_addon_url">http://192.168.4.141:8090/addon/manifest.json</string>
 
     <!-- What opens when you press a title. {type} and {id} are filled in (e.g. movie / tt1234567). -->
     <string name="default_open_uri">stremio:///detail/{type}/{id}</string>
