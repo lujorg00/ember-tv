@@ -333,7 +333,16 @@ def _cats():
         raw = raw["cats"]
     items = [dict(v, name=v.get("name", k)) for k, v in raw.items()] if isinstance(raw, dict) else list(raw)
     out = []
+    outdoor = [r.lower() for r in CFG["cats"].get("outdoor_rooms", ["fence"])]
     for c in items:
+        if "zone" in c:  # catwatch's own format
+            zone = str(c.get("zone") or "")
+            room = str(c.get("room") or "").lower()
+            home = bool(zone) and "unreachable" not in zone and room not in outdoor
+            since = _ago(c.get("since"))
+            out.append({"name": str(c.get("name", "?")), "home": home,
+                        "detail": ("In" if home else "Out") + (f" \u00b7 {since}" if since else "")})
+            continue
         state = str(c.get("state", c.get("status", ""))).lower()
         home = c.get("home", c.get("present", c.get("inside")))
         if home is None:
