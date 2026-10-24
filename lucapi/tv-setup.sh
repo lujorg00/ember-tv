@@ -41,11 +41,20 @@ if ! command -v adb >/dev/null; then
 fi
 
 # --- connect ---------------------------------------------------------------------------
+echo "adb version: $(adb version | head -1)"
 say "On the TV: Settings > System > Developer options > Wireless debugging > Pair device with pairing code"
-echo "It shows an IP address and port, and a 6-digit code."
-read -rp "Type the IP address and port it shows (e.g. ${TV_IP}:37123): " PAIR
-[ -n "$PAIR" ] || die "No pairing address given"
-adb pair "$PAIR" || die "Pairing failed. Check the code and try again (codes expire quickly)."
+echo "Leave that pairing box open on the TV the whole time - closing it cancels the code."
+paired=no
+for attempt in 1 2 3; do
+  read -rp "Type the IP address and port shown in the pairing box (e.g. ${TV_IP}:37123), or 'skip' if already paired: " PAIR
+  [ "$PAIR" = "skip" ] && { paired=yes; break; }
+  [ -n "$PAIR" ] || continue
+  read -rp "Type the 6-digit code shown in the pairing box: " CODE
+  OUT=$(adb pair "$PAIR" "$CODE" 2>&1); echo "$OUT"
+  if echo "$OUT" | grep -qi "successfully paired"; then paired=yes; break; fi
+  echo "That didn't pair. If the box on the TV closed, open 'Pair device with pairing code' again: it gives a new port and code."
+done
+[ "$paired" = yes ] || die "Pairing failed three times. Send Claude the messages above."
 
 say "Now back out to the main Wireless debugging screen: it shows 'IP address & port' (a different port)."
 read -rp "Type just that port number: " PORT
