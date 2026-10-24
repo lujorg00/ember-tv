@@ -630,31 +630,49 @@ public class HomeActivity extends Activity {
             lucapiLine.setVisibility(View.GONE);
         }
 
-        // Cats: a small block each, bottom-left: name, then "In · 2h" / "Out · 40m".
+        // Cats: one split pill, bottom-left - "Home  Elvis" | "Out  Winnie · 40m".
         catsLine.removeAllViews();
         org.json.JSONArray cats = o.optJSONArray("cats");
+        StringBuilder home = new StringBuilder(), away = new StringBuilder();
         for (int i = 0; cats != null && i < cats.length(); i++) {
             org.json.JSONObject c = cats.optJSONObject(i);
             if (c == null) continue;
-            boolean in = c.optBoolean("home");
-            LinearLayout block = new LinearLayout(this);
-            block.setOrientation(LinearLayout.VERTICAL);
-            block.setPadding(dp(9), dp(5), dp(10), dp(6));
-            GradientDrawable bb = new GradientDrawable();
-            bb.setColor(apSurface);
-            bb.setCornerRadius(dp(8));
-            block.setBackground(bb);
-            TextView name = text(11, apText, Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            name.setText(c.optString("name"));
-            block.addView(name);
-            TextView state = text(10, in ? apAccent : apMuted, Typeface.create("sans-serif", Typeface.NORMAL));
-            state.setText(c.optString("detail"));
-            block.addView(state);
-            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (i > 0) blp.leftMargin = dp(8);
-            catsLine.addView(block, blp);
+            String name = c.optString("name");
+            if (c.optBoolean("home")) {
+                if (home.length() > 0) home.append(", ");
+                home.append(name);
+            } else {
+                String detail = c.optString("detail");
+                int dot = detail.indexOf("\u00b7");
+                if (away.length() > 0) away.append(", ");
+                away.append(name);
+                if (dot >= 0) away.append(" \u00b7 ").append(detail.substring(dot + 1).trim());
+            }
+        }
+        if (home.length() > 0 || away.length() > 0) {
+            LinearLayout pill = new LinearLayout(this);
+            pill.setOrientation(LinearLayout.HORIZONTAL);
+            GradientDrawable pb = new GradientDrawable();
+            pb.setColor(apSurface);
+            pb.setCornerRadius(dp(999));
+            pill.setBackground(pb);
+            pill.setClipToOutline(true);
+            if (home.length() > 0) pill.addView(catSegment("Home", home.toString(), apAccent, (apAccent & 0x00FFFFFF) | 0x40000000));
+            if (away.length() > 0) pill.addView(catSegment("Out", away.toString(), apMuted, 0));
+            catsLine.addView(pill);
         }
         catsLine.setVisibility(catsLine.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private View catSegment(String label, String names, int labelColour, int bg) {
+        TextView t = text(12, apText, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder(label + "  " + names);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(labelColour), 0, label.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        t.setText(sb);
+        t.setSingleLine(true);
+        t.setPadding(dp(12), dp(5), dp(12), dp(5));
+        if (bg != 0) t.setBackgroundColor(bg);
+        return t;
     }
 
     /** Keeps the ticker pill just to the left of the clock, whatever the clock's width. */
