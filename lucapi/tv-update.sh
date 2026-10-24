@@ -11,5 +11,8 @@ fi
 [ "$(adb -s "$DEV" get-state 2>/dev/null)" = "device" ] || { echo "Couldn't reach the TV at $DEV"; exit 1; }
 curl -fsSL -o /tmp/ember.apk https://github.com/lujorg00/ember-tv/releases/latest/download/ember.apk && \
   adb -s "$DEV" install -r /tmp/ember.apk && \
+  adb -s "$DEV" shell settings put secure screensaver_components org.lucamedia.ember/.EmberDream && \
+  adb -s "$DEV" shell settings put secure screensaver_enabled 1 && \
+  adb -s "$DEV" shell settings put secure screensaver_activate_on_sleep 1 && \
   adb -s "$DEV" shell am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null && \
   echo "Ember updated: $(adb -s "$DEV" shell dumpsys package org.lucamedia.ember | grep -m1 versionName | tr -d ' \r')"

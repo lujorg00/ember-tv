@@ -21,15 +21,16 @@ import java.util.Random;
  *   DAY      warm paper under a pale sky, a bright sun top-right, soft clouds drifting across
  *   EVENING  a dark wall lit by a fire just out of view (bottom-left), flickering, with stray embers
  *   NIGHT    deep blue, twinkling stars, the odd shooting star, and tonight's real moon phase
- * Built for the Chromecast's small GPU: everything soft (sky, sun, clouds, firelight, moonlight) is drawn
- * into a quarter-resolution buffer and scaled up (it's all blurry anyway), and only the small crisp
- * things (stars, moon, embers, snow) are drawn at full resolution. ~30fps, only while on screen,
- * and it can be switched to a still picture in Ember settings.
+ * Built for the Chromecast: nothing is painted pixel-by-pixel on the processor while it animates. Each
+ * scene's still parts are pre-rendered once into small bitmaps; the moving parts (clouds, pools of
+ * firelight, shadow) are small pre-made glow bitmaps the GPU just stretches and fades; and the crisp
+ * details (stars, moon, embers, snow) are a few dozen dots. ~30fps, only while on screen, and it can
+ * be switched to a still picture in Ember settings.
  */
 final class AmbientView extends View {
 
     private static final long FRAME_MS = 33;
-    private static final float SOFT_SCALE = 0.25f;
+    private static final float SOFT_SCALE = 0.25f; // resolution of the pre-rendered still bases
 
     private SunClock.Mode mode = SunClock.Mode.NIGHT;
     private final Random rnd = new Random();
@@ -39,10 +40,14 @@ final class AmbientView extends View {
     private int w, h;
     private boolean animate = true;
 
-    // Quarter-resolution buffer for the soft layers, plus each mode's unchanging base, pre-rendered once.
-    private Bitmap soft;
-    private Canvas softCanvas;
+    // Each mode's unchanging base, pre-rendered once at quarter resolution (uploaded to the GPU once).
     private Bitmap baseDay, baseEvening, baseNight;
+    // Soft glow sprites for the firelight and shadow, made once; the GPU stretches them each frame.
+    private Bitmap[] fireGlows;
+    private Bitmap shadowGlow;
+    private float[][] firePools; // {cx, cy, radius}
+    private float[] shadowPool;  // {cx, cy, radius}
+    private final RectF tmp = new RectF();
     private final RectF full = new RectF();
 
     // Day
@@ -158,13 +163,23 @@ final class AmbientView extends View {
         crystal = makeCrystal();
 
         int lw = Math.max(1, Math.round(w * SOFT_SCALE)), lh = Math.max(1, Math.round(h * SOFT_SCALE));
-        soft = Bitmap.createBitmap(lw, lh, Bitmap.Config.ARGB_8888);
-        softCanvas = new Canvas(soft);
-        softCanvas.scale(SOFT_SCALE, SOFT_SCALE); // so drawing code can keep using full-screen coordinates
         full.set(0, 0, w, h);
+        firePools = new float[][]{{cx, cy, w * 0.58f}, {cx + w * 0.05f, cy - h * 0.04f, w * 0.38f}, {cx + w * 0.10f, cy - h * 0.08f, w * 0.22f}};
+        fireGlows = new Bitmap[]{glow(Color.argb(74, 235, 110, 40)), glow(Color.argb(66, 255, 165, 70)), glow(Color.argb(58, 255, 205, 120))};
+        shadowPool = new float[]{w * 0.8f, h * 0.55f, w * 0.22f};
+        shadowGlow = glow(Color.argb(60, 0, 0, 0));
         baseDay = makeBase(lw, lh, 0xFFEADFCF, skyShader, sunShader);
         baseEvening = makeBase(lw, lh, 0xFF110A07);
         baseNight = makeBase(lw, lh, 0xFF0A0A10, moonlightShader);
+    }
+
+    /** A small soft round glow (fades fully to transparent) the GPU can stretch to any size cheaply. */
+    private static Bitmap glow(int c) {
+        Bitmap b = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+        p.setShader(soft(48, 48, 48, c));
+        new Canvas(b).drawRect(0, 0, 96, 96, p);
+        return b;
     }
 
     private Bitmap makeBase(int lw, int lh, int colour, Shader... layers) {
@@ -277,34 +292,25 @@ final class AmbientView extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        if (w == 0 || h == 0 || soft == null) return;
+        if (w == 0 || h == 0 || baseDay == null) return;
         long nowMs = SystemClock.uptimeMillis();
-        if (nowMs < stillUntil && lastT >= 0) {
-            // Holding still: show the last frame and check back when the hold ends.
-            c.drawBitmap(soft, null, full, paint);
-            drawCrisp(c, lastT);
-            if (animate && isShown() && windowVisible) postInvalidateDelayed(stillUntil - nowMs);
-            return;
-        }
-        float t = (nowMs - start) / 1000f;
+        boolean holding = nowMs < stillUntil && lastT >= 0;
+        float t = holding ? lastT : (nowMs - start) / 1000f;
         lastT = t;
         paint.setShader(null);
+        paint.setColorFilter(null);
         paint.setAlpha(255);
 
-        // 1. Soft layers, at quarter resolution.
         Bitmap base = mode == SunClock.Mode.DAY ? baseDay : mode == SunClock.Mode.EVENING ? baseEvening : baseNight;
-        softCanvas.drawBitmap(base, null, full, null);
-        if (mode == SunClock.Mode.DAY) drawClouds(softCanvas, t);
-        else if (mode == SunClock.Mode.EVENING) drawFirelight(softCanvas, t);
-        paint.setShader(null);
+        c.drawBitmap(base, null, full, paint); // static: the GPU keeps it, no re-upload
+        if (mode == SunClock.Mode.DAY) drawClouds(c, t);
+        else if (mode == SunClock.Mode.EVENING) drawFirelight(c, t);
         paint.setAlpha(255);
-        c.drawBitmap(soft, null, full, paint); // scaled up with filtering
-
-        // 2. Crisp details, at full resolution.
         drawCrisp(c, t);
 
-        // Only keep animating while actually visible: never while an app is open over Ember.
-        if (animate && isShown() && windowVisible) postInvalidateDelayed(FRAME_MS);
+        // Only keep animating while visible: never while an app is open over Ember. While the remote is
+        // being used, hold the frame and check back when the hold ends.
+        if (animate && isShown() && windowVisible) postInvalidateDelayed(holding ? stillUntil - nowMs : FRAME_MS);
     }
 
     private float lastT = -1;
@@ -348,27 +354,21 @@ final class AmbientView extends View {
     }
 
     private void drawFirelight(Canvas c, float t) {
-        // Each pool of light flickers on its own rhythm, which is what makes firelight feel alive.
+        // Each pool flickers on its own rhythm, which is what makes firelight feel alive.
         float[][] beat = {{2.7f, 6.3f, 11f}, {4.1f, 8.9f, 13.7f}, {6.6f, 12.4f, 17.3f}};
-        for (int i = 0; i < fireShaders.length; i++) {
+        for (int i = 0; i < firePools.length; i++) {
             float f = 0.75f + 0.15f * (float) Math.sin(t * beat[i][0] + i)
                     + 0.08f * (float) Math.sin(t * beat[i][1] + i * 2) + 0.05f * (float) Math.sin(t * beat[i][2] + i * 3);
             float dx = (float) Math.sin(t * 0.9f + i) * 10 * density, dy = (float) Math.cos(t * 1.3f + i) * 6 * density;
-            c.save();
-            c.translate(dx, dy);
-            paint.setShader(fireShaders[i]);
+            float[] pl = firePools[i];
+            tmp.set(pl[0] + dx - pl[2], pl[1] + dy - pl[2], pl[0] + dx + pl[2], pl[1] + dy + pl[2]);
             paint.setAlpha((int) (Math.max(0f, Math.min(1f, f)) * 255));
-            c.drawRect(-dx, -dy, w - dx, h - dy, paint);
-            c.restore();
+            c.drawBitmap(fireGlows[i], null, tmp, paint);
         }
-        c.save();
-        c.translate((float) Math.sin(t * 1.4f) * 14 * density, 0);
-        paint.setShader(shadowShader);
+        float sx = (float) Math.sin(t * 1.4f) * 14 * density;
+        tmp.set(shadowPool[0] + sx - shadowPool[2], shadowPool[1] - shadowPool[2], shadowPool[0] + sx + shadowPool[2], shadowPool[1] + shadowPool[2]);
         paint.setAlpha(255);
-        c.drawRect(-20 * density, 0, w + 20 * density, h, paint);
-        c.restore();
-        paint.setShader(null);
-        paint.setAlpha(255);
+        c.drawBitmap(shadowGlow, null, tmp, paint);
     }
 
     private void drawEmbers(Canvas c, float t) {

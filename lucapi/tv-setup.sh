@@ -101,7 +101,7 @@ say "Making Ember the home app and the screensaver..."
 A cmd package set-home-activity "$EMBER/.HomeActivity" >/dev/null 2>&1 || true
 A settings put secure screensaver_components "$EMBER/.EmberDream"
 A settings put secure screensaver_enabled 1
-A settings put secure screensaver_activate_on_sleep 0
+A settings put secure screensaver_activate_on_sleep 1   # start the screensaver when the TV goes idle
 A settings put system screen_off_timeout 60000
 
 # --- restore script --------------------------------------------------------------------

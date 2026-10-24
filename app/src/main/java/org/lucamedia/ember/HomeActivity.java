@@ -479,7 +479,8 @@ public class HomeActivity extends Activity {
             ImageView img = new ImageView(this);
             img.setScaleType(ImageView.ScaleType.CENTER_CROP);
             card.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            images.into(img, wide ? m.background : m.poster, w, h);
+            // Posters load only when they're near the screen (see lazyLoad), not all at once.
+            img.setTag(R.id.ember_pending, new Object[]{wide ? m.background : m.poster, w, h});
 
             if (wide) {
                 View shade = new View(this);
@@ -521,6 +522,14 @@ public class HomeActivity extends Activity {
             });
             strip.addView(card, cardLp(w, h));
         }
+        final HorizontalScrollView hs = (HorizontalScrollView) strip.getParent();
+        lazyLoad(hs, strip);
+        hs.setOnScrollChangeListener(new View.OnScrollChangeListener() {
+            @Override
+            public void onScrollChange(View v, int x, int y, int ox, int oy) {
+                lazyLoad(hs, strip);
+            }
+        });
     }
 
     private static final int APP_COLUMNS = 5;
@@ -913,6 +922,25 @@ public class HomeActivity extends Activity {
             View target = keep == null ? null : appsGrid.findViewWithTag(keep);
             if (target == null && !tiles.isEmpty()) target = tiles.get(0);
             if (target != null) target.requestFocus();
+        }
+    }
+
+    /** Starts loading posters that are on screen or just past its right edge; the rest wait. */
+    private void lazyLoad(HorizontalScrollView hs, LinearLayout strip) {
+        int edge = hs.getScrollX() + screenW + screenW / 2;
+        int x = 0;
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            View card = strip.getChildAt(i);
+            int left = card.getWidth() > 0 ? card.getLeft() : x;
+            x += card.getLayoutParams().width + dp(14);
+            if (left > edge) break;
+            if (!(card instanceof FrameLayout) || ((FrameLayout) card).getChildCount() == 0) continue;
+            View first = ((FrameLayout) card).getChildAt(0);
+            if (!(first instanceof ImageView)) continue;
+            Object[] p = (Object[]) first.getTag(R.id.ember_pending);
+            if (p == null) continue;
+            first.setTag(R.id.ember_pending, null);
+            images.into((ImageView) first, (String) p[0], (Integer) p[1], (Integer) p[2]);
         }
     }
 
