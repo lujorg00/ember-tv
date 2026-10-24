@@ -231,6 +231,10 @@ final class AmbientView extends View {
         return java.util.Calendar.getInstance().get(java.util.Calendar.MONTH) == java.util.Calendar.DECEMBER;
     }
 
+    private android.graphics.ColorFilter snowFilter;
+    private int snowTint;
+    private final RectF snowDst = new RectF();
+
     /** Light snowfall: slow, soft flakes and a few small crystals drifting and turning, tinted to suit the scene. */
     private void drawSnow(Canvas c, float t) {
         int tint;
@@ -241,9 +245,13 @@ final class AmbientView extends View {
             default: tint = 0xFFF2F4FF; alpha = 170; break;      // crisp white at night
         }
         paint.setShader(null);
-        paint.setColorFilter(new android.graphics.PorterDuffColorFilter(tint, android.graphics.PorterDuff.Mode.SRC_IN));
+        if (snowFilter == null || snowTint != tint) {
+            snowTint = tint;
+            snowFilter = new android.graphics.PorterDuffColorFilter(tint, android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        paint.setColorFilter(snowFilter);
         paint.setAlpha(alpha);
-        RectF dst = new RectF();
+        RectF dst = snowDst;
         for (float[] f : flakes) {
             float y = (f[1] + t * f[2]) % (h + 30 * density) - 15 * density;
             float x = f[0] + (float) Math.sin(t * 0.45f + f[4]) * 18 * density + t * 2 * density;
@@ -336,10 +344,13 @@ final class AmbientView extends View {
         if (visibility == VISIBLE) invalidate(); // restart the loop when the Apps page comes back
     }
 
+    private final Rect cloudSrc = new Rect(0, 0, 48, 20);
+    private final RectF cloudDst = new RectF();
+
     private void drawClouds(Canvas c, float t) {
         paint.setShader(null);
-        Rect src = new Rect(0, 0, 48, 20);
-        RectF dst = new RectF();
+        Rect src = cloudSrc;
+        RectF dst = cloudDst;
         for (int i = 0; i < clouds.length; i++) {
             float[] s = cloudSpec[i];
             float cw = s[1] * w, ch = s[2] * h * 1.6f;

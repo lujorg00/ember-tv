@@ -391,7 +391,7 @@ public class HomeActivity extends Activity {
         };
         rowScroll.setVerticalScrollBarEnabled(false);
         rowScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        rowScroll.setClipChildren(false);
+        rowScroll.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         rowScroll.setClipToPadding(false);
         FrameLayout.LayoutParams rsLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         rsLp.topMargin = (int) (screenH * 0.46f);
@@ -399,7 +399,7 @@ public class HomeActivity extends Activity {
 
         rowsBox = new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
-        rowsBox.setClipChildren(false);
+        rowsBox.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         rowsBox.setClipToPadding(false);
         rowsBox.setPadding(0, 0, 0, screenH); // lets the last row scroll up to the top slot
         rowScroll.addView(rowsBox, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -759,7 +759,7 @@ public class HomeActivity extends Activity {
         appsScroll = new ScrollView(this);
         appsScroll.setVerticalScrollBarEnabled(false);
         appsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        appsScroll.setClipChildren(false);
+        appsScroll.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         appsScroll.setClipToPadding(false);
         column.addView(appsScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -948,7 +948,7 @@ public class HomeActivity extends Activity {
     private LinearLayout addRow(String title) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setClipChildren(false);
+        row.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         row.setClipToPadding(false);
 
         TextView t = text(15, apText, Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -959,7 +959,7 @@ public class HomeActivity extends Activity {
         HorizontalScrollView hs = new HorizontalScrollView(this);
         hs.setHorizontalScrollBarEnabled(false);
         hs.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        hs.setClipChildren(false);
+        hs.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         hs.setClipToPadding(false);
         hs.setFadingEdgeLength(dp(24));
         hs.setHorizontalFadingEdgeEnabled(true);
