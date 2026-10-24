@@ -28,14 +28,28 @@ final class Meta {
         this.genres = genres;
     }
 
+    /** Like optString, but a JSON null counts as missing (Android's optString turns it into the text "null"). */
+    static String str(JSONObject o, String k, String fallback) {
+        if (o.isNull(k)) return fallback;
+        String v = o.optString(k, fallback).trim();
+        return v.isEmpty() || v.equals("null") ? fallback : v;
+    }
+
+    /** An image address, or "" if the addon gave none (or something that isn't a web link). */
+    private static String img(JSONObject o, String k) {
+        String v = str(o, k, "");
+        if (v.startsWith("//")) v = "https:" + v;
+        return v.startsWith("http") ? v : "";
+    }
+
     static Meta from(JSONObject o, String fallbackType) {
-        String id = o.optString("id", "");
-        String type = o.optString("type", fallbackType);
-        String poster = o.optString("poster", "");
+        String id = str(o, "id", "");
+        String type = str(o, "type", fallbackType);
+        String poster = img(o, "poster");
         if (poster.isEmpty() && id.startsWith("tt")) {
             poster = "https://images.metahub.space/poster/medium/" + id + "/img";
         }
-        String bg = o.optString("background", "");
+        String bg = img(o, "background");
         if (bg.isEmpty() && id.startsWith("tt")) {
             bg = "https://images.metahub.space/background/medium/" + id + "/img";
         }
@@ -51,9 +65,9 @@ final class Meta {
             }
             genres = sb.toString();
         }
-        return new Meta(id, type, o.optString("name", ""), poster, bg,
-                o.optString("description", ""), o.optString("releaseInfo", ""),
-                o.optString("imdbRating", ""), genres);
+        return new Meta(id, type, str(o, "name", ""), poster, bg,
+                str(o, "description", ""), str(o, "releaseInfo", ""),
+                str(o, "imdbRating", ""), genres);
     }
 
     /** "2025 · ★ 7.8 · Drama, Thriller" */

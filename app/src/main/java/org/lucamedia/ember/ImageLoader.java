@@ -98,7 +98,7 @@ final class ImageLoader {
     /** Loads url into view, scaled to roughly maxW x maxH pixels. Ignores stale results. */
     void into(final ImageView view, final String url, final int maxW, final int maxH) {
         view.setTag(R.id.ember_image_url, url);
-        if (url == null || url.isEmpty()) {
+        if (url == null || !url.startsWith("http")) {
             view.setImageDrawable(null);
             return;
         }
@@ -164,7 +164,7 @@ final class ImageLoader {
             public void run() {
                 for (String u : urls) {
                     if (!want.equals(heroWanted)) return; // you've moved on: skip it
-                    if (u == null || u.isEmpty()) continue;
+                    if (u == null || !u.startsWith("http")) continue;
                     final Bitmap bmp = fetch(u, maxW, maxH);
                     if (bmp == null) continue;
                     memory.put(key(u, maxW), bmp);

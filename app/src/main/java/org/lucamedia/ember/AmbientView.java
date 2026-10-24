@@ -65,7 +65,6 @@ final class AmbientView extends View {
     private float[][] stars; // {x, y, radius, speed, phase}
     private long nextMeteorAt;
     private float[] meteor; // {startX, startY, startTimeSec}
-    private final Path moonPath = new Path();
 
     // December: light snow over whichever scene is showing.
     private float[][] flakes; // {x, startY, fallSpeed (px/s), size, swayPhase, isCrystal, spin}
@@ -441,29 +440,45 @@ final class AmbientView extends View {
         paint.setAlpha(255);
     }
 
-    /** Draws the moon as it actually looks tonight (waxing lit on the right, waning on the left, as seen from the UK). */
+    private Bitmap moonBmp;
+    private long moonDay = -1;
+    private final RectF moonDst = new RectF();
+
+    /** The moon as it actually looks tonight. Drawn into a small picture once a day and reused, because
+     *  redrawing a curved shape every frame makes the TV rasterise and upload it again each time. */
     private void drawMoon(Canvas c, float cx, float cy, float r) {
-        double age = SunClock.moonAgeDays(System.currentTimeMillis());
-        double phase = age / 29.530588853; // 0 new, 0.5 full
-        paint.setColor(0x26E9E6DA);
-        c.drawCircle(cx, cy, r, paint); // the faint unlit disc
-        if (phase < 0.02 || phase > 0.98) return; // new moon: just the faint disc
+        long day = System.currentTimeMillis() / 86400000L;
+        if (moonBmp == null || day != moonDay) {
+            moonDay = day;
+            moonBmp = renderMoon(Math.max(8, Math.round(r * 2 + 2)));
+        }
+        paint.setColor(Color.WHITE);
+        paint.setAlpha(255);
+        moonDst.set(cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1);
+        c.drawBitmap(moonBmp, null, moonDst, paint);
+    }
+
+    /** Waxing lit on the right, waning on the left, as seen from the UK. */
+    private Bitmap renderMoon(int size) {
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        float cx = size / 2f, cy = size / 2f, r = size / 2f - 1;
+        double phase = SunClock.moonAgeDays(System.currentTimeMillis()) / 29.530588853; // 0 new, 0.5 full
+        p.setColor(0x26E9E6DA);
+        c.drawCircle(cx, cy, r, p); // the faint unlit disc
+        if (phase < 0.02 || phase > 0.98) return b; // new moon: just the faint disc
         float k = (float) Math.cos(phase * 2 * Math.PI); // 1 new, -1 full
         boolean waxing = phase < 0.5;
-        moonPath.reset();
-        RectF disc = new RectF(cx - r, cy - r, cx + r, cy + r);
-        // Lit limb: the right half when waxing, left half when waning.
-        moonPath.arcTo(disc, -90, waxing ? 180 : -180);
-        // Terminator: half an ellipse whose width depends on the phase.
+        android.graphics.Path path = new android.graphics.Path();
+        path.arcTo(new RectF(cx - r, cy - r, cx + r, cy + r), -90, waxing ? 180 : -180);
         float tw = Math.abs(k) * r;
-        RectF term = new RectF(cx - tw, cy - r, cx + tw, cy + r);
         boolean bulgesOut = k < 0; // gibbous: terminator bulges into the dark side
-        // Crescent: terminator curves towards the lit side; gibbous: towards the dark side.
-        float sweep = (waxing ^ bulgesOut) ? -180 : 180;
-        moonPath.arcTo(term, 90, sweep);
-        moonPath.close();
-        paint.setColor(0xFFE9E6DA);
-        c.drawPath(moonPath, paint);
+        path.arcTo(new RectF(cx - tw, cy - r, cx + tw, cy + r), 90, (waxing ^ bulgesOut) ? -180 : 180);
+        path.close();
+        p.setColor(0xFFE9E6DA);
+        c.drawPath(path, p);
+        return b;
     }
 
     private static int blend(int a, int b, float f) {
