@@ -331,6 +331,8 @@ def _cats():
         return []
     if isinstance(raw, dict) and "cats" in raw:
         raw = raw["cats"]
+    elif isinstance(raw, dict) and "pets" in raw:  # the wall dashboard's /api/cats (Sure Petcare flap)
+        raw = raw["pets"]
     items = [dict(v, name=v.get("name", k)) for k, v in raw.items()] if isinstance(raw, dict) else list(raw)
     out = []
     outdoor = [r.lower() for r in CFG["cats"].get("outdoor_rooms", ["fence"])]
@@ -345,9 +347,12 @@ def _cats():
             continue
         state = str(c.get("state", c.get("status", ""))).lower()
         home = c.get("home", c.get("present", c.get("inside")))
-        if home is None:
+        if home is None and "inside" not in c:
             home = state in ("home", "in", "inside", "present")
         since = _ago(c.get("since", c.get("last_seen", c.get("changed"))))
+        if home is None and "inside" in c:
+            out.append({"name": str(c.get("name", "?")), "home": False, "detail": "Unknown"})
+            continue
         detail = ("In" if home else "Out") + (f" · {since}" if since else "")
         out.append({"name": str(c.get("name", "?")), "home": bool(home), "detail": detail})
     return out
