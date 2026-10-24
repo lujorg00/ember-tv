@@ -398,6 +398,18 @@ public class HomeActivity extends Activity {
         FrameLayout.LayoutParams rsLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         rsLp.topMargin = (int) (screenH * 0.46f);
         cataloguePage.addView(rowScroll, rsLp);
+        rowScroll.setOnScrollChangeListener(new View.OnScrollChangeListener() {
+            @Override
+            public void onScrollChange(View v, int x, int y, int ox, int oy) {
+                cullRows();
+            }
+        });
+        rowScroll.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                cullRows();
+            }
+        });
 
         rowsBox = new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
@@ -530,8 +542,46 @@ public class HomeActivity extends Activity {
             @Override
             public void onScrollChange(View v, int x, int y, int ox, int oy) {
                 lazyLoad(hs, strip);
+                cullStrip(hs, strip);
             }
         });
+    }
+
+    /** Only cards near the screen are drawn. Hidden ones keep their place, so scrolling and focus behave the same,
+     *  but they drop out of the list the TV has to walk and draw every frame. */
+    private void cullStrip(HorizontalScrollView hs, LinearLayout strip) {
+        int from = hs.getScrollX() - screenW / 2, to = hs.getScrollX() + screenW + screenW / 2;
+        for (int i = 0; i < strip.getChildCount(); i++) {
+            View c = strip.getChildAt(i);
+            if (c.getWidth() == 0) continue; // not laid out yet
+            boolean near = c.getRight() > from && c.getLeft() < to;
+            int v = near || c.hasFocus() ? View.VISIBLE : View.INVISIBLE;
+            if (c.getVisibility() != v) c.setVisibility(v);
+        }
+    }
+
+    /** Same for whole rows: only the ones in or next to the visible part of the page. */
+    private void cullRows() {
+        if (rowsBox == null) return;
+        int y = rowScroll.getScrollY();
+        int from = y - screenH / 2, to = y + screenH + screenH / 2;
+        for (int i = 0; i < rowsBox.getChildCount(); i++) {
+            View row = rowsBox.getChildAt(i);
+            if (row.getHeight() == 0) continue;
+            boolean near = row.getBottom() > from && row.getTop() < to;
+            int v = near || row.hasFocus() ? View.VISIBLE : View.INVISIBLE;
+            if (row.getVisibility() != v) row.setVisibility(v);
+            if (near && row instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) row;
+                for (int j = 0; j < g.getChildCount(); j++) {
+                    View k = g.getChildAt(j);
+                    if (k instanceof HorizontalScrollView && ((HorizontalScrollView) k).getChildCount() > 0
+                            && ((HorizontalScrollView) k).getChildAt(0) instanceof LinearLayout) {
+                        cullStrip((HorizontalScrollView) k, (LinearLayout) ((HorizontalScrollView) k).getChildAt(0));
+                    }
+                }
+            }
+        }
     }
 
     private static final int APP_COLUMNS = 5;
@@ -963,8 +1013,8 @@ public class HomeActivity extends Activity {
         hs.setOverScrollMode(View.OVER_SCROLL_NEVER);
         hs.setClipChildren(true); // clip so off-screen cards are skipped when drawing
         hs.setClipToPadding(false);
-        hs.setFadingEdgeLength(dp(24));
-        hs.setHorizontalFadingEdgeEnabled(true);
+        // No fading edge: Android draws it by rendering the whole row offscreen every frame.
+        hs.setHorizontalFadingEdgeEnabled(false);
 
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
