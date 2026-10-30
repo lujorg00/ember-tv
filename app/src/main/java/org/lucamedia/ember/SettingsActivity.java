@@ -185,7 +185,7 @@ public class SettingsActivity extends Activity {
         col.addView(motionButton);
 
         col.addView(section("Dimmer"));
-        col.addView(text("One remote button dims the whole picture: Off, Dim (50%), Heavy (80%). It goes to Heavy by itself at midnight and lifts at 8am. Press Set, then press the button you want (the Netflix button).", 13, MUTED, false));
+        col.addView(text("One remote button dims the whole picture: Off, Dim (50%), Heavy (80%). It goes to Dim by itself at 11:30pm, Heavy at midnight, and lifts at 8am. Press Set, then press the button you want (the Netflix button).", 13, MUTED, false));
         dimButton = button("", new View.OnClickListener() {
             @Override
             public void onClick(View v) {

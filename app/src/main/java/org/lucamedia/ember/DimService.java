@@ -26,15 +26,15 @@ import java.util.Calendar;
 /**
  * The dimmer: a see-through black layer over everything on screen (Stremio, YouTube, the screensaver),
  * switched by one remote button (the Netflix button, learnt in Ember settings). Presses cycle
- * Off -> Dim -> Heavy -> Off. Every night at midnight it goes to Heavy by itself and lifts again at 8am,
- * unless you've changed it with the button in the meantime.
+ * Off -> Dim -> Heavy -> Off. At 11:30pm it goes to Dim by itself, at midnight to Heavy, and lifts
+ * again at 8am unless you've changed it with the button since.
  */
 public class DimService extends AccessibilityService {
 
     static final int[] LEVELS = {0, 50, 80};       // percent of black over the picture
     static final String[] NAMES = {"Dim off", "Dim", "Heavy dim"};
-    private static final int AUTO_LEVEL = 2;       // midnight: heavy
-    private static final int AUTO_START_HOUR = 0, AUTO_END_HOUR = 8;
+    private static final int EVENING_START = 23 * 60 + 30; // 11:30pm: Dim
+    private static final int MORNING_END = 8 * 60;         // midnight to 8am: Heavy, then lifts
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private Prefs prefs;
@@ -101,21 +101,27 @@ public class DimService extends AccessibilityService {
         return true; // swallow it, so Netflix doesn't open
     }
 
-    /** Midnight to 8am: heavy dim, once per night. At 8am an automatic dim lifts; one you set yourself stays. */
+    /** 11:30pm: Dim (50%). Midnight: Heavy (80%). Each step happens once a night and never brightens what you've set;
+     *  the button changes it in between. At 8am an automatic dim lifts; one you set yourself stays. */
     private void checkSchedule() {
         Calendar c = Calendar.getInstance();
-        int hour = c.get(Calendar.HOUR_OF_DAY);
-        String night = c.get(Calendar.YEAR) + "-" + c.get(Calendar.DAY_OF_YEAR);
-        if (hour >= AUTO_START_HOUR && hour < AUTO_END_HOUR) {
-            if (!night.equals(prefs.dimAutoNight())) {
-                prefs.setDimAutoNight(night);
-                prefs.setDimAuto(true);
-                if (prefs.dimLevel() < AUTO_LEVEL) apply(AUTO_LEVEL, true);
-            }
+        int mins = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE);
+        String today = c.get(Calendar.YEAR) + "-" + c.get(Calendar.DAY_OF_YEAR);
+        if (mins >= EVENING_START) {
+            step("eve:" + today, 1);
+        } else if (mins < MORNING_END) {
+            step("night:" + today, 2);
         } else if (prefs.dimAuto()) {
             prefs.setDimAuto(false);
             apply(0, false);
         }
+    }
+
+    private void step(String id, int level) {
+        if (id.equals(prefs.dimAutoNight())) return; // already done
+        prefs.setDimAutoNight(id);
+        prefs.setDimAuto(true);
+        if (prefs.dimLevel() < level) apply(level, true);
     }
 
     private void apply(int level, boolean announce) {
