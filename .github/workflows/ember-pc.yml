@@ -1,0 +1,69 @@
+name: Build Ember PC
+
+on:
+  push:
+    branches: [main]
+    paths: ['ember-pc/**', '.github/workflows/ember-pc.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ember-pc/src-tauri
+
+      - name: Fetch mpv (shinchiro's Windows build)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $h = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "ember-pc" }
+          $rel = Invoke-RestMethod -Headers $h https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-.*\.7z$' } | Select-Object -First 1
+          if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' -and $_.name -notmatch 'dev' } | Select-Object -First 1 }
+          Write-Host "Using $($asset.name)"
+          Invoke-WebRequest -Headers $h $asset.browser_download_url -OutFile mpv.7z
+          7z x mpv.7z -ompv-extract -y | Out-Null
+          $dest = "ember-pc/src-tauri/resources/mpv"
+          Copy-Item mpv-extract/mpv.exe $dest/
+          Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination $dest/
+          Remove-Item $dest/.keep -ErrorAction SilentlyContinue
+          Get-ChildItem $dest
+
+      - name: Build
+        working-directory: ember-pc
+        run: |
+          npm install
+          npx tauri build
+
+      - name: Rename installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem ember-pc/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Copy-Item $exe.FullName Ember-PC-setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ember-PC-setup
+          path: Ember-PC-setup.exe
+
+      # A pre-release, so the TV's "latest release" download link keeps pointing at the APK.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ember-pc-${{ github.run_number }}
+          name: Ember PC test ${{ github.run_number }}
+          prerelease: true
+          files: Ember-PC-setup.exe

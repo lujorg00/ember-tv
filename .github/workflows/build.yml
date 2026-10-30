@@ -3,6 +3,7 @@ name: Build Ember APK
 on:
   push:
     branches: [main]
+    paths-ignore: ['ember-pc/**', '.github/workflows/ember-pc.yml']
   workflow_dispatch:
 
 permissions:
