@@ -247,57 +247,80 @@ async function showLibrary() {
 async function showTitle(type, id, hint = {}, opts = {}) {
   const v = $("#view");
   v.innerHTML = "";
-  const page = h(`<div class="title"><div class="bd"></div><button class="back">‹ Back</button><div class="content fade-in">
-      <section class="left"></section><section class="right"></section></div></div>`);
+  const page = h(`<div class="tp"><div class="tp-bd"></div><div class="tp-scrim"></div>
+    <button class="back">‹ Back</button>
+    <header class="tp-head fade-in"></header>
+    <div class="tp-body"><section class="tp-eps"></section><aside class="tp-streams"></aside></div></div>`);
   v.appendChild(page);
   $(".back", page).onclick = back;
   const [m] = await Promise.all([meta(type, id), loadProgress()]);
   const mm = { ...hint, ...m, id, type };
-  $(".bd", page).style.backgroundImage = `url('${backdrop(mm)}')`;
+  const bdUrl = backdrop(mm);
+  if (bdUrl) { const img = new Image(); img.onload = () => { $(".tp-bd", page).style.backgroundImage = `url('${bdUrl}')`; $(".tp-bd", page).classList.add("show"); }; img.src = bdUrl; }
   let saved = {};
   try { (await getJson(`${feed()}/progress/${id}`, 6000)).positions.forEach(p => saved[(p.season ?? "") + ":" + (p.episode ?? "")] = p); } catch (e) {}
 
-  const left = $(".left", page), right = $(".right", page);
+  const head = $(".tp-head", page), epsBox = $(".tp-eps", page), right = $(".tp-streams", page);
   const p = progress[id];
-  left.innerHTML = `${mm.logo ? `<img class="logoimg" style="max-width:440px;max-height:130px;display:block;margin:6px 0 12px" src="${esc(mm.logo)}" alt="">` : ""}
-    <h1 style="font:600 34px 'Segoe UI Variable Display','Segoe UI';margin:0 0 4px;${mm.logo ? "display:none" : ""}">${esc(mm.name)}</h1>
-    <div class="meta-line">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating].filter(Boolean).join("  ·  "))}</div>
-    <div class="chips">${(mm.genres || []).map(g => `<span class="chip">${esc(g)}</span>`).join("")}</div>
-    ${p ? `<div class="resume-note">${esc(progressLine(p))}</div>` : ""}
-    <div class="desc" style="-webkit-line-clamp:6;max-width:640px">${esc(mm.description || "")}</div>
-    <div class="eps-wrap"></div>`;
+  const eps = type === "series" ? (mm.videos || []).filter(x => x.season > 0).sort((a, b) => a.season - b.season || a.episode - b.episode) : [];
+  // The episode you're on, or the first you haven't finished.
+  let cur = p && p.season ? { season: p.season, episode: p.episode }
+    : (() => { const n = eps.find(e => !(saved[e.season + ":" + e.episode] || {}).finished); return n ? { season: n.season, episode: n.episode } : null; })();
+  const epOf = (c) => c && eps.find(x => x.season === c.season && x.episode === c.episode);
+
+  const resumeLabel = () => {
+    if (type === "series") {
+      if (!cur) return "Play";
+      const sp = saved[cur.season + ":" + cur.episode];
+      return `${sp && !sp.finished && sp.position > 20 ? "Resume" : "Play"} S${cur.season} E${cur.episode}${sp && !sp.finished && sp.position > 20 ? " · " + fmt(sp.position) : ""}`;
+    }
+    const sp = saved[":"];
+    return sp && !sp.finished && sp.position > 20 ? "Resume · " + fmt(sp.position) : "Play";
+  };
+  head.innerHTML = `${mm.logo ? `<img class="tp-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">` : `<h1>${esc(mm.name)}</h1>`}
+    <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
+    ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
+    <p class="tp-desc">${esc(mm.description || "")}</p>
+    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button>
+      ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
+  const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
+  // Resume: the streams for that episode, best first; one more click plays.
+  $("#resumeBtn", head).onclick = () => { right.scrollIntoView({ behavior: "smooth", block: "start" }); right.classList.add("pulse"); setTimeout(() => right.classList.remove("pulse"), 900); };
 
   const pick = (season, episode, title) => streamsPanel(right, mm, season, episode, title, saved, opts.autoplay);
+
   if (type === "series") {
-    const eps = (mm.videos || []).filter(x => x.season > 0).sort((a, b) => a.season - b.season || a.episode - b.episode);
     const seasons = [...new Set(eps.map(e => e.season))];
-    // Start on the episode you're on, or the first one you haven't finished.
-    let cur = p && p.season ? { season: p.season, episode: p.episode }
-      : (() => { const n = eps.find(e => !(saved[e.season + ":" + e.episode] || {}).finished); return n ? { season: n.season, episode: n.episode } : null; })();
     let season = cur ? cur.season : seasons[0];
-    const wrap = $(".eps-wrap", left);
-    const draw = () => {
-      wrap.innerHTML = `<div class="panel" style="margin-top:8px"><div class="chips" style="margin:0 0 10px">${seasons.map(s =>
-        `<span class="chip btn-chip ${s === season ? "on" : ""}" data-s="${s}">Season ${s}</span>`).join("")}</div><div class="eps"></div></div>`;
-      wrap.querySelectorAll("[data-s]").forEach(c => c.onclick = () => { season = +c.dataset.s; draw(); });
-      const list = $(".eps", wrap);
+    const drawEps = () => {
+      const opt = seasons.map(s => `<option value="${s}" ${s === season ? "selected" : ""}>Season ${s}</option>`).join("");
+      const count = eps.filter(e => e.season === season).length;
+      epsBox.innerHTML = `<div class="tp-eps-head"><div class="select"><select>${opt}</select></div><span class="muted">${count} episodes</span></div><div class="ep-grid"></div>`;
+      $("select", epsBox).onchange = (e) => { season = +e.target.value; drawEps(); };
+      const grid = $(".ep-grid", epsBox);
       eps.filter(e => e.season === season).forEach(e => {
         const sp = saved[e.season + ":" + e.episode];
-        const mark = sp ? (sp.finished ? "✓ watched" : `${fmt(sp.position)} in`) : "";
-        const el = h(`<div class="ep ${cur && cur.season === e.season && cur.episode === e.episode ? "sel" : ""}">
-            <div class="thumb" style="background-image:url('${esc(e.thumbnail || "")}')">${sp && !sp.finished ? `<div class="bar"><i style="width:${sp.percent}%"></i></div>` : ""}</div>
-            <div><div class="t">${e.episode}. ${esc(e.name || e.title || "Episode " + e.episode)}</div>
-            <div class="d">${esc((e.released || "").slice(0, 10))}</div></div><div class="tick">${mark}</div></div>`);
-        el.onclick = () => { list.querySelectorAll(".ep").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
-          cur = { season: e.season, episode: e.episode }; pick(e.season, e.episode, e.name || e.title || ""); };
-        list.appendChild(el);
+        const isCur = cur && cur.season === e.season && cur.episode === e.episode;
+        const el = h(`<div class="epc ${isCur ? "sel" : ""}">
+            <div class="thumb" style="background-image:url('${esc(e.thumbnail || "")}')">
+              ${sp && sp.finished ? `<span class="watched">✓</span>` : ""}
+              ${sp && !sp.finished ? `<div class="bar"><i style="width:${Math.max(3, sp.percent)}%"></i></div>` : ""}
+              <span class="num">E${e.episode}</span></div>
+            <div class="t">${esc(e.name || e.title || "Episode " + e.episode)}</div>
+            <div class="d">${esc((e.released || "").slice(0, 10))}${sp && !sp.finished ? ` · <span class="acc">${fmt(sp.position)} in</span>` : ""}</div></div>`);
+        el.onclick = () => { grid.querySelectorAll(".epc").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
+          cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
+          pick(e.season, e.episode, e.name || e.title || ""); };
+        grid.appendChild(el);
       });
-      const sel = $(".ep.sel", list); if (sel) sel.scrollIntoView({ block: "center" });
     };
-    draw();
-    if (cur) { const e = eps.find(x => x.season === cur.season && x.episode === cur.episode); pick(cur.season, cur.episode, e ? e.name || e.title || "" : ""); }
+    drawEps();
+    const e = epOf(cur);
+    if (cur) pick(cur.season, cur.episode, e ? e.name || e.title || "" : "");
     else right.innerHTML = `<div class="panel muted">Pick an episode.</div>`;
   } else {
+    epsBox.remove();
+    page.querySelector(".tp-body").classList.add("film");
     pick(null, null, "");
   }
 }
@@ -305,7 +328,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
 // ---------------------------------------------------------------- streams
 
 const BADGES = [
-  [/\b(2160p|4k|uhd)\b/i, "4K", "q4k"], [/\b1080p\b/i, "1080p", ""], [/\b720p\b/i, "720p", ""],
+  [/\b(2160p|4k|uhd)\b/i, "4K", "q4k"], [/\b1080p\b/i, "1080p", "q"], [/\b720p\b/i, "720p", "q"], [/\b480p\b/i, "SD", "q"],
   [/\b(dv|dovi|dolby ?vision)\b/i, "Dolby Vision", "hdr"], [/\bhdr10\+|hdr10plus\b/i, "HDR10+", "hdr"], [/\bhdr(10)?\b/i, "HDR", "hdr"],
   [/\batmos\b/i, "Atmos", "audio"], [/\btrue ?hd/i, "TrueHD", "audio"], [/\bdts[- :.]?(hd|x|ma)/i, "DTS-HD", "audio"], [/\bdts/i, "DTS", "audio"],
   [/\b(ddp|dd\+|e-?ac-?3)/i, "DD+", "audio"], [/\b(dd(?![p+])|ac-?3)/i, "DD", "audio"], [/\b(remux)\b/i, "Remux", ""],
@@ -314,22 +337,36 @@ function badges(text) {
   const out = []; const seen = new Set();
   for (const [re, label, cls] of BADGES) {
     if (!re.test(text)) continue;
-    if ((label === "HDR" && (seen.has("HDR10+"))) || (label === "DTS" && seen.has("DTS-HD")) || (label === "DD" && seen.has("DD+"))) continue;
-    if (["1080p", "720p"].includes(label) && seen.has("4K")) continue;
+    if ((label === "HDR" && seen.has("HDR10+")) || (label === "DTS" && seen.has("DTS-HD")) || (label === "DD" && seen.has("DD+"))) continue;
+    if (["1080p", "720p", "SD"].includes(label) && seen.has("4K")) continue;
     seen.add(label); out.push(`<span class="badge ${cls}">${label}</span>`);
   }
-  const size = text.match(/(\d+(?:\.\d+)?)\s?(GB|GiB|MB)/i);
-  if (size) out.push(`<span class="badge">${size[1]} ${size[2].toUpperCase().replace("IB", "B")}</span>`);
+  if (!seen.has("4K") && !seen.has("1080p") && !seen.has("720p") && !seen.has("SD") && /\bHD\b/.test(text)) out.unshift(`<span class="badge q">HD</span>`);
   return out.join("");
+}
+
+/** Turns AIOStreams' many-line description into: a release name, a short line of extras, size, cached or not. */
+function describe(s) {
+  const raw = `${s.name || ""}\n${s.title || s.description || ""}`;
+  const lines = raw.split("\n").map(l => l.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2B00}-\u{2BFF}]/gu, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const file = (s.behaviorHints && s.behaviorHints.filename) || lines.find(l => /\.\w{2,4}$|\.(S\d|\d{3,4}p)/i.test(l) && l.includes(".")) || "";
+  const size = (raw.match(/(\d+(?:\.\d+)?)\s?(GB|GiB|MB|MiB)\b/i) || []);
+  const cached = /⚡|\[(AD|RD|PM|TB|DL)\+?\]/.test(raw);
+  const langs = lines.find(l => /\b(english|italian|spanish|french|german|portuguese|japanese|multi|dual audio)\b/i.test(l) && l.length < 60) || "";
+  // No file name: use the descriptive lines (show, episode), skipping the addon tag, quality, size, cache and language lines.
+  const junk = (l) => l === langs || /^(aio|aiostreams)$/i.test(l) || /^(HD|SD|4K|UHD|\d{3,4}p)$/i.test(l) || /\d\s?(GB|MB|GiB|MiB)\b/i.test(l)
+    || /^\[?(AD|RD|PM|TB|DL)\]?\+?$/i.test(l.replace(/[⚡\s]/g, "")) || /^(DD\+?|DDP|AAC|AC3|DTS.*|TrueHD.*|Atmos|English|10bit.*)$/i.test(l);
+  const name = file || lines.filter(l => !junk(l)).slice(0, 2).join(" · ") || lines[0] || "Stream";
+  return { raw, name, size: size[1] ? `${size[1]} ${size[2].toUpperCase().replace("IB", "B")}` : "", cached, langs };
 }
 
 async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay) {
   const id = mm.type === "series" ? `${mm.id}:${season}:${episode}` : mm.id;
   const sp = saved[(season ?? "") + ":" + (episode ?? "")];
   const resume = sp && !sp.finished && sp.position > 20 ? sp : null;
-  right.innerHTML = `<div class="panel"><h3>Streams${mm.type === "series" ? ` · S${season} E${episode}` : ""}</h3>
-    ${resume ? `<div class="resume-note">Resumes at ${fmt(resume.position)} <span class="muted">(${esc(resume.device)}, ${esc(resume.ago)} ago)</span>
-      <label class="muted" style="margin-left:8px"><input type="checkbox" class="fromstart"> start from the beginning</label></div>` : ""}
+  right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
+    ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
+      <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}</div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
@@ -339,9 +376,10 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   if (!streams.length) { box.innerHTML = `<div class="muted">No streams found.</div>`; return; }
   box.innerHTML = "";
   streams.forEach((s, i) => {
-    const text = `${s.name || ""}\n${s.title || s.description || ""}`;
-    const el = h(`<div class="stream"><div class="badges">${badges(text) || `<span class="badge">${esc((s.name || "Stream").split("\n")[0])}</span>`}</div>
-      <div class="src">${esc(text.trim())}</div></div>`);
+    const d = describe(s);
+    const el = h(`<div class="stream" title="${esc(d.raw)}">
+      <div class="badges">${badges(d.raw)}${d.size ? `<span class="badge">${d.size}</span>` : ""}${d.cached ? `<span class="badge cached">⚡ Cached</span>` : ""}</div>
+      <div class="sname">${esc(d.name)}</div>${d.langs ? `<div class="src">${esc(d.langs)}</div>` : ""}</div>`);
     el.onclick = () => {
       const fromStart = right.querySelector(".fromstart")?.checked;
       play(s.url, mm, season, episode, epTitle, resume && !fromStart ? resume.position : 0);
