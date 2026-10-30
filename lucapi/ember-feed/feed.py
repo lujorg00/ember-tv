@@ -8,7 +8,9 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /cats         -> just the cats, in or out (polled often, for the pop-ups)
   GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
-  GET /progress     -> where you stopped part-way through films and episodes (Trakt)
+  GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
+  GET /progress/<imdb> -> every saved position for one title (episode lists)
+  POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
   GET /health       -> "ok"
@@ -516,45 +518,242 @@ def trakt_creds():
     return _trakt_files.get("client") or t.get("client_id"), token
 
 
-def _trakt(path):
+def _trakt(path, body=None):
     cid, tok = trakt_creds()
     if not cid or not tok:
         raise RuntimeError("no Trakt login found (see trakt in config.json)")
-    req = urllib.request.Request("https://api.trakt.tv" + path, headers={
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request("https://api.trakt.tv" + path, data=data, method="POST" if data else "GET", headers={
         "Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": cid,
         "Authorization": "Bearer " + tok, "User-Agent": "ember-feed/1.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read())
+        raw = r.read()
+        return json.loads(raw) if raw else {}
 
 
-def _progress():
-    """Films and episodes you stopped part-way through, newest first, keyed by IMDb id."""
-    out = {}
-    for it in _trakt("/sync/playback?extended=full&limit=60"):
+def _trakt_playback():
+    """Films and episodes Trakt has a part-way point for (Omni writes these), newest first."""
+    out = []
+    for it in _trakt("/sync/playback?extended=full&limit=100"):
         pct = float(it.get("progress") or 0)
-        if pct <= 1 or pct >= 95:
-            continue
         if it.get("type") == "episode":
             show, ep = it.get("show", {}), it.get("episode", {})
             imdb = (show.get("ids") or {}).get("imdb")
-            info = {"type": "series", "season": ep.get("season"), "episode": ep.get("number"),
+            item = {"type": "series", "season": ep.get("season"), "episode": ep.get("number"),
                     "episodeTitle": ep.get("title") or "", "runtime": ep.get("runtime") or show.get("runtime")}
         else:
             mv = it.get("movie", {})
             imdb = (mv.get("ids") or {}).get("imdb")
-            info = {"type": "movie", "runtime": mv.get("runtime")}
-        if not imdb or imdb in out:
-            continue  # the list is newest first: keep the latest
-        info.update(progress=round(pct, 1), pausedAt=it.get("paused_at"), ago=_ago(it.get("paused_at")))
-        out[imdb] = info
+            item = {"type": "movie", "runtime": mv.get("runtime")}
+        if imdb:
+            item.update(imdb=imdb, progress=pct, pausedAt=it.get("paused_at"))
+            out.append(item)
+    return out
+
+# ------------------------------------------------------------------ the progress store
+# Your own record of where you are in everything, to the second, kept on the Pi. Ember TV and Ember PC report to it
+# while you watch; it also keeps copies of what Omni tells Trakt. Unlike Trakt it never throws a position away at 80%.
+
+import sqlite3
+
+DB_PATH = Path(os.environ.get("EMBER_PROGRESS_DB", HERE / "progress.db"))
+_db_lock = threading.Lock()
+_db = None
+FINISHED_AT = CFG.get("progress", {}).get("finished_percent", 97)
+
+
+def db():
+    global _db
+    if _db is None:
+        _db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        _db.execute("""CREATE TABLE IF NOT EXISTS positions (
+            key TEXT PRIMARY KEY,          -- movie:tt123 or series:tt123:2:6
+            imdb TEXT NOT NULL, type TEXT NOT NULL, season INTEGER, episode INTEGER,
+            position REAL NOT NULL,        -- seconds in
+            duration REAL,                 -- seconds long (if known)
+            percent REAL NOT NULL,
+            updated INTEGER NOT NULL,      -- unix seconds
+            device TEXT, source TEXT,      -- source: ember (our players) or trakt (Omni via Trakt)
+            finished INTEGER NOT NULL DEFAULT 0,
+            trakt_watched INTEGER NOT NULL DEFAULT 0,
+            episode_title TEXT)""")
+        _db.execute("CREATE INDEX IF NOT EXISTS positions_imdb ON positions(imdb, updated)")
+        _db.commit()
+    return _db
+
+
+def _key(imdb, typ, season=None, episode=None):
+    return f"series:{imdb}:{int(season)}:{int(episode)}" if typ == "series" and season is not None else f"movie:{imdb}"
+
+
+def _row(r):
+    cols = ["key", "imdb", "type", "season", "episode", "position", "duration", "percent", "updated", "device",
+            "source", "finished", "trakt_watched", "episode_title"]
+    return dict(zip(cols, r))
+
+
+def _upsert(d):
+    with _db_lock:
+        db().execute("""INSERT INTO positions (key, imdb, type, season, episode, position, duration, percent, updated,
+                            device, source, finished, trakt_watched, episode_title)
+                        VALUES (:key,:imdb,:type,:season,:episode,:position,:duration,:percent,:updated,:device,
+                                :source,:finished,:trakt_watched,:episode_title)
+                        ON CONFLICT(key) DO UPDATE SET position=excluded.position,
+                            duration=COALESCE(excluded.duration, positions.duration), percent=excluded.percent,
+                            updated=excluded.updated, device=excluded.device, source=excluded.source,
+                            finished=excluded.finished, trakt_watched=excluded.trakt_watched,
+                            episode_title=COALESCE(NULLIF(excluded.episode_title,''), positions.episode_title)""", d)
+        db().commit()
+
+
+def _get(key):
+    with _db_lock:
+        r = db().execute("SELECT * FROM positions WHERE key=?", (key,)).fetchone()
+    return _row(r) if r else None
+
+
+def _iso_to_epoch(s):
+    try:
+        return int(datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return int(time.time())
+
+
+def report(body):
+    """A player says where you are. body: imdb, type (movie/series), season, episode, position (s), duration (s),
+    device, state (playing / paused / stopped), finished (optional: the player saw the credits)."""
+    imdb = str(body.get("imdb", ""))
+    typ = "series" if body.get("type") == "series" else "movie"
+    if not (imdb.startswith("tt") and imdb[2:].isdigit()):
+        raise ValueError("imdb must look like tt1234567")
+    season, episode = body.get("season"), body.get("episode")
+    if typ == "series" and (season is None or episode is None):
+        raise ValueError("series needs season and episode")
+    pos = max(0.0, float(body.get("position", 0)))
+    dur = float(body["duration"]) if body.get("duration") else None
+    pct = min(100.0, pos / dur * 100) if dur else float(body.get("percent", 0))
+    state = body.get("state", "playing")
+    finished = bool(body.get("finished")) or pct >= FINISHED_AT
+    d = {"key": _key(imdb, typ, season, episode), "imdb": imdb, "type": typ,
+         "season": int(season) if typ == "series" else None, "episode": int(episode) if typ == "series" else None,
+         "position": pos, "duration": dur, "percent": round(pct, 2), "updated": int(time.time()),
+         "device": str(body.get("device", ""))[:40], "source": "ember", "finished": int(finished),
+         "trakt_watched": 0, "episode_title": str(body.get("episodeTitle", ""))[:120]}
+    _upsert(d)
+    with _cache_lock:
+        _cache.pop("progress", None)
+    # Tell Trakt too (so Omni knows), but only when something changes - not on every tick.
+    if state in ("playing", "paused", "stopped") and body.get("tell_trakt", True):
+        prev_state = _last_state.get(d["key"])
+        if state != prev_state or finished:
+            _last_state[d["key"]] = "stopped" if finished else state
+            verb = {"playing": "start", "paused": "pause", "stopped": "stop"}[state]
+            if finished:
+                verb = "stop"
+            threading.Thread(target=_scrobble, args=(verb, d, max(pct, 80.0) if finished else pct), daemon=True).start()
+    return {"ok": True, "finished": finished, "percent": d["percent"]}
+
+
+_last_state = {}
+
+
+def _scrobble(verb, d, pct):
+    target = ({"show": {"ids": {"imdb": d["imdb"]}}, "episode": {"season": d["season"], "number": d["episode"]}}
+              if d["type"] == "series" else {"movie": {"ids": {"imdb": d["imdb"]}}})
+    try:
+        _trakt(f"/scrobble/{verb}", dict(target, progress=round(pct, 2), app_version="ember-1"))
+    except Exception as e:
+        print(f"[ember-feed] Trakt scrobble {verb} failed: {e}", flush=True)
+
+
+def snapshot_trakt():
+    """Copies Trakt's part-way points (from Omni) into the store. If one vanishes because Trakt marked it watched
+    while the copy was past 80%, the copy is kept as resumable and flagged, since that's the case Trakt loses."""
+    items = _trakt_playback()
+    seen = set()
+    for it in items:
+        k = _key(it["imdb"], it["type"], it.get("season"), it.get("episode"))
+        seen.add(k)
+        updated = _iso_to_epoch(it.get("pausedAt"))
+        cur = _get(k)
+        if cur and (cur["updated"] >= updated or (cur["source"] == "ember" and updated - cur["updated"] < 300)):
+            continue  # ours is newer, or this is just our own report echoed back by Trakt
+        rt = it.get("runtime")
+        dur = float(rt) * 60 if rt else (cur or {}).get("duration")
+        pct = float(it["progress"])
+        _upsert({"key": k, "imdb": it["imdb"], "type": it["type"], "season": it.get("season"),
+                 "episode": it.get("episode"), "position": (dur or 0) * pct / 100, "duration": dur,
+                 "percent": round(pct, 2), "updated": updated, "device": "Trakt (Omni)", "source": "trakt",
+                 "finished": int(pct >= FINISHED_AT), "trakt_watched": 0,
+                 "episode_title": it.get("episodeTitle", "")})
+    # Copies from Trakt that Trakt no longer has.
+    with _db_lock:
+        gone = [_row(r) for r in db().execute(
+            "SELECT * FROM positions WHERE source='trakt' AND finished=0 AND trakt_watched=0").fetchall()]
+    for g in gone:
+        if g["key"] in seen:
+            continue
+        if g["percent"] >= 80:
+            g.update(trakt_watched=1)  # Trakt counted it as watched; keep where you were
+        else:
+            g.update(finished=1)       # finished (or cleared) in Omni
+        _upsert(g)
+    with _cache_lock:
+        _cache.pop("progress", None)
+
+
+def _snapshot_loop():
+    while True:
+        try:
+            snapshot_trakt()
+        except Exception as e:
+            print(f"[ember-feed] Trakt snapshot failed: {e}", flush=True)
+        time.sleep(CFG.get("progress", {}).get("trakt_poll_seconds", 180))
+
+
+def _progress():
+    """Where you are in each title, newest first, keyed by IMDb id: the most recent unfinished position on any device."""
+    with _db_lock:
+        rows = [_row(r) for r in db().execute(
+            "SELECT * FROM positions ORDER BY updated DESC").fetchall()]
+    out, done = {}, set()
+    for r in rows:
+        if r["imdb"] in out or r["imdb"] in done:
+            continue
+        if r["finished"]:
+            # the latest thing for this title is finished: nothing to resume (the continue row shows the next episode)
+            done.add(r["imdb"])
+            continue
+        if r["percent"] < 1:
+            continue
+        item = {"type": r["type"], "progress": r["percent"], "position": round(r["position"]),
+                "duration": round(r["duration"]) if r["duration"] else None,
+                "runtime": round(r["duration"] / 60) if r["duration"] else None,
+                "device": r["device"], "source": r["source"], "traktWatched": bool(r["trakt_watched"]),
+                "pausedAt": datetime.fromtimestamp(r["updated"], TZ).isoformat(),
+                "ago": _ago(r["updated"])}
+        if r["type"] == "series":
+            item.update(season=r["season"], episode=r["episode"], episodeTitle=r["episode_title"] or "")
+        out[r["imdb"]] = item
     return out
 
 
 def progress():
     try:
-        return {"items": cached("progress", 120, _progress)}
+        return {"items": cached("progress", 30, _progress)}
     except Exception as e:
         return {"items": {}, "error": str(e)}
+
+
+def title_positions(imdb):
+    """Every episode (or the film) of one title: for the episode list on a title page."""
+    with _db_lock:
+        rows = [_row(r) for r in db().execute(
+            "SELECT * FROM positions WHERE imdb=? ORDER BY season, episode", (imdb,)).fetchall()]
+    return {"imdb": imdb, "positions": [
+        {"season": r["season"], "episode": r["episode"], "position": round(r["position"]),
+         "duration": round(r["duration"]) if r["duration"] else None, "percent": r["percent"],
+         "finished": bool(r["finished"]), "device": r["device"], "ago": _ago(r["updated"])} for r in rows]}
 
 
 def next_episode(imdb):
@@ -677,8 +876,36 @@ class Handler(BaseHTTPRequestHandler):
         proto = self.headers.get("X-Forwarded-Proto", "http")
         return f"{proto}://{host}"
 
+    def _allowed(self):
+        """At home everything is open. Through the Cloudflare tunnel (lucamedia.org) every request needs the key
+        from config.json ("api_key"), sent as the X-Ember-Key header - and with no key set, outside access is refused."""
+        if not self.headers.get("CF-Connecting-IP"):
+            return True
+        key = CFG.get("api_key", "")
+        return bool(key) and self.headers.get("X-Ember-Key", "") == key
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if not self._allowed():
+            self._json({"error": "key needed"}, 401)
+            return
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            body = json.loads(self.rfile.read(min(n, 65536)) or b"{}")
+            if path == "/progress/report":
+                self._json(report(body))
+            else:
+                self._json({"error": "not found"}, 404)
+        except ValueError as e:
+            self._json({"error": str(e)}, 400)
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
+        if path != "/health" and not self._allowed():
+            self._json({"error": "key needed"}, 401)
+            return
         try:
             if path == "/health":
                 body = b"ok"
@@ -702,6 +929,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(weather())
             elif path == "/progress":
                 self._json(progress())
+            elif path.startswith("/progress/tt") and path[len("/progress/tt"):].isdigit():
+                self._json(title_positions(path[len("/progress/"):]))
             elif path.startswith("/next/"):
                 imdb = path[len("/next/"):]
                 self._json(next_episode(imdb) if imdb.startswith("tt") and imdb[2:].isdigit() else {})
@@ -758,6 +987,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    db()  # create the progress store if it's new
+    if all(trakt_creds()):
+        threading.Thread(target=_snapshot_loop, daemon=True).start()
+    else:
+        print("[ember-feed] no Trakt login found: progress store runs without Trakt", flush=True)
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()
