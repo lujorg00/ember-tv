@@ -42,6 +42,36 @@ public class SettingsActivity extends Activity {
     private TextView status;
     private TextView overrideState;
     private Button hiddenButton;
+    private Button dimButton;
+    private final android.content.SharedPreferences.OnSharedPreferenceChangeListener dimWatch =
+            new android.content.SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(android.content.SharedPreferences sp, String key) {
+                    if (key != null && key.startsWith("dim_")) refreshDim();
+                }
+            };
+
+    private void refreshDim() {
+        if (dimButton == null) return;
+        if (!accessibilityOn(DimService.class)) {
+            dimButton.setText("Dimmer is switched off in Accessibility settings");
+        } else if (prefs.dimLearning()) {
+            dimButton.setText("Now press the button you want as the dimmer\u2026");
+        } else if (prefs.dimKey() == 0) {
+            dimButton.setText("Set dimmer button");
+        } else {
+            dimButton.setText("Dimmer button: " + android.view.KeyEvent.keyCodeToString(prefs.dimKey())
+                    .replace("KEYCODE_", "").toLowerCase(java.util.Locale.UK) + "  (press to change)");
+        }
+    }
+
+    private boolean accessibilityOn(Class<?> svc) {
+        String enabled = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (enabled == null) return false;
+        android.content.ComponentName me = new android.content.ComponentName(this, svc);
+        for (String s : enabled.split(":")) if (me.equals(android.content.ComponentName.unflattenFromString(s))) return true;
+        return false;
+    }
     private TextView diag;
 
     @Override
@@ -63,8 +93,17 @@ public class SettingsActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        prefs.raw().unregisterOnSharedPreferenceChangeListener(dimWatch);
+        if (prefs.dimLearning()) prefs.setDimLearning(false); // don't leave it waiting for a button
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        prefs.raw().registerOnSharedPreferenceChangeListener(dimWatch);
+        refreshDim();
         refreshState();
     }
 
@@ -144,6 +183,18 @@ public class SettingsActivity extends Activity {
             }
         });
         col.addView(motionButton);
+
+        col.addView(section("Dimmer"));
+        col.addView(text("One remote button dims the whole picture: Off, Dim (50%), Heavy (80%). It goes to Heavy by itself at midnight and lifts at 8am. Press Set, then press the button you want (the Netflix button).", 13, MUTED, false));
+        dimButton = button("", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.setDimLearning(true);
+                refreshDim();
+            }
+        });
+        col.addView(dimButton);
+        refreshDim();
 
         col.addView(section("Home button"));
         col.addView(text("Google TV doesn't let other apps be the home screen. Switch on \"Ember home button\" under Accessibility and Ember will replace the Google TV home screen whenever it appears.", 13, MUTED, false));

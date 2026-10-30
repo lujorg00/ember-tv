@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">Ember</string>
     <string name="dream_label">Ember</string>
+    <string name="dim_service_label">Ember dimmer</string>
+    <string name="dim_service_description">Lets one remote button (set in Ember settings) dim the whole picture, and dims it automatically at midnight. It only listens for that button and reads nothing on screen.</string>
     <string name="override_service_label">Ember home button</string>
     <string name="override_service_description">Replaces the Google TV home screen with Ember whenever you press Home or wake the TV. It only watches which app is on screen; it reads nothing else.</string>
 </resources>

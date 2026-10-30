@@ -98,4 +98,17 @@ final class Prefs {
     void setLastStockWindow(String s) {
         sp.edit().putString(K_LAST_STOCK, s).apply();
     }
+
+    // ---- dimmer
+    int dimKey() { return sp.getInt("dim_key", 0); }
+    void setDimKey(int k) { sp.edit().putInt("dim_key", k).apply(); }
+    boolean dimLearning() { return sp.getBoolean("dim_learning", false); }
+    void setDimLearning(boolean b) { sp.edit().putBoolean("dim_learning", b).apply(); }
+    int dimLevel() { return Math.max(0, Math.min(DimService.LEVELS.length - 1, sp.getInt("dim_level", 0))); }
+    void setDimLevel(int l) { sp.edit().putInt("dim_level", l).apply(); }
+    boolean dimAuto() { return sp.getBoolean("dim_auto", false); }
+    void setDimAuto(boolean b) { sp.edit().putBoolean("dim_auto", b).apply(); }
+    String dimAutoNight() { return sp.getString("dim_auto_night", ""); }
+    void setDimAutoNight(String n) { sp.edit().putString("dim_auto_night", n).apply(); }
+    SharedPreferences raw() { return sp; }
 }
