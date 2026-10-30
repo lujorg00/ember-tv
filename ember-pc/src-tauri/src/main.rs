@@ -19,7 +19,10 @@ struct Player(Arc<Mutex<Inner>>);
 
 #[cfg(windows)]
 mod layer {
-    use windows_sys::Win32::Foundation::{HWND, RECT};
+    // The page always draws on top of anything inside its window, so the video gets its own borderless
+    // window, owned by Ember's (so it stays above it and minimises with it), kept exactly over the page.
+    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -27,44 +30,50 @@ mod layer {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// A plain black child window covering the whole page, on top of it. mpv draws into this.
+    fn page_rect(parent: HWND) -> (i32, i32, i32, i32) {
+        unsafe {
+            let mut r: RECT = std::mem::zeroed();
+            GetClientRect(parent, &mut r);
+            let mut p = POINT { x: 0, y: 0 };
+            ClientToScreen(parent, &mut p);
+            (p.x, p.y, r.right - r.left, r.bottom - r.top)
+        }
+    }
+
     pub fn create(parent: isize) -> isize {
         unsafe {
             let parent = parent as HWND;
-            let mut r: RECT = std::mem::zeroed();
-            GetClientRect(parent, &mut r);
+            let (x, y, w, h) = page_rect(parent);
             let class = wide("STATIC");
-            let name = wide("Ember video");
-            let h = CreateWindowExW(
-                0,
+            let name = wide("Ember");
+            let v = CreateWindowExW(
+                WS_EX_TOOLWINDOW, // no extra taskbar button
                 class.as_ptr(),
                 name.as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                0,
-                0,
-                r.right - r.left,
-                r.bottom - r.top,
-                parent,
+                WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
+                x,
+                y,
+                w,
+                h,
+                parent, // owner
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null(),
             );
-            SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            h as isize
+            v as isize
         }
     }
 
     pub fn fit(layer: isize, parent: isize) {
         unsafe {
-            let mut r: RECT = std::mem::zeroed();
-            GetClientRect(parent as HWND, &mut r);
-            SetWindowPos(layer as HWND, HWND_TOP, 0, 0, r.right - r.left, r.bottom - r.top, 0);
+            let (x, y, w, h) = page_rect(parent as HWND);
+            SetWindowPos(layer as HWND, std::ptr::null_mut(), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
 
     pub fn focus_video(layer: isize) {
         unsafe {
-            // mpv makes its own window inside ours; give it the keyboard
+            SetForegroundWindow(layer as HWND);
             let inner = GetWindow(layer as HWND, GW_CHILD);
             SetFocus(if inner.is_null() { layer as HWND } else { inner });
         }
@@ -238,7 +247,7 @@ fn main() {
         .manage(Player::default())
         .invoke_handler(tauri::generate_handler![play, stop, playing, player_log])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Resized(_) = event {
+            if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) {
                 let app = window.app_handle();
                 let player = app.state::<Player>();
                 let layer = player.0.lock().unwrap().layer;
