@@ -19,17 +19,12 @@ struct Player(Arc<Mutex<Inner>>);
 
 #[cfg(windows)]
 mod layer {
-    // The page always draws on top of anything inside its window, so the video gets its own borderless
-    // window, owned by Ember's (so it stays above it and minimises with it), kept exactly over the page.
-    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-    use windows_sys::Win32::Graphics::Gdi::{ClientToScreen, GetStockObject, BLACK_BRUSH, HBRUSH};
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    // mpv only gets the mouse and keyboard properly in its own window, so "inside Ember" means: mpv's own
+    // borderless window, made a child-like "owned" window of Ember's (stays above it, minimises with it,
+    // no extra taskbar button) and kept exactly over Ember's page as you move or resize it.
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-    fn wide(s: &str) -> Vec<u16> {
-        s.encode_utf16().chain(std::iter::once(0)).collect()
-    }
 
     fn page_rect(parent: HWND) -> (i32, i32, i32, i32) {
         unsafe {
@@ -41,71 +36,52 @@ mod layer {
         }
     }
 
-    /// Our own plain window class: a STATIC control lets mouse clicks fall through to the window behind it,
-    /// so mpv never got your clicks or the keyboard.
-    fn register_class() -> Vec<u16> {
-        let class = wide("EmberVideo");
-        unsafe {
-            let wc = WNDCLASSW {
-                style: CS_HREDRAW | CS_VREDRAW,
-                lpfnWndProc: Some(DefWindowProcW),
-                cbClsExtra: 0,
-                cbWndExtra: 0,
-                hInstance: GetModuleHandleW(std::ptr::null()),
-                hIcon: std::ptr::null_mut(),
-                hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-                hbrBackground: GetStockObject(BLACK_BRUSH) as HBRUSH,
-                lpszMenuName: std::ptr::null(),
-                lpszClassName: class.as_ptr(),
-            };
-            RegisterClassW(&wc); // fails harmlessly if already registered
-        }
-        class
+    /// "--geometry" for mpv so its window opens in the right place before we take it over.
+    pub fn geometry(parent: isize) -> String {
+        let (x, y, w, h) = page_rect(parent as HWND);
+        format!("{}x{}+{}+{}", w, h, x, y)
     }
 
-    pub fn create(parent: isize) -> isize {
+    struct Find {
+        pid: u32,
+        found: HWND,
+    }
+
+    unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
+        let f = &mut *(l as *mut Find);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, &mut pid);
+        if pid == f.pid && IsWindowVisible(h) != 0 && GetWindow(h, GW_OWNER).is_null() {
+            f.found = h;
+            return 0;
+        }
+        1
+    }
+
+    /// mpv's main window, once it exists.
+    pub fn find(pid: u32) -> isize {
+        let mut f = Find { pid, found: std::ptr::null_mut() };
         unsafe {
-            let parent = parent as HWND;
-            let (x, y, w, h) = page_rect(parent);
-            let class = register_class();
-            let name = wide("Ember");
-            let v = CreateWindowExW(
-                WS_EX_TOOLWINDOW, // no extra taskbar button
-                class.as_ptr(),
-                name.as_ptr(),
-                WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
-                x,
-                y,
-                w,
-                h,
-                parent, // owner
-                std::ptr::null_mut(),
-                GetModuleHandleW(std::ptr::null()),
-                std::ptr::null(),
-            );
+            EnumWindows(Some(each), &mut f as *mut Find as LPARAM);
+        }
+        f.found as isize
+    }
+
+    pub fn adopt(video: isize, parent: isize) {
+        unsafe {
+            let v = video as HWND;
+            SetWindowLongPtrW(v, GWLP_HWNDPARENT, parent);
+            let ex = GetWindowLongPtrW(v, GWL_EXSTYLE);
+            SetWindowLongPtrW(v, GWL_EXSTYLE, (ex & !(WS_EX_APPWINDOW as isize)) | WS_EX_TOOLWINDOW as isize);
+            fit(video, parent);
             SetForegroundWindow(v);
-            v as isize
         }
     }
 
-    pub fn fit(layer: isize, parent: isize) {
+    pub fn fit(video: isize, parent: isize) {
         unsafe {
             let (x, y, w, h) = page_rect(parent as HWND);
-            SetWindowPos(layer as HWND, std::ptr::null_mut(), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-    }
-
-    pub fn focus_video(layer: isize) {
-        unsafe {
-            SetForegroundWindow(layer as HWND);
-            let inner = GetWindow(layer as HWND, GW_CHILD);
-            SetFocus(if inner.is_null() { layer as HWND } else { inner });
-        }
-    }
-
-    pub fn destroy(layer: isize) {
-        unsafe {
-            DestroyWindow(layer as HWND);
+            SetWindowPos(video as HWND, std::ptr::null_mut(), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
     }
 }
@@ -123,14 +99,8 @@ fn main_hwnd(app: &tauri::AppHandle) -> isize {
     0
 }
 
-fn remove_layer(app: &tauri::AppHandle, player: &Player) {
-    let layer = std::mem::take(&mut player.0.lock().unwrap().layer);
-    if layer != 0 {
-        let _ = app.run_on_main_thread(move || {
-            #[cfg(windows)]
-            layer::destroy(layer);
-        });
-    }
+fn remove_layer(_app: &tauri::AppHandle, player: &Player) {
+    player.0.lock().unwrap().layer = 0; // mpv's window closes with mpv
 }
 
 fn stop_inner(app: &tauri::AppHandle, player: &Player) {
@@ -187,22 +157,10 @@ async fn play(
     }
 
     if embed {
-        // Make the video layer on the window's own thread, then hand it to mpv.
         let parent = main_hwnd(&app);
-        let (tx, rx) = std::sync::mpsc::channel();
-        app.run_on_main_thread(move || {
-            #[cfg(windows)]
-            let _ = tx.send(layer::create(parent));
-            #[cfg(not(windows))]
-            let _ = tx.send(0isize);
-        })
-        .map_err(|e| e.to_string())?;
-        let layer = rx.recv_timeout(Duration::from_secs(3)).map_err(|e| e.to_string())?;
-        if layer == 0 {
-            return Err("couldn't make the video layer".into());
-        }
-        player.0.lock().unwrap().layer = layer;
-        cmd.arg(format!("--wid={}", layer));
+        #[cfg(windows)]
+        cmd.arg(format!("--geometry={}", layer::geometry(parent)));
+        cmd.arg("--no-border").arg("--title=Ember video");
     } else {
         cmd.arg("--fs");
     }
@@ -214,30 +172,35 @@ async fn play(
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     player.0.lock().unwrap().child = Some(child);
 
-    // Give mpv the keyboard once its window exists, and clear the layer away when playback ends.
+    // In the window: find mpv's window, attach it over Ember's page. Then watch for playback ending.
+    let pid = player.0.lock().unwrap().child.as_ref().map(|c| c.id()).unwrap_or(0);
     let (app2, p2) = (app.clone(), player.clone());
     std::thread::spawn(move || {
-        let mut focused = false;
+        let parent = main_hwnd(&app2);
+        let mut tries = 0;
         loop {
-            std::thread::sleep(Duration::from_millis(500));
+            std::thread::sleep(Duration::from_millis(if tries < 40 { 150 } else { 500 }));
+            tries += 1;
             let mut g = p2.0.lock().unwrap();
             let done = match g.child.as_mut() {
                 Some(c) => !matches!(c.try_wait(), Ok(None)),
                 None => true,
             };
-            let layer = g.layer;
+            let attached = g.layer != 0;
             drop(g);
             if done {
                 remove_layer(&app2, &p2);
                 break;
             }
-            if !focused && layer != 0 {
-                focused = true;
-                let _ = app2.run_on_main_thread(move || {
-                    #[cfg(windows)]
-                    layer::focus_video(layer);
-                });
+            #[cfg(windows)]
+            if embed && !attached && tries < 80 {
+                let v = layer::find(pid);
+                if v != 0 {
+                    p2.0.lock().unwrap().layer = v;
+                    let _ = app2.run_on_main_thread(move || layer::adopt(v, parent));
+                }
             }
+            let _ = (attached, parent, pid);
         }
     });
     Ok("playing".into())
