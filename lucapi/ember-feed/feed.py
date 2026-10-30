@@ -640,6 +640,7 @@ def report(body):
          "device": str(body.get("device", ""))[:40], "source": "ember", "finished": int(finished),
          "trakt_watched": 0, "episode_title": str(body.get("episodeTitle", ""))[:120]}
     _upsert(d)
+    print(f"[ember-feed] report {d['key']} {state} {round(pos)}s from {d['device']}", flush=True)
     with _cache_lock:
         _cache.pop("progress", None)
     # Tell Trakt too (so Omni knows), but only when something changes - not on every tick.

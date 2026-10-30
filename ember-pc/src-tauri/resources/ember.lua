@@ -2,9 +2,14 @@
 -- Options come from Ember as --script-opts=ember-feed=...,ember-imdb=...,ember-type=...,...
 local mp = require 'mp'
 local utils = require 'mp.utils'
+local msg = require 'mp.msg'
 local o = { feed = "", imdb = "", type = "movie", season = "", episode = "", device = "Ember PC", key = "", title = "" }
 require('mp.options').read_options(o, "ember")
-if o.feed == "" or o.imdb == "" then return end
+if o.feed == "" or o.imdb == "" then
+    msg.error("no Pi address or title given, so progress won't be saved (feed='" .. o.feed .. "', imdb='" .. o.imdb .. "')")
+    return
+end
+msg.info("reporting " .. o.type .. " " .. o.imdb .. " to " .. o.feed)
 
 local pos, dur, started, sent_end = nil, nil, false, false
 
@@ -21,7 +26,14 @@ local function post(state, sync, finished)
     end
     table.insert(args, o.feed .. "/progress/report")
     local cmd = { name = "subprocess", args = args, playback_only = false, capture_stdout = true, capture_stderr = true }
-    if sync then mp.command_native(cmd) else mp.command_native_async(cmd, function() end) end
+    local function done(ok, r)
+        if r and r.status == 0 then
+            msg.info(state .. " at " .. math.floor(pos) .. "s -> " .. (r.stdout or ""))
+        else
+            msg.error(state .. " report failed: status " .. tostring(r and r.status) .. " " .. tostring(r and r.error_string) .. " " .. tostring(r and r.stderr))
+        end
+    end
+    if sync then done(true, mp.command_native(cmd)) else mp.command_native_async(cmd, done) end
 end
 
 mp.observe_property("time-pos", "number", function(_, v) if v then pos = v end end)

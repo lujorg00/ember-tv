@@ -56,6 +56,7 @@
       <label class="row"><input type="radio" name="mode" value="window" checked style="width:auto"> inside the Ember window</label>
       <label class="row"><input type="radio" name="mode" value="full" style="width:auto"> full screen</label>
       <button id="stop">Stop</button>
+      <button id="plog">Player log</button>
     </div>
     <div id="streams" class="list"></div>
   </section>
@@ -159,6 +160,7 @@ async function play(url) {
   } catch(e) { log("Couldn't start mpv: " + e); }
 }
 $("stop").onclick = () => invoke && invoke("stop");
+$("plog").onclick = async () => { if (invoke) log("Player log:\n" + (await invoke("player_log") || "(nothing about Ember yet)")); };
 const fmt = s => { s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s/60)%60, x = s%60;
   return (h ? h + ":" + String(m).padStart(2,"0") : m) + ":" + String(x).padStart(2,"0"); };
 $("go").onclick = search; $("q").addEventListener("keydown", e => { if (e.key === "Enter") search(); });

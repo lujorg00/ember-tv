@@ -125,12 +125,18 @@ async fn play(
         return Err(format!("mpv not found at {}", mpv.display()));
     }
     stop_inner(&app, &player);
+    let logdir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let _ = std::fs::create_dir_all(&logdir);
+    let logfile = logdir.join("mpv-log.txt");
+    let _ = std::fs::remove_file(&logfile);
 
     let mut cmd = Command::new(&mpv);
     cmd.arg(&url)
         .arg(format!("--start={}", start.max(0.0)))
         .arg(format!("--script={}", script.display()))
         .arg(format!("--script-opts={}", opts))
+        .arg(format!("--log-file={}", logfile.display()))
+        .arg("--msg-level=all=warn,ember=v")
         .arg("--force-window=immediate")
         .arg("--title=Ember")
         .arg("--hwdec=auto-safe")
@@ -209,6 +215,15 @@ fn stop(app: tauri::AppHandle, player: tauri::State<Player>) {
     stop_inner(&app, &player);
 }
 
+/// The player's log lines about Ember's progress reports (and any errors), for checking resume.
+#[tauri::command]
+fn player_log(app: tauri::AppHandle) -> String {
+    let Ok(dir) = app.path().app_local_data_dir() else { return String::new() };
+    let text = std::fs::read_to_string(dir.join("mpv-log.txt")).unwrap_or_else(|_| "No player log yet: play something first.".into());
+    let lines: Vec<&str> = text.lines().filter(|l| l.contains("[ember]") || l.contains("error") || l.contains("Lua")).collect();
+    lines[lines.len().saturating_sub(40)..].join("\n")
+}
+
 #[tauri::command]
 fn playing(player: tauri::State<Player>) -> bool {
     let mut g = player.0.lock().unwrap();
@@ -221,7 +236,7 @@ fn playing(player: tauri::State<Player>) -> bool {
 fn main() {
     tauri::Builder::default()
         .manage(Player::default())
-        .invoke_handler(tauri::generate_handler![play, stop, playing])
+        .invoke_handler(tauri::generate_handler![play, stop, playing, player_log])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Resized(_) = event {
                 let app = window.app_handle();
