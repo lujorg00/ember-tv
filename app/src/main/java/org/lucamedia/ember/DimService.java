@@ -62,7 +62,8 @@ public class DimService extends AccessibilityService {
     private PowerManager power;
     private AudioManager audio;
     private FrameLayout layer;
-    private TextView label, note;
+    private TextView label, note, catNote;
+    private long catUntil;
     private int shownAlpha; // 0..255 currently on screen
     private ValueAnimator fade;
     private long noteUntil;
@@ -395,7 +396,7 @@ public class DimService extends AccessibilityService {
             }
         }
         catsKnown = true;
-        if (msg.length() > 0) showNote(msg.toString(), CAT_NOTE_MS);
+        if (msg.length() > 0) showCatNote(msg.toString());
     }
 
     private String feed(String path) {
@@ -428,13 +429,15 @@ public class DimService extends AccessibilityService {
     private final Runnable dropIfIdle = new Runnable() {
         @Override
         public void run() {
-            if (prefs.dimLevel() == 0 && System.currentTimeMillis() >= noteUntil) removeLayer();
+            long now = System.currentTimeMillis();
+            if (prefs.dimLevel() == 0 && now >= noteUntil && now >= catUntil) removeLayer();
         }
     };
 
     private void scheduleDrop(long ms) {
         main.removeCallbacks(dropIfIdle);
-        main.postDelayed(dropIfIdle, Math.max(ms, noteUntil - System.currentTimeMillis() + 800));
+        long now = System.currentTimeMillis();
+        main.postDelayed(dropIfIdle, Math.max(ms, Math.max(noteUntil, catUntil) - now + 800));
     }
 
     /** The dimmer's own short message, bottom centre. */
@@ -510,6 +513,24 @@ public class DimService extends AccessibilityService {
         scheduleDrop(ms + 900);
     }
 
+    /** The cats get their own quiet corner, bottom-left, separate from alerts (no queue, smaller, softer). */
+    private void showCatNote(String s) {
+        ensureLayer();
+        if (catNote == null) return;
+        catNote.setText(s);
+        catNote.animate().cancel();
+        catNote.setAlpha(0f);
+        final TextView c = catNote;
+        c.animate().alpha(0.92f).setStartDelay(0).setDuration(400).withEndAction(new Runnable() {
+            @Override
+            public void run() {
+                c.animate().alpha(0f).setStartDelay(CAT_NOTE_MS).setDuration(800).start();
+            }
+        }).start();
+        catUntil = System.currentTimeMillis() + CAT_NOTE_MS + 1300;
+        scheduleDrop(CAT_NOTE_MS + 1500);
+    }
+
     private void styleNote(TextView t, int level) {
         float d = getResources().getDisplayMetrics().density;
         GradientDrawable bg = new GradientDrawable();
@@ -573,6 +594,21 @@ public class DimService extends AccessibilityService {
         np.rightMargin = Math.round(40 * d);
         layer.addView(note, np);
 
+        catNote = pill(d);
+        catNote.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        catNote.setTextColor(0xFFE6D6C4);
+        catNote.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        catNote.setPadding(Math.round(14 * d), Math.round(6 * d), Math.round(14 * d), Math.round(6 * d));
+        GradientDrawable cb = new GradientDrawable();
+        cb.setColor(0xB31A1410);
+        cb.setCornerRadius(99 * d);
+        catNote.setBackground(cb);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        cp.gravity = Gravity.BOTTOM | Gravity.START;
+        cp.leftMargin = Math.round(40 * d);
+        cp.bottomMargin = Math.round(32 * d);
+        layer.addView(catNote, cp);
+
         WindowManager.LayoutParams wp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -586,6 +622,7 @@ public class DimService extends AccessibilityService {
             layer = null;
             label = null;
             note = null;
+            catNote = null;
         }
     }
 
@@ -598,6 +635,7 @@ public class DimService extends AccessibilityService {
         layer = null;
         label = null;
         note = null;
+        catNote = null;
         shownAlpha = 0;
     }
 
