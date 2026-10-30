@@ -285,9 +285,16 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // Resume: the streams for that episode, best first; one more click plays.
-  $("#resumeBtn", head).onclick = () => { right.scrollIntoView({ behavior: "smooth", block: "start" }); right.classList.add("pulse"); setTimeout(() => right.classList.remove("pulse"), 900); };
+  const startBest = () => {
+    if (type === "series" && !cur) return toast("Pick an episode first.");
+    const sp = type === "series" ? saved[cur.season + ":" + cur.episode] : saved[":"];
+    const e = type === "series" ? epOf(cur) : null;
+    playBest(mm, cur ? cur.season : null, cur ? cur.episode : null, e ? e.name || e.title || "" : "", sp && !sp.finished && sp.position > 20 ? sp.position : 0);
+  };
+  $("#resumeBtn", head).onclick = startBest;
+  if (opts.autoplay) setTimeout(startBest, 300);
 
-  const pick = (season, episode, title) => streamsPanel(right, mm, season, episode, title, saved, opts.autoplay);
+  const pick = (season, episode, title) => streamsPanel(right, mm, season, episode, title, saved);
 
   if (type === "series") {
     const seasons = [...new Set(eps.map(e => e.season))];
@@ -366,7 +373,8 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   const resume = sp && !sp.finished && sp.position > 20 ? sp : null;
   right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
     ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
-      <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}</div>
+      <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}
+    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div></div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
@@ -385,26 +393,68 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
       play(s.url, mm, season, episode, epTitle, resume && !fromStart ? resume.position : 0);
     };
     box.appendChild(el);
-    if (autoplay && i === 0 && store.get("autoplayFirst", "0") === "1") el.click();
   });
 }
 
 // ---------------------------------------------------------------- playing
 
 let watching = null;
-async function play(url, mm, season, episode, epTitle, start) {
+let attempt = null; // { mm, season, episode, epTitle, ranked, n } while the picker is in charge
+
+/** Plays the best stream the Pi's picker finds; if it errors or stalls, the next best, from the same point. */
+async function playBest(mm, season, episode, epTitle, start) {
+  if (!aioBase()) { go("settings"); return toast("Add your AIOStreams link first."); }
+  toast("Finding the best stream…", 15000);
+  const id = mm.type === "series" ? `${mm.id}:${season}:${episode}` : mm.id;
+  const runtime = parseInt(mm.runtime) || "";
+  let res;
+  try {
+    res = await getJson(`${feed()}/pick/${mm.type}/${encodeURIComponent(id)}?aio=${encodeURIComponent(store.get("aio"))}` +
+      `&quality=${store.get("quality", "4k")}&runtime=${runtime}&passthrough=${store.get("passthrough", "0")}`, 60000);
+  } catch (e) { return toast("Couldn't ask lucapi for the best stream: " + e.message); }
+  const ranked = (res.ranked || []).filter(x => !x.probe || x.probe.ok);
+  if (!ranked.length) return toast("No working streams found for this one.");
+  attempt = { mm, season, episode, epTitle, ranked, n: 0 };
+  return play(ranked[0].url, mm, season, episode, epTitle, start, ranked[0]);
+}
+
+async function tryNext(why) {
+  const a = attempt;
+  if (!a) return false;
+  const failed = a.ranked[a.n];
+  fetch(`${feed()}/pick/failed`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: `${failed.name}\n${failed.title}\n${failed.filename}`, why }) }).catch(() => {});
+  a.n += 1;
+  if (a.n >= a.ranked.length || a.n >= 4) { attempt = null; toast("None of the streams would play properly. Try one from the list."); return false; }
+  // carry on from wherever the last one got to
+  let start = 0;
+  try {
+    const r = await getJson(`${feed()}/progress/${a.mm.id}`, 5000);
+    const p = r.positions.find(p => a.mm.type === "movie" ? p.season == null : (p.season == a.season && p.episode == a.episode));
+    if (p && !p.finished) start = p.position;
+  } catch (e) {}
+  toast(`That stream ${why}. Trying the next best (${a.n + 1} of ${Math.min(4, a.ranked.length)})…`, 6000);
+  await play(a.ranked[a.n].url, a.mm, a.season, a.episode, a.epTitle, start, a.ranked[a.n], true);
+  return true;
+}
+
+async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
+  if (!chosen) attempt = null; // picked by hand: no automatic switching
   if (!invoke) return toast("Playing only works inside the Ember app.");
   const embed = store.get("playMode", "window") === "window";
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
     `ember-episode=${episode ?? ""}`, "ember-device=Ember PC"].join(",");
   try {
     await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts });
-    toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}. Esc goes back.`);
+    if (!retry) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
     sky.pause(true);
     clearInterval(watching);
     watching = setInterval(async () => {
       if (await invoke("playing")) return;
-      clearInterval(watching); sky.pause(false);
+      clearInterval(watching);
+      const code = await invoke("last_exit");
+      if (attempt && (code === 2 || code === 4) && await tryNext(code === 2 ? "wouldn't play" : "kept stalling")) return;
+      attempt = null; sky.pause(false);
       const cur = navStack[navStack.length - 1];
       if (cur && cur[0] === "title" && cur[1][1] === mm.id) { navStack.pop(); go("title", ...cur[1].slice(0, 3)); } // refresh resume points
     }, 2000);
@@ -422,6 +472,9 @@ function showSettings() {
       <label>Playing</label>
       <label class="check"><input type="radio" name="pm" value="window"> In the Ember window</label>
       <label class="check"><input type="radio" name="pm" value="full"> Full screen</label>
+      <label>Best stream picker: highest quality</label>
+      <label class="check"><input type="radio" name="q" value="4k"> 4K when it's available and your connection keeps up</label>
+      <label class="check"><input type="radio" name="q" value="1080p"> 1080p (smaller files, safest)</label>
       <label>Sound</label>
       <label class="check"><input type="checkbox" id="pt"> Send Dolby and DTS untouched to a receiver or soundbar (HDMI only; leave off for PC speakers and headphones)</label>
       <label>Background</label>
@@ -431,11 +484,12 @@ function showSettings() {
   $("#aio").value = store.get("aio"); $("#feed").value = feed();
   document.querySelector(`input[name=pm][value=${store.get("playMode", "window")}]`).checked = true;
   $("#pt").checked = store.get("passthrough", "0") === "1";
+  document.querySelector(`input[name=q][value=${store.get("quality", "4k")}]`).checked = true;
   $("#motion").checked = store.get("motion", "1") === "1";
   $("#save").onclick = () => {
     store.set("aio", $("#aio").value.trim()); store.set("feed", $("#feed").value.trim());
     store.set("playMode", document.querySelector("input[name=pm]:checked").value);
-    store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("motion", $("#motion").checked ? "1" : "0");
+    store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0");
     addonCatalogs = null; sky.start(); toast("Saved");
   };
 }

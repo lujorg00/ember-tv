@@ -11,7 +11,8 @@ use tauri::Manager;
 #[derive(Default)]
 struct Inner {
     child: Option<Child>,
-    layer: isize, // our video layer (a child window above the page), 0 if none
+    layer: isize,   // mpv's window while it's attached over the page, 0 if none
+    last_exit: i32, // how mpv last finished: 0 fine, 2 couldn't play, 4 stalled (Ember's script), -1 running/unknown
 }
 
 #[derive(Clone, Default)]
@@ -104,9 +105,12 @@ fn remove_layer(_app: &tauri::AppHandle, player: &Player) {
 }
 
 fn stop_inner(app: &tauri::AppHandle, player: &Player) {
-    if let Some(mut c) = player.0.lock().unwrap().child.take() {
+    let mut g = player.0.lock().unwrap();
+    if let Some(mut c) = g.child.take() {
         let _ = c.kill();
+        g.last_exit = 0; // you stopped it: not a failure
     }
+    drop(g);
     remove_layer(app, player);
 }
 
@@ -170,7 +174,11 @@ async fn play(
         cmd.creation_flags(0x0800_0000); // no console window
     }
     let child = cmd.spawn().map_err(|e| e.to_string())?;
-    player.0.lock().unwrap().child = Some(child);
+    {
+        let mut g = player.0.lock().unwrap();
+        g.child = Some(child);
+        g.last_exit = -1;
+    }
 
     // In the window: find mpv's window, attach it over Ember's page. Then watch for playback ending.
     let pid = player.0.lock().unwrap().child.as_ref().map(|c| c.id()).unwrap_or(0);
@@ -183,9 +191,19 @@ async fn play(
             tries += 1;
             let mut g = p2.0.lock().unwrap();
             let done = match g.child.as_mut() {
-                Some(c) => !matches!(c.try_wait(), Ok(None)),
+                Some(c) => match c.try_wait() {
+                    Ok(None) => false,
+                    Ok(Some(st)) => {
+                        g.last_exit = st.code().unwrap_or(-1);
+                        true
+                    }
+                    Err(_) => true,
+                },
                 None => true,
             };
+            if done {
+                g.child = None;
+            }
             let attached = g.layer != 0;
             drop(g);
             if done {
@@ -221,6 +239,11 @@ fn player_log(app: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
+fn last_exit(player: tauri::State<Player>) -> i32 {
+    player.0.lock().unwrap().last_exit
+}
+
+#[tauri::command]
 fn playing(player: tauri::State<Player>) -> bool {
     let mut g = player.0.lock().unwrap();
     match g.child.as_mut() {
@@ -232,7 +255,7 @@ fn playing(player: tauri::State<Player>) -> bool {
 fn main() {
     tauri::Builder::default()
         .manage(Player::default())
-        .invoke_handler(tauri::generate_handler![play, stop, playing, player_log])
+        .invoke_handler(tauri::generate_handler![play, stop, playing, player_log, last_exit])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) {
                 let app = window.app_handle();

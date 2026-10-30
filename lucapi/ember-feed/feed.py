@@ -13,6 +13,8 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
+  GET /pick/<type>/<id>?aio=&quality=4k&runtime=  -> streams best first, the top few tested for speed
+  POST /pick/failed -> a player says a stream errored or stalled (it's pushed down next time)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -857,6 +859,162 @@ def alerts():
     return {"now": now.isoformat(), "alerts": out}
 
 
+# ------------------------------------------------------------------ the stream picker
+# Scores every stream AIOStreams offers, tests the best few (does the link answer, how fast does it come in,
+# is that comfortably faster than the file needs), and returns them best first. Players play the first one and,
+# if it errors or stalls, tell us (/pick/failed) and move on to the next.
+
+import re
+import concurrent.futures
+
+PICK = CFG.get("picker", {})
+_RES = [(re.compile(r"\b(2160p|4k|uhd)\b", re.I), 2160), (re.compile(r"\b1440p\b", re.I), 1440),
+        (re.compile(r"\b1080p\b", re.I), 1080), (re.compile(r"\b720p\b", re.I), 720), (re.compile(r"\b(480p|576p|sd)\b", re.I), 480)]
+_BAD = re.compile(r"\b(cam|camrip|hdcam|ts|telesync|hdts|tc|telecine|scr|screener|dvdscr|workprint)\b", re.I)
+_SIZE = re.compile(r"(\d+(?:\.\d+)?)\s?(GB|GiB|MB|MiB)\b", re.I)
+
+
+def _fingerprint(text):
+    """The release group (the bit after the last dash in a release name), used to remember which ones let you down."""
+    for line in str(text).lower().split("\n"):
+        line = re.sub(r"\.(mkv|mp4|avi|m2ts)$", "", line.strip())
+        if "." in line or " " not in line:
+            m = re.search(r"-([a-z0-9]{2,15})$", line)
+            if m and not re.fullmatch(r"\d+|dl|web|hd|sd", m.group(1)):
+                return m.group(1)
+    return ""
+
+
+def _failures():
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS stream_failures (fp TEXT PRIMARY KEY, n INTEGER, last INTEGER)")
+        rows = db().execute("SELECT fp, n, last FROM stream_failures").fetchall()
+    week = time.time() - 14 * 86400
+    return {fp: n for fp, n, last in rows if last > week}
+
+
+def stream_failed(body):
+    fp = _fingerprint(str(body.get("text", "")))
+    if not fp:
+        return {"ok": False}
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS stream_failures (fp TEXT PRIMARY KEY, n INTEGER, last INTEGER)")
+        db().execute("INSERT INTO stream_failures VALUES (?, 1, ?) ON CONFLICT(fp) DO UPDATE SET n = n + 1, last = excluded.last",
+                     (fp, int(time.time())))
+        db().commit()
+    print(f"[ember-feed] stream failed: {fp} ({body.get('why', '')})", flush=True)
+    return {"ok": True, "fingerprint": fp}
+
+
+def _score(s, want_res, runtime_min, passthrough, fails):
+    text = f"{s.get('name', '')}\n{s.get('title') or s.get('description') or ''}\n{(s.get('behaviorHints') or {}).get('filename', '')}"
+    why, score = [], 0.0
+    if _BAD.search(text):
+        return -1e9, ["cam / screener"], text, None
+    res = next((r for rx, r in _RES if rx.search(text)), 0)
+    if not res and re.search(r"\bHD\b", text):
+        res = 1080
+    # Resolution: as close to what you want as possible, never above it.
+    if res > want_res:
+        score -= 400; why.append(f"{res}p is above your {want_res}p limit")
+    elif res:
+        score += {2160: 300, 1440: 240, 1080: 220, 720: 120, 480: 30}.get(res, 0) - (0 if res == want_res else 40)
+    cached = bool(re.search(r"⚡|\[(AD|RD|PM|TB|DL|ED|OC)\+?\]|\bcached\b", text, re.I))
+    if cached:
+        score += 500; why.append("cached")
+    elif re.search(r"⏳|\[(AD|RD|PM|TB|DL)\s*download\]|uncached|\bp2p\b", text, re.I):
+        score -= 600; why.append("not cached")
+    if re.search(r"\b(dv|dovi|dolby ?vision)\b", text, re.I):
+        score += 40; why.append("Dolby Vision")
+    elif re.search(r"\bhdr", text, re.I):
+        score += 35; why.append("HDR")
+    if re.search(r"\batmos\b", text, re.I):
+        score += 30
+    if re.search(r"\b(ddp|dd\+|e-?ac-?3)", text, re.I):
+        score += 20
+    if re.search(r"true ?hd|dts", text, re.I) and not passthrough:
+        score -= 10  # fine on PC, decoded on the Chromecast
+    if re.search(r"\b(english|eng)\b|🇬🇧|🇺🇸", text, re.I):
+        score += 25
+    elif re.search(r"\b(italian|spanish|french|german|portuguese|russian|hindi|latino)\b", text, re.I) and not re.search(r"\b(multi|dual)\b", text, re.I):
+        score -= 120; why.append("not English")
+    if re.search(r"\bremux\b", text, re.I):
+        score -= 30  # huge: buffers more easily
+    m = _SIZE.search(text)
+    size_gb = (float(m.group(1)) / (1024 if m.group(2).upper().startswith("M") else 1)) if m else None
+    need = None
+    if size_gb and runtime_min:
+        need = size_gb * 8 * 1024 / (runtime_min * 60)  # average Mbit/s the file needs
+        if need > PICK.get("max_mbps", 80):
+            score -= 200; why.append(f"very heavy ({need:.0f} Mbit/s)")
+    f = fails.get(_fingerprint(text), 0)
+    if f:
+        score -= 150 * f; why.append(f"failed {f}x recently")
+    return score, why, text, need
+
+
+def _probe(url, timeout=6.0, want_bytes=6 * 1024 * 1024, max_s=2.5):
+    """Asks for the start of the file and times it. Returns ok, time to first byte, Mbit/s."""
+    t0 = time.time()
+    try:
+        req = urllib.request.Request(url, headers={"Range": f"bytes=0-{want_bytes - 1}", "User-Agent": "ember-feed/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if r.status not in (200, 206):
+                return {"ok": False, "why": f"HTTP {r.status}"}
+            first = r.read(65536)
+            ttfb = time.time() - t0
+            got, t1 = len(first), time.time()
+            while got < want_bytes and time.time() - t1 < max_s:
+                chunk = r.read(262144)
+                if not chunk:
+                    break
+                got += len(chunk)
+            secs = max(0.05, time.time() - t1)
+            ctype = r.headers.get("Content-Type", "")
+        if got < 32768 or "text/html" in ctype:
+            return {"ok": False, "why": "not a video"}
+        return {"ok": True, "ttfb_ms": round(ttfb * 1000), "mbps": round((got - len(first)) * 8 / secs / 1e6, 1)}
+    except Exception as e:
+        return {"ok": False, "why": type(e).__name__}
+
+
+def pick(typ, sid, aio, want="4k", runtime_min=None, passthrough=False, probe_top=4):
+    aio = (aio or CFG.get("aiostreams_url", "")).strip()
+    if not aio:
+        raise ValueError("no AIOStreams link (pass ?aio= or set aiostreams_url in config.json)")
+    base = re.sub(r"/manifest\.json.*$", "", aio)
+    streams = [s for s in json.loads(http_get(f"{base}/stream/{typ}/{sid}.json", timeout=40)).get("streams", []) if s.get("url")]
+    want_res = 2160 if str(want).lower() in ("4k", "2160", "2160p") else int(re.sub(r"\D", "", str(want)) or 1080)
+    fails = _failures()
+    scored = []
+    for i, s in enumerate(streams):
+        sc, why, text, need = _score(s, want_res, runtime_min, passthrough, fails)
+        sc -= i * 0.5  # keep AIOStreams' own order as the tie-break
+        scored.append({"i": i, "score": round(sc, 1), "why": why, "need_mbps": round(need, 1) if need else None, "url": s["url"],
+                       "name": s.get("name", ""), "title": s.get("title") or s.get("description") or "",
+                       "filename": (s.get("behaviorHints") or {}).get("filename", "")})
+    scored.sort(key=lambda x: -x["score"])
+    top = [x for x in scored if x["score"] > -1e8][:probe_top]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(top))) as ex:
+        for x, pr in zip(top, ex.map(lambda x: _probe(x["url"]), top)):
+            x["probe"] = pr
+    # Best = highest score that answered and comes in comfortably faster than it plays.
+    def verdict(x):
+        pr = x.get("probe")
+        if not pr:
+            return 1  # untested: after the tested ones
+        if not pr["ok"]:
+            return 3
+        if x["need_mbps"] and pr["mbps"] < x["need_mbps"] * 1.3:
+            x["why"].append(f"line too slow for it ({pr['mbps']} vs {x['need_mbps']} Mbit/s)")
+            return 2
+        return 0
+    ranked = sorted(scored, key=lambda x: (verdict(x), -x["score"]))
+    ranked = [x for x in ranked if x["score"] > -1e8]
+    print(f"[ember-feed] pick {typ} {sid}: {len(streams)} streams, best: {ranked[0]['filename'] or ranked[0]['title'][:60] if ranked else 'none'}", flush=True)
+    return {"count": len(streams), "ranked": ranked[:12]}
+
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -903,6 +1061,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(min(n, 65536)) or b"{}")
             if path == "/progress/report":
                 self._json(report(body))
+            elif path == "/pick/failed":
+                self._json(stream_failed(body))
             else:
                 self._json({"error": "not found"}, 404)
         except ValueError as e:
@@ -938,6 +1098,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(weather())
             elif path == "/progress":
                 self._json(progress())
+            elif path.startswith("/pick/"):
+                parts = path.split("/")  # /pick/<type>/<id>
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                g = lambda k, d=None: (q.get(k) or [d])[0]
+                rt = g("runtime")
+                self._json(pick(parts[2], urllib.parse.unquote(parts[3]), g("aio"), g("quality", "4k"),
+                                float(rt) if rt else None, g("passthrough") == "1"))
             elif path.startswith("/progress/tt") and path[len("/progress/tt"):].isdigit():
                 self._json(title_positions(path[len("/progress/"):]))
             elif path.startswith("/next/"):

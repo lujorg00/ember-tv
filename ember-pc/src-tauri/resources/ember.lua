@@ -49,6 +49,30 @@ end)
 mp.add_periodic_timer(15, function()
     if started and not mp.get_property_bool("pause") then post("playing") end
 end)
+-- Stalled: waiting on the network for more than 12 seconds. Save where you are and quit with code 4,
+-- so Ember moves you to the next-best stream from the same point.
+local stall_since = nil
+mp.observe_property("paused-for-cache", "bool", function(_, waiting)
+    if waiting then stall_since = stall_since or mp.get_time() else stall_since = nil end
+end)
+mp.add_periodic_timer(2, function()
+    if stall_since and mp.get_time() - stall_since > 12 then
+        msg.warn("stalled for " .. math.floor(mp.get_time() - stall_since) .. "s: asking Ember for another stream")
+        sent_end = true
+        post("stopped", true, false)
+        mp.commandv("quit", "4")
+    end
+end)
+-- Never got going at all (no picture after 25 seconds): same.
+mp.add_timeout(25, function()
+    if not pos or pos < 1 then
+        if mp.get_property_bool("pause") then return end
+        msg.warn("no playback after 25s: asking Ember for another stream")
+        sent_end = true
+        mp.commandv("quit", "4")
+    end
+end)
+
 mp.register_event("end-file", function(e)
     if sent_end then return end
     sent_end = true
