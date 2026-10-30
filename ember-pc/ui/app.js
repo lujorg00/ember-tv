@@ -78,12 +78,13 @@ function card(m, type) {
   el.onclick = () => go("title", m.type || type, m.id, m);
   return el;
 }
-function row(title, metas, type, onHover) {
-  const r = h(`<section class="row fade-in"><h2>${esc(title)} <small>${metas.length}</small></h2><div class="strip"></div></section>`);
+function row(title, metas, type, onPick) {
+  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   metas.forEach(m => {
     const c = card(m, type);
-    if (onHover) c.addEventListener("mouseenter", () => onHover(m));
+    if (onPick) c.onclick = () => onPick(m); // home: a click puts it in the big space at the top
     strip.appendChild(c);
   });
   // mouse wheel scrolls the row sideways
@@ -106,13 +107,24 @@ async function catalogRow(c) {
   try { return (await getJson(`${feed()}/addon/catalog/${c.type}/${c.id}.json`)).metas || []; } catch (e) { return []; }
 }
 
+/** Home rows get "Films" or "Series" on the end, unless the name already says which. */
+function homeRowName(name, type) {
+  if (/\b(films?|movies?|series|shows?|tv)\b/i.test(name)) return name;
+  return { name, kind: type === "movie" ? "Films" : "Series" };
+}
+
+const HERO_EVERY_MS = 10000, HERO_HOLD_MS = 60000;
+let heroTimer = 0;
+
 async function showHome() {
+  clearInterval(heroTimer);
   const v = $("#view");
   v.innerHTML = "";
-  const hero = h(`<header class="hero"><div class="bd a"></div><div class="bd b"></div><div class="info"></div></header>`);
+  const hero = h(`<header class="hero"><div class="bd a"></div><div class="bd b"></div><div class="info"></div><div class="dots"></div></header>`);
   const rows = h(`<div class="rows"></div>`);
   v.append(hero, rows);
-  let flip = false, heroFor = null, hoverTimer;
+  let flip = false, heroFor = null, pool = [], idx = 0, heldUntil = 0;
+
   const setHero = async (m) => {
     if (!m || heroFor === m.id) return;
     heroFor = m.id;
@@ -126,29 +138,50 @@ async function showHome() {
     img.onload = () => { if (heroFor !== m.id) return; on.style.backgroundImage = `url('${img.src}')`; on.classList.add("show"); off.classList.remove("show"); };
     const p = progress[m.id];
     const info = $(".info", hero);
-    info.innerHTML = `${mm.logo ? `<img class="logoimg" src="${esc(mm.logo)}" alt="${esc(mm.name)}" onerror="this.outerHTML='<h1>${esc(mm.name).replace(/'/g, "")}</h1>'">` : `<h1>${esc(mm.name)}</h1>`}
+    info.classList.remove("fade-in"); void info.offsetWidth; info.classList.add("fade-in");
+    info.innerHTML = `${mm.logo ? `<img class="logoimg" src="${esc(mm.logo)}" alt="${esc(mm.name)}">` : `<h1>${esc(mm.name)}</h1>`}
       <div class="sub">${esc(p ? progressLine(p) : [mm.releaseInfo, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("  ·  "))}</div>
       <div class="desc">${esc(mm.description || "")}</div>
       <div class="btns"><button class="btn primary">${p ? "Resume " + fmt(p.position) : "Watch"}</button><button class="btn">Details</button></div>`;
+    const logo = $(".logoimg", info);
+    if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
     const [watch, details] = info.querySelectorAll("button");
     watch.onclick = () => go("title", type, m.id, m, { autoplay: true });
     details.onclick = () => go("title", type, m.id, m);
+    const i = pool.findIndex(x => x.id === m.id);
+    hero.querySelectorAll(".dots i").forEach((d, k) => d.classList.toggle("on", k === i));
   };
-  const hover = (m) => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => setHero(m), 160); };
+
+  // A poster you click goes to the top and stays a minute before the slideshow carries on.
+  const pick = (m) => { heldUntil = Date.now() + HERO_HOLD_MS; setHero(m); $("#view").scrollTo({ top: 0, behavior: "smooth" }); };
+  const startSlideshow = () => {
+    hero.querySelector(".dots").innerHTML = pool.map(() => "<i></i>").join("");
+    hero.querySelectorAll(".dots i").forEach((d, k) => d.onclick = () => { idx = k; pick(pool[k]); });
+    setHero(pool[0]);
+    clearInterval(heroTimer);
+    heroTimer = setInterval(() => {
+      if (!document.body.contains(hero)) return clearInterval(heroTimer);
+      if (Date.now() < heldUntil || document.hidden || hero.matches(":hover")) return;
+      idx = (idx + 1) % pool.length; setHero(pool[idx]);
+    }, HERO_EVERY_MS);
+  };
 
   await loadProgress();
   const cats = await catalogs();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
-  let first = true;
-  // fetch all rows at once, show them in the addon's order as they arrive
   const slots = cats.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
-  await Promise.all(cats.map(async (c, i) => {
+  const results = await Promise.all(cats.map(async (c, i) => {
     const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
-    if (!metas.length) return;
-    slots[i].replaceWith(row(c.name || c.id, metas, c.type, hover));
-    if (first && i === 0) { first = false; setHero(metas[0]); }
+    if (metas.length) slots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, pick));
+    return metas;
   }));
-  if (first) { const any = rows.querySelector(".poster"); if (any) any.dispatchEvent(new Event("mouseenter")); }
+  // The slideshow: the top two from each row, no repeats, up to 10.
+  const seen = new Set();
+  for (let k = 0; k < 2; k++) for (const metas of results) {
+    const m = metas[k];
+    if (m && !seen.has(m.id) && pool.length < 10) { seen.add(m.id); pool.push(m); }
+  }
+  if (pool.length) startSlideshow();
 }
 
 // ---------------------------------------------------------------- search

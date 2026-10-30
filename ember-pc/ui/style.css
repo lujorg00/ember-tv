@@ -37,6 +37,9 @@ input { font: inherit; color: var(--text); }
   -webkit-mask-composite: source-in; mask-composite: intersect; }
 .hero .bd.show { opacity: .78; }
 .hero .info { position: relative; max-width: 560px; }
+.dots { position: absolute; left: 48px; bottom: 18px; display: flex; gap: 7px; }
+.dots i { width: 7px; height: 7px; border-radius: 9px; background: rgba(255, 230, 200, .25); cursor: pointer; transition: width .3s, background .3s; }
+.dots i.on { width: 22px; background: var(--accent); }
 .hero h1 { font: 600 40px/1.1 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 26px 0 8px; letter-spacing: -.3px; text-shadow: 0 2px 24px #0008; }
 .hero .logoimg { max-width: 420px; max-height: 120px; margin: 18px 0 10px; display: block; filter: drop-shadow(0 4px 18px #0009); }
 .sub { color: var(--accent); font-size: 13px; font-weight: 500; }
@@ -51,6 +54,7 @@ input { font: inherit; color: var(--text); }
 .rows { position: relative; padding: 0 0 60px; }
 .row { margin: 6px 0 18px; }
 .row h2 { font-size: 15px; font-weight: 600; margin: 0 48px 10px; display: flex; align-items: baseline; gap: 10px; }
+.row h2 .kind { color: var(--accent); font-weight: 500; }
 .row h2 small { color: var(--faint); font-weight: 400; font-size: 12px; }
 .strip { display: flex; gap: 14px; overflow-x: auto; overflow-y: visible; padding: 8px 48px 14px; scroll-behavior: smooth; }
 .strip::-webkit-scrollbar { height: 0; }
