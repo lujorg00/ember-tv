@@ -3,167 +3,26 @@
 <head>
 <meta charset="utf-8">
 <title>Ember</title>
-<style>
-  :root { --bg:#0E0B09; --panel:#16100C; --card:#1C1612; --line:#2A1F18; --text:#F3E7DA; --muted:#A8968A; --accent:#F0A04B; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 "Segoe UI Variable Text","Segoe UI",sans-serif; }
-  header { display:flex; align-items:center; gap:14px; padding:18px 28px; border-bottom:1px solid var(--line); }
-  header b { color:var(--accent); font-size:18px; font-weight:600; }
-  header .tag { color:var(--muted); font-size:12px; }
-  main { display:grid; grid-template-columns: 1.1fr 1fr; gap:22px; padding:22px 28px; }
-  input, button, select { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:10px; padding:9px 12px; }
-  input:focus, button:focus { outline:2px solid var(--accent); outline-offset:1px; }
-  button { cursor:pointer; } button:hover { border-color:var(--accent); }
-  button.primary { background:var(--accent); color:#2A1606; border-color:var(--accent); font-weight:600; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .muted { color:var(--muted); } h3 { margin:18px 0 8px; font-size:14px; font-weight:600; }
-  .list { display:flex; flex-direction:column; gap:6px; max-height:56vh; overflow:auto; padding-right:4px; }
-  .item { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 10px; cursor:pointer; display:flex; gap:10px; align-items:center; }
-  .item:hover, .item.sel { border-color:var(--accent); }
-  .item img { width:36px; height:54px; object-fit:cover; border-radius:5px; background:#2A1F18; }
-  .stream { white-space:pre-line; font-size:12px; }
-  details { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin:0 28px 0; }
-  details input { width:100%; margin:4px 0 8px; }
-  #log { font:12px Consolas,monospace; color:var(--muted); white-space:pre-wrap; padding:0 28px 20px; }
-  .resume { color:var(--accent); font-size:12px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><b>Ember</b><span class="tag">PC test build 2</span></header>
+<canvas id="sky"></canvas>
+<div id="glow"></div>
 
-<details id="settings">
-  <summary>Settings</summary>
-  <label class="muted">lucapi (ember-feed)</label>
-  <input id="feed" placeholder="http://192.168.4.141:8090">
-  <label class="muted">Your AIOStreams manifest link (paste it from your AIOStreams config page)</label>
-  <input id="aio" placeholder="https://.../manifest.json">
-  <label class="row muted"><input type="checkbox" id="passthrough" style="width:auto"> Send Dolby/DTS untouched to a receiver or soundbar (HDMI only; leave off for PC speakers)</label>
-  <div class="row"><button id="save">Save</button><span id="saved" class="muted"></span></div>
-</details>
+<nav id="side">
+  <div class="logo"><span class="flame"></span>Ember</div>
+  <button data-page="search" class="nav"><i>⌕</i>Search</button>
+  <button data-page="home" class="nav on"><i>⌂</i>Home</button>
+  <button data-page="films" class="nav"><i>▣</i>Films</button>
+  <button data-page="series" class="nav"><i>▤</i>Series</button>
+  <button data-page="library" class="nav"><i>◔</i>Library</button>
+  <div class="grow"></div>
+  <button data-page="settings" class="nav"><i>⚙</i>Settings</button>
+</nav>
 
-<main>
-  <section>
-    <div class="row"><input id="q" placeholder="Search films and series" style="flex:1"><button id="go" class="primary">Search</button></div>
-    <h3>Results</h3>
-    <div id="results" class="list"><span class="muted">Search for something you're part-way through to test resuming.</span></div>
-    <div id="episodes"></div>
-  </section>
-  <section>
-    <h3 id="streamsTitle">Streams</h3>
-    <div id="resume" class="resume"></div>
-    <div class="row" style="margin:6px 0 10px">
-      <span class="muted">Play:</span>
-      <label class="row"><input type="radio" name="mode" value="window" checked style="width:auto"> inside the Ember window</label>
-      <label class="row"><input type="radio" name="mode" value="full" style="width:auto"> full screen</label>
-      <button id="stop">Stop</button>
-      <button id="plog">Player log</button>
-    </div>
-    <div id="streams" class="list"></div>
-  </section>
-</main>
-<div id="log"></div>
+<main id="view"></main>
 
-<script>
-const $ = id => document.getElementById(id);
-const store = { get:k => { try { return localStorage.getItem(k) || ""; } catch(e) { return ""; } },
-                set:(k,v) => { try { localStorage.setItem(k,v); } catch(e) {} } };
-const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
-let current = null; // {imdb, type, season, episode, title, name}
-
-$("feed").value = store.get("feed") || "http://192.168.4.141:8090";
-$("aio").value = store.get("aio");
-$("passthrough").checked = store.get("passthrough") === "1";
-if (!$("aio").value) $("settings").open = true;
-$("save").onclick = () => { store.set("feed", $("feed").value.trim().replace(/\/+$/,"")); store.set("aio", $("aio").value.trim());
-  store.set("passthrough", $("passthrough").checked ? "1" : "0"); $("saved").textContent = "Saved"; };
-const log = m => { $("log").textContent = new Date().toLocaleTimeString() + "  " + m + "\n" + $("log").textContent.slice(0, 3000); };
-const feed = () => (store.get("feed") || "http://192.168.4.141:8090");
-const aioBase = () => store.get("aio").replace(/\/manifest\.json.*$/,"");
-
-async function getJson(url) { const r = await fetch(url); if (!r.ok) throw new Error("HTTP " + r.status + " " + url); return r.json(); }
-
-async function search() {
-  const q = $("q").value.trim(); if (q.length < 2) return;
-  $("results").innerHTML = '<span class="muted">Searching…</span>'; $("episodes").innerHTML = "";
-  const enc = encodeURIComponent(q);
-  const [s, m] = await Promise.all(["series","movie"].map(t =>
-    getJson(`https://v3-cinemeta.strem.io/catalog/${t}/top/search=${enc}.json`).then(j => j.metas || []).catch(() => [])));
-  $("results").innerHTML = "";
-  [...s.slice(0,8).map(x => ({...x, type:"series"})), ...m.slice(0,8).map(x => ({...x, type:"movie"}))].forEach(x => {
-    const d = document.createElement("div"); d.className = "item";
-    d.innerHTML = `<img src="${x.poster || ""}" alt=""><div><div>${x.name}</div><div class="muted">${x.type === "series" ? "Series" : "Film"} · ${x.releaseInfo || ""}</div></div>`;
-    d.onclick = () => { document.querySelectorAll("#results .item").forEach(e => e.classList.remove("sel")); d.classList.add("sel"); pick(x); };
-    $("results").appendChild(d);
-  });
-  if (!s.length && !m.length) $("results").innerHTML = '<span class="muted">Nothing found.</span>';
-}
-
-async function pick(x) {
-  $("streams").innerHTML = ""; $("resume").textContent = "";
-  if (x.type === "movie") { current = { imdb:x.id, type:"movie", name:x.name, title:"" }; return loadStreams(); }
-  $("episodes").innerHTML = '<h3>Episodes</h3><div class="muted">Loading…</div>';
-  let saved = {};
-  try { (await getJson(`${feed()}/progress/${x.id}`)).positions.forEach(p => saved[p.season+":"+p.episode] = p); } catch(e) { log("Pi: " + e.message); }
-  const meta = (await getJson(`https://v3-cinemeta.strem.io/meta/series/${x.id}.json`)).meta;
-  const eps = (meta.videos || []).filter(v => v.season > 0).sort((a,b) => a.season - b.season || a.episode - b.episode);
-  const box = document.createElement("div"); box.className = "list";
-  eps.forEach(v => {
-    const p = saved[v.season+":"+v.episode];
-    const d = document.createElement("div"); d.className = "item";
-    const mark = p ? (p.finished ? " ✓" : ` · ${Math.round(p.percent)}%`) : "";
-    d.innerHTML = `<div>S${v.season} E${v.episode} · ${v.name || v.title || ""}<span class="muted">${mark}</span></div>`;
-    d.onclick = () => { box.querySelectorAll(".item").forEach(e => e.classList.remove("sel")); d.classList.add("sel");
-      current = { imdb:x.id, type:"series", season:v.season, episode:v.episode, name:x.name, title:v.name || v.title || "" }; loadStreams(); };
-    box.appendChild(d);
-  });
-  $("episodes").innerHTML = "<h3>Episodes</h3>"; $("episodes").appendChild(box);
-}
-
-async function resumeAt() {
-  try {
-    const r = await getJson(`${feed()}/progress/${current.imdb}`);
-    const p = r.positions.find(p => current.type === "movie" ? p.season == null : (p.season == current.season && p.episode == current.episode));
-    if (p && !p.finished && p.position > 5) return p;
-  } catch(e) { log("Pi: " + e.message); }
-  return null;
-}
-
-async function loadStreams() {
-  if (!aioBase()) { $("settings").open = true; return log("Paste your AIOStreams manifest link in Settings first."); }
-  const id = current.type === "series" ? `${current.imdb}:${current.season}:${current.episode}` : current.imdb;
-  $("streamsTitle").textContent = "Streams · " + current.name + (current.type === "series" ? ` S${current.season} E${current.episode}` : "");
-  $("streams").innerHTML = '<span class="muted">Asking AIOStreams…</span>';
-  const p = await resumeAt();
-  current.start = p ? p.position : 0;
-  $("resume").textContent = p ? `Resumes at ${fmt(p.position)} (from ${p.device}, ${p.ago} ago)` : "";
-  let streams = [];
-  try { streams = (await getJson(`${aioBase()}/stream/${current.type}/${id}.json`)).streams || []; }
-  catch(e) { $("streams").innerHTML = ""; return log("AIOStreams: " + e.message); }
-  $("streams").innerHTML = streams.length ? "" : '<span class="muted">No streams.</span>';
-  streams.filter(s => s.url).forEach(s => {
-    const d = document.createElement("div"); d.className = "item stream";
-    d.textContent = (s.name || "") + "\n" + (s.title || s.description || "");
-    d.onclick = () => play(s.url);
-    $("streams").appendChild(d);
-  });
-}
-
-async function play(url) {
-  if (!invoke) return log("Not running inside the Ember app.");
-  const embed = document.querySelector('input[name=mode]:checked').value === "window";
-  const opts = [`ember-feed=${feed()}`, `ember-imdb=${current.imdb}`, `ember-type=${current.type}`,
-    `ember-season=${current.season || ""}`, `ember-episode=${current.episode || ""}`, `ember-device=Ember PC`]
-    .join(",");
-  try {
-    await invoke("play", { url, start: current.start || 0, embed, passthrough: store.get("passthrough") === "1", opts });
-    log(`Playing ${current.name}${current.start ? " from " + fmt(current.start) : ""} (${embed ? "inside the window" : "full screen"}). In the player: move the mouse for controls; Space pauses, I shows stream info, # audio, J subtitles, Esc goes back to Ember.`);
-  } catch(e) { log("Couldn't start mpv: " + e); }
-}
-$("stop").onclick = () => invoke && invoke("stop");
-$("plog").onclick = async () => { if (invoke) log("Player log:\n" + (await invoke("player_log") || "(nothing about Ember yet)")); };
-const fmt = s => { s = Math.round(s); const h = Math.floor(s/3600), m = Math.floor(s/60)%60, x = s%60;
-  return (h ? h + ":" + String(m).padStart(2,"0") : m) + ":" + String(x).padStart(2,"0"); };
-$("go").onclick = search; $("q").addEventListener("keydown", e => { if (e.key === "Enter") search(); });
-</script>
+<div id="toast"></div>
+<script src="app.js"></script>
 </body>
 </html>
