@@ -58,6 +58,8 @@ final class ScreensaverView extends FrameLayout {
     private final LinearLayout overlay;
     private final TextView clock;
     private final TextView date;
+    private final TextView weatherLine;
+    private JSONObject weather;
     private final LinearLayout eventsBox;
     private final LinearLayout servicesBox;
     private final TextView health;
@@ -161,6 +163,9 @@ final class ScreensaverView extends FrameLayout {
         clockBox.addView(clock);
         date = text(16, SOFT, "sans-serif");
         clockBox.addView(date);
+        weatherLine = text(14, SOFT, "sans-serif");
+        weatherLine.setPadding(0, dp(4), 0, 0);
+        clockBox.addView(weatherLine);
 
         // Calendar, top-left.
         eventsBox = new LinearLayout(ctx);
@@ -267,6 +272,8 @@ final class ScreensaverView extends FrameLayout {
 
     private void apply(JSONObject o) {
         message.setText("");
+        weather = o.optJSONObject("weather");
+        weatherLine.setText(Weather.full(weather, getContext()));
         renderEvents(o.optJSONArray("events"));
         renderServices(o.optJSONArray("services"), o.optJSONObject("health"));
 
@@ -429,6 +436,7 @@ final class ScreensaverView extends FrameLayout {
         Calendar c = Calendar.getInstance();
         clock.setText(new SimpleDateFormat("HH:mm", Locale.UK).format(c.getTime()));
         date.setText(DateText.of(c));
+        if (weatherLine.length() == 0) weatherLine.setText(Weather.full(weather, getContext()));
     }
 
     private static int parseColour(String s, int fallback) {

@@ -457,6 +457,7 @@ public class HomeActivity extends Activity {
     private void render() {
         String keep = focusKey;
         rowsBox.removeAllViews();
+        progressBars.clear();
         for (int i = 0; i < rows.size(); i++) addMetaRow(i, rows.get(i));
 
         if (rows.isEmpty()) {
@@ -483,6 +484,8 @@ public class HomeActivity extends Activity {
 
     private void addMetaRow(int rowIndex, AddonClient.Row row) {
         LinearLayout strip = addRow(row.title);
+        String rt = row.title.toLowerCase(Locale.UK);
+        final boolean continueRow = rt.contains("pick up") || rt.contains("left off") || rt.contains("continue");
         boolean wide = row.wide();
         int w = wide ? dp(192) : dp(100);
         int h = wide ? dp(108) : dp(150);
@@ -511,10 +514,29 @@ public class HomeActivity extends Activity {
                 card.addView(label, lp);
             }
 
+            // How far through you are, from Trakt (hidden until there's something to show).
+            FrameLayout track = new FrameLayout(this);
+            GradientDrawable tb = new GradientDrawable();
+            tb.setColor(0x47FFFFFF);
+            tb.setCornerRadius(dp(2));
+            track.setBackground(tb);
+            View fill = new View(this);
+            GradientDrawable fb = new GradientDrawable();
+            fb.setColor(apAccent);
+            fb.setCornerRadius(dp(2));
+            fill.setBackground(fb);
+            track.addView(fill, new FrameLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3));
+            tl.gravity = Gravity.BOTTOM;
+            tl.leftMargin = tl.rightMargin = tl.bottomMargin = dp(6);
+            track.setVisibility(View.GONE);
+            card.addView(track, tl);
+            progressBars.add(new Object[]{m.id, track, fill, w - dp(12)});
+
             card.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    openTitle(m);
+                    openTitle(m, continueRow);
                 }
             });
             card.setOnLongClickListener(new View.OnLongClickListener() {
@@ -538,6 +560,7 @@ public class HomeActivity extends Activity {
         }
         final HorizontalScrollView hs = (HorizontalScrollView) strip.getParent();
         lazyLoad(hs, strip);
+        updateProgressBars();
         hs.setOnScrollChangeListener(new View.OnScrollChangeListener() {
             @Override
             public void onScrollChange(View v, int x, int y, int ox, int oy) {
@@ -603,6 +626,7 @@ public class HomeActivity extends Activity {
         @Override
         public void run() {
             refreshStatus();
+            refreshProgress();
             main.postDelayed(this, STATUS_EVERY_MS);
         }
     };
@@ -656,6 +680,7 @@ public class HomeActivity extends Activity {
 
     private void renderStatus(org.json.JSONObject o) {
         lastStatus = o;
+        updateClock(); // picks up the weather
         // Calendar ticker: "Next shift: ..." then your other upcoming events, rolling.
         tickerItems.clear();
         org.json.JSONArray t = o.optJSONArray("ticker");
@@ -1152,8 +1177,10 @@ public class HomeActivity extends Activity {
     // ---------------------------------------------------------------- hero
 
     private void showMetaHero(Meta m) {
+        heroMeta = m;
         heroTitle.setText(m.name);
-        heroSub.setText(m.subtitle());
+        org.json.JSONObject pr = progress.get(m.id);
+        heroSub.setText(pr != null ? progressLine(pr) : m.subtitle());
         heroDesc.setText(m.description);
         pendingBackdrop = m.background;
         pendingPoster = m.poster;
@@ -1193,13 +1220,67 @@ public class HomeActivity extends Activity {
         }
         Calendar c = Calendar.getInstance();
         clock.setText(new SimpleDateFormat("HH:mm", Locale.UK).format(c.getTime()));
-        greeting.setText(DateText.of(c));
+        android.text.SpannableStringBuilder d = new android.text.SpannableStringBuilder(DateText.of(c));
+        String w = Weather.brief(lastStatus == null ? null : lastStatus.optJSONObject("weather"));
+        if (!w.isEmpty()) d.append("  \u00b7  ").append(w);
+        greeting.setText(d);
     }
 
     // ---------------------------------------------------------------- actions
 
     private void openTitle(Meta m) {
+        openTitle(m, false);
+    }
+
+    /**
+     * Opens the title in Stremio. If you were part-way through it (Trakt), Stremio opens on that episode and a note saying
+     * where you were shows over Stremio once it starts playing. From the continue row, a show you finished an episode of
+     * opens on the next episode.
+     */
+    private void openTitle(final Meta m, boolean continueRow) {
+        org.json.JSONObject pr = progress.get(m.id);
+        boolean series = "series".equals(m.type);
+        if (pr != null) {
+            String where = clockTime(positionMins(pr));
+            String note = where.isEmpty() ? Math.round(pr.optDouble("progress")) + "% through" : "You were at " + where;
+            if (series && pr.optInt("season", 0) > 0) note += "  \u00b7  " + epCode(pr);
+            prefs.setResumeNote(note, System.currentTimeMillis() + 15 * 60_000L);
+            if (series && pr.optInt("season", 0) > 0) {
+                openUri(m, pr.optInt("season"), pr.optInt("episode"));
+                return;
+            }
+        } else if (continueRow && series && prefs.feedConfigured() && m.id.startsWith("tt")) {
+            final String url = prefs.feedUrl() + "/next/" + m.id;
+            worker.execute(new Runnable() {
+                @Override
+                public void run() {
+                    int s = 0, e = 0;
+                    try {
+                        org.json.JSONObject n = new org.json.JSONObject(AddonClient.get(url));
+                        s = n.optInt("season", 0);
+                        e = n.optInt("episode", 0);
+                    } catch (Exception ignored) {
+                        // fall back to the show's page
+                    }
+                    final int fs = s, fe = e;
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            openUri(m, fs, fe);
+                        }
+                    });
+                }
+            });
+            return;
+        }
+        openUri(m, 0, 0);
+    }
+
+    private void openUri(Meta m, int season, int episode) {
         String uri = prefs.openUri().replace("{type}", m.type).replace("{id}", m.id);
+        if (season > 0 && episode > 0 && uri.startsWith("stremio:///detail/")) {
+            uri += "/" + m.id + ":" + season + ":" + episode; // straight to that episode's streams
+        }
         Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
@@ -1207,6 +1288,107 @@ public class HomeActivity extends Activity {
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, "Nothing can open " + uri + ". Is Stremio installed?", Toast.LENGTH_LONG).show();
         }
+    }
+
+    // ---------------------------------------------------------------- Trakt progress
+
+    private final java.util.Map<String, org.json.JSONObject> progress = new java.util.HashMap<>();
+    private final List<Object[]> progressBars = new ArrayList<>(); // {imdb id, track, fill, track width px}
+    private Meta heroMeta;
+
+    private void refreshProgress() {
+        if (!prefs.feedConfigured()) return;
+        final String url = prefs.feedUrl() + "/progress";
+        worker.execute(new Runnable() {
+            @Override
+            public void run() {
+                org.json.JSONObject items;
+                try {
+                    items = new org.json.JSONObject(AddonClient.get(url)).optJSONObject("items");
+                } catch (Exception e) {
+                    return; // keep what we had
+                }
+                if (items == null) return;
+                final java.util.Map<String, org.json.JSONObject> got = new java.util.HashMap<>();
+                java.util.Iterator<String> keys = items.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    org.json.JSONObject v = items.optJSONObject(k);
+                    if (v != null) got.put(k, v);
+                }
+                main.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        progress.clear();
+                        progress.putAll(got);
+                        updateProgressBars();
+                        if (heroMeta != null && !onApps) {
+                            org.json.JSONObject pr = progress.get(heroMeta.id);
+                            heroSub.setText(pr != null ? progressLine(pr) : heroMeta.subtitle());
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private void updateProgressBars() {
+        for (Object[] b : progressBars) {
+            org.json.JSONObject pr = progress.get((String) b[0]);
+            View track = (View) b[1];
+            View fill = (View) b[2];
+            if (pr == null) {
+                if (track.getVisibility() != View.GONE) track.setVisibility(View.GONE);
+                continue;
+            }
+            int width = (int) ((Integer) b[3] * Math.max(0.03, Math.min(1.0, pr.optDouble("progress") / 100.0)));
+            ViewGroup.LayoutParams lp = fill.getLayoutParams();
+            if (lp.width != width) {
+                lp.width = width;
+                fill.setLayoutParams(lp);
+            }
+            if (track.getVisibility() != View.VISIBLE) track.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /** "S2 · E6 · Attila  ·  10:50 in, 42 min left  ·  2h ago" */
+    private static String progressLine(org.json.JSONObject pr) {
+        StringBuilder sb = new StringBuilder();
+        if ("series".equals(pr.optString("type")) && pr.optInt("season", 0) > 0) {
+            sb.append(epCode(pr));
+            String t = pr.optString("episodeTitle", "");
+            if (!t.isEmpty()) sb.append(" \u00b7 ").append(t);
+            sb.append("  \u00b7  ");
+        }
+        double at = positionMins(pr);
+        if (at > 0) {
+            int left = (int) Math.round(pr.optDouble("runtime", 0) - at);
+            sb.append(clockTime(at)).append(" in, ").append(Math.max(1, left)).append(" min left");
+        } else {
+            sb.append(Math.round(pr.optDouble("progress"))).append("% through");
+        }
+        String ago = pr.optString("ago", "");
+        if (!ago.isEmpty()) sb.append("  \u00b7  ").append(ago).append(" ago");
+        return sb.toString();
+    }
+
+    private static String epCode(org.json.JSONObject pr) {
+        return "S" + pr.optInt("season") + " \u00b7 E" + pr.optInt("episode");
+    }
+
+    /** Minutes in, from the progress percentage and the runtime (0 if the runtime isn't known). */
+    private static double positionMins(org.json.JSONObject pr) {
+        double rt = pr.optDouble("runtime", 0);
+        if (!(rt > 0)) return 0;
+        return rt * pr.optDouble("progress", 0) / 100.0;
+    }
+
+    /** 10.83 -> "10:50", 62.2 -> "1:02:10" */
+    private static String clockTime(double mins) {
+        if (!(mins > 0)) return "";
+        long secs = Math.round(mins * 60);
+        long h = secs / 3600, m = (secs / 60) % 60, s = secs % 60;
+        return h > 0 ? String.format(Locale.UK, "%d:%02d:%02d", h, m, s) : String.format(Locale.UK, "%d:%02d", m, s);
     }
 
     private void titleMenu(final Meta m) {

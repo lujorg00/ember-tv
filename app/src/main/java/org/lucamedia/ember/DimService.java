@@ -6,12 +6,15 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -21,32 +24,59 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * The dimmer: a see-through black layer over everything on screen (Stremio, YouTube, the screensaver),
- * switched by one remote button (the Netflix button, learnt in Ember settings). Presses cycle
- * Off -> Dim -> Heavy -> Off. At 11:30pm it goes to Dim by itself, at midnight to Heavy, and lifts
- * again at 8am unless you've changed it with the button since.
+ * Ember's layer over everything on screen (Stremio, YouTube, the screensaver):
+ *  - the dimmer: a see-through black layer, cycled Off -> Dim -> Heavy by one remote button (the Netflix button,
+ *    learnt in Ember settings). Automatic: Dim at 11:30pm, Heavy at midnight, lifted at 8am. Before an early shift
+ *    (starting before 10am) each step comes an hour earlier, with a note saying when the shift is.
+ *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
+ *    and "Winnie came in" / "Elvis went out" from the cat flap.
  */
 public class DimService extends AccessibilityService {
 
     static final int[] LEVELS = {0, 50, 80};       // percent of black over the picture
     static final String[] NAMES = {"Dim off", "Dim", "Heavy dim"};
-    private static final int EVENING_START = 23 * 60 + 30; // 11:30pm: Dim
-    private static final int MORNING_END = 8 * 60;         // midnight to 8am: Heavy, then lifts
+    private static final int DIM_AT = 23 * 60 + 30, HEAVY_AT = 24 * 60, LIFT_AT = 8 * 60;
+    private static final int EARLY_SHIFT_BEFORE = 10 * 60; // a shift before 10am counts as early
+    private static final int EARLY_BY = 60;                // and brings the dimming forward an hour
+    private static final long CAT_POLL_MS = 20_000, NIGHT_POLL_MS = 15 * 60_000;
+    private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 8_000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService net = Executors.newSingleThreadExecutor();
     private Prefs prefs;
     private WindowManager wm;
+    private PowerManager power;
+    private AudioManager audio;
     private FrameLayout layer;
-    private TextView label;
+    private TextView label, note;
     private int shownAlpha; // 0..255 currently on screen
     private ValueAnimator fade;
+    private long noteUntil;
+
+    // the next shift, from lucapi (start time in millis, 0 = none)
+    private volatile long shiftStart;
+    private volatile String shiftTitle = "";
+    private long nightFetchedAt;
+
+    private final Map<String, Boolean> catsHome = new HashMap<>();
+    private boolean catsKnown;
 
     private final Runnable clock = new Runnable() {
         @Override
         public void run() {
+            if (System.currentTimeMillis() - nightFetchedAt > NIGHT_POLL_MS) fetchNight();
             checkSchedule();
             main.postDelayed(this, 30_000);
         }
@@ -55,7 +85,9 @@ public class DimService extends AccessibilityService {
     private final BroadcastReceiver screenOn = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
-            checkSchedule(); // the TV may have slept through midnight or 8am
+            checkSchedule(); // the TV may have slept through a step
+            main.removeCallbacks(catPoll);
+            main.post(catPoll);
         }
     };
 
@@ -64,21 +96,30 @@ public class DimService extends AccessibilityService {
         super.onServiceConnected();
         prefs = new Prefs(this);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        power = (PowerManager) getSystemService(POWER_SERVICE);
+        audio = (AudioManager) getSystemService(AUDIO_SERVICE);
         registerReceiver(screenOn, new IntentFilter(Intent.ACTION_SCREEN_ON));
+        prefs.raw().registerOnSharedPreferenceChangeListener(resumeWatch);
         apply(prefs.dimLevel(), false);
         main.post(clock);
+        main.postDelayed(catPoll, 3000);
+        if (!prefs.resumeNote().isEmpty()) main.post(resumeCheck);
     }
 
     @Override
     public void onDestroy() {
         main.removeCallbacksAndMessages(null);
+        net.shutdownNow();
         try {
             unregisterReceiver(screenOn);
         } catch (Exception ignored) {
         }
+        if (prefs != null) prefs.raw().unregisterOnSharedPreferenceChangeListener(resumeWatch);
         removeLayer();
         super.onDestroy();
     }
+
+    // ---------------------------------------------------------------- the button
 
     @Override
     protected boolean onKeyEvent(KeyEvent e) {
@@ -101,28 +142,176 @@ public class DimService extends AccessibilityService {
         return true; // swallow it, so Netflix doesn't open
     }
 
-    /** 11:30pm: Dim (50%). Midnight: Heavy (80%). Each step happens once a night and never brightens what you've set;
-     *  the button changes it in between. At 8am an automatic dim lifts; one you set yourself stays. */
+    // ---------------------------------------------------------------- the schedule
+
+    /**
+     * Times are counted from noon, so one night runs noon -> noon: Dim, then Heavy, then lift at 8am. Each step happens
+     * once a night and never brightens what you've set; at 8am an automatic dim lifts, one you set yourself stays.
+     */
     private void checkSchedule() {
-        Calendar c = Calendar.getInstance();
-        int mins = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE);
-        String today = c.get(Calendar.YEAR) + "-" + c.get(Calendar.DAY_OF_YEAR);
-        if (mins >= EVENING_START) {
-            step("eve:" + today, 1);
-        } else if (mins < MORNING_END) {
-            step("night:" + today, 2);
+        Calendar now = Calendar.getInstance();
+        int mins = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+        int t = (mins - 12 * 60 + 1440) % 1440;           // minutes since noon
+        Calendar noon = (Calendar) now.clone();             // the noon this night started at
+        if (mins < 12 * 60) noon.add(Calendar.DAY_OF_YEAR, -1);
+        noon.set(Calendar.HOUR_OF_DAY, 12);
+        noon.set(Calendar.MINUTE, 0);
+        noon.set(Calendar.SECOND, 0);
+        noon.set(Calendar.MILLISECOND, 0);
+        String night = noon.get(Calendar.YEAR) + "-" + noon.get(Calendar.DAY_OF_YEAR);
+
+        boolean early = earlyShift(noon);
+        int shift = early ? EARLY_BY : 0;
+        int dimAt = DIM_AT - 12 * 60 - shift, heavyAt = HEAVY_AT - 12 * 60 - shift, liftAt = LIFT_AT + 12 * 60;
+
+        if (t >= heavyAt && t < liftAt) {
+            if (step("heavy:" + night, 2) && early) shiftNote();
+        } else if (t >= dimAt && t < liftAt) {
+            if (step("dim:" + night, 1) && early) shiftNote();
         } else if (prefs.dimAuto()) {
             prefs.setDimAuto(false);
             apply(0, false);
         }
     }
 
-    private void step(String id, int level) {
-        if (id.equals(prefs.dimAutoNight())) return; // already done
+    /** True if the next shift starts between midnight and 10am after this night's noon. */
+    private boolean earlyShift(Calendar noon) {
+        if (shiftStart == 0) return false;
+        long midnight = noon.getTimeInMillis() + 12 * 3600_000L;
+        return shiftStart >= midnight && shiftStart < midnight + EARLY_SHIFT_BEFORE * 60_000L;
+    }
+
+    private boolean step(String id, int level) {
+        if (id.equals(prefs.dimAutoNight())) return false; // already done
         prefs.setDimAutoNight(id);
         prefs.setDimAuto(true);
         if (prefs.dimLevel() < level) apply(level, true);
+        return true;
     }
+
+    private void shiftNote() {
+        long left = shiftStart - System.currentTimeMillis();
+        if (left <= 0) return;
+        String at = new SimpleDateFormat("HH:mm", Locale.UK).format(shiftStart);
+        long h = left / 3600_000L, m = (left / 60_000L) % 60;
+        showNote("Early shift: " + shiftTitle + " at " + at + "  ·  " + h + "h " + m + "m to go", 15_000);
+    }
+
+    private void fetchNight() {
+        nightFetchedAt = System.currentTimeMillis();
+        final String url = feed("/night");
+        if (url == null) return;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject s = new JSONObject(AddonClient.get(url)).optJSONObject("shift");
+                    if (s == null) {
+                        shiftStart = 0;
+                        return;
+                    }
+                    shiftTitle = s.optString("title", "shift");
+                    shiftStart = parseIso(s.optString("start"));
+                } catch (Exception e) {
+                    Log.w("EmberDim", "couldn't read the next shift: " + e);
+                }
+            }
+        });
+    }
+
+    private static long parseIso(String iso) throws java.text.ParseException {
+        // "2026-10-30T07:00:00+00:00" -> drop the colon in the offset for SimpleDateFormat
+        String s = iso.replaceAll("\\.\\d+", "").replaceAll("Z$", "+0000").replaceAll("([+-]\\d\\d):(\\d\\d)$", "$1$2");
+        return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.UK).parse(s).getTime();
+    }
+
+    // ---------------------------------------------------------------- "you were at 10:50"
+
+    /** Ember sets a resume note when it opens something you were part-way through; it shows once playback starts. */
+    private final SharedPreferences.OnSharedPreferenceChangeListener resumeWatch =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(SharedPreferences sp, String key) {
+                    if ("resume_note".equals(key) && !prefs.resumeNote().isEmpty()) {
+                        main.removeCallbacks(resumeCheck);
+                        main.postDelayed(resumeCheck, 2000);
+                    }
+                }
+            };
+
+    private final Runnable resumeCheck = new Runnable() {
+        @Override
+        public void run() {
+            String text = prefs.resumeNote();
+            if (text.isEmpty()) return;
+            if (System.currentTimeMillis() > prefs.resumeNoteUntil()) {
+                prefs.setResumeNote("", 0); // you didn't play it in time
+                return;
+            }
+            if (audio.isMusicActive()) {   // something has started playing
+                prefs.setResumeNote("", 0);
+                showNote(text, RESUME_NOTE_MS);
+                return;
+            }
+            main.postDelayed(this, 1000);
+        }
+    };
+
+    // ---------------------------------------------------------------- the cat flap
+
+    private final Runnable catPoll = new Runnable() {
+        @Override
+        public void run() {
+            main.removeCallbacks(this);
+            if (power.isInteractive()) {
+                final String url = feed("/cats");
+                if (url != null) {
+                    net.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                final JSONArray cats = new JSONObject(AddonClient.get(url)).optJSONArray("cats");
+                                main.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        catsChanged(cats);
+                                    }
+                                });
+                            } catch (Exception ignored) {
+                                // lucapi blipped; try again next time
+                            }
+                        }
+                    });
+                }
+                main.postDelayed(this, CAT_POLL_MS);
+            }
+            // While the screen is off we stop; turning it on starts us again.
+        }
+    };
+
+    private void catsChanged(JSONArray cats) {
+        if (cats == null) return;
+        StringBuilder msg = new StringBuilder();
+        for (int i = 0; i < cats.length(); i++) {
+            JSONObject c = cats.optJSONObject(i);
+            if (c == null || "Unknown".equals(c.optString("detail"))) continue;
+            String name = c.optString("name");
+            boolean home = c.optBoolean("home");
+            Boolean before = catsHome.put(name, home);
+            if (catsKnown && before != null && before != home) {
+                if (msg.length() > 0) msg.append("  ·  ");
+                msg.append(name).append(home ? " came in" : " went out");
+            }
+        }
+        catsKnown = true;
+        if (msg.length() > 0) showNote(msg.toString(), CAT_NOTE_MS);
+    }
+
+    private String feed(String path) {
+        return prefs.feedConfigured() ? prefs.feedUrl() + path : null;
+    }
+
+    // ---------------------------------------------------------------- the layer
 
     private void apply(int level, boolean announce) {
         prefs.setDimLevel(level);
@@ -141,18 +330,23 @@ public class DimService extends AccessibilityService {
         });
         fade.start();
         if (announce) say(level == 0 ? NAMES[0] : NAMES[level] + "  " + LEVELS[level] + "%");
-        main.removeCallbacks(dropIfOff);
-        main.postDelayed(dropIfOff, 1800);
+        scheduleDrop(1800);
     }
 
-    /** When the dimmer is off, take the layer away completely so it costs nothing. */
-    private final Runnable dropIfOff = new Runnable() {
+    /** When nothing is dimmed or showing, take the layer away completely so it costs nothing. */
+    private final Runnable dropIfIdle = new Runnable() {
         @Override
         public void run() {
-            if (prefs.dimLevel() == 0) removeLayer();
+            if (prefs.dimLevel() == 0 && System.currentTimeMillis() >= noteUntil) removeLayer();
         }
     };
 
+    private void scheduleDrop(long ms) {
+        main.removeCallbacks(dropIfIdle);
+        main.postDelayed(dropIfIdle, Math.max(ms, noteUntil - System.currentTimeMillis() + 800));
+    }
+
+    /** The dimmer's own short message, bottom centre. */
     private void say(String s) {
         ensureLayer();
         if (label == null) return;
@@ -160,8 +354,39 @@ public class DimService extends AccessibilityService {
         label.animate().cancel();
         label.setAlpha(1f);
         label.animate().alpha(0f).setStartDelay(1100).setDuration(500).start();
-        main.removeCallbacks(dropIfOff);
-        main.postDelayed(dropIfOff, 1800);
+        scheduleDrop(1800);
+    }
+
+    /** A note, top-right, for a while. */
+    private void showNote(String s, final long ms) {
+        ensureLayer();
+        if (note == null) return;
+        note.setText(s);
+        note.animate().cancel();
+        note.setAlpha(0f);
+        final TextView n = note;
+        n.animate().alpha(1f).setStartDelay(0).setDuration(300).withEndAction(new Runnable() {
+            @Override
+            public void run() {
+                n.animate().alpha(0f).setStartDelay(ms).setDuration(600).start();
+            }
+        }).start();
+        noteUntil = System.currentTimeMillis() + ms + 700;
+        scheduleDrop(ms + 900);
+    }
+
+    private TextView pill(float d) {
+        TextView t = new TextView(this);
+        t.setTextColor(0xFFF3E7D8);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        t.setPadding(Math.round(18 * d), Math.round(8 * d), Math.round(18 * d), Math.round(8 * d));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xE01A1410);
+        bg.setCornerRadius(99 * d);
+        t.setBackground(bg);
+        t.setAlpha(0f);
+        return t;
     }
 
     private void ensureLayer() {
@@ -169,20 +394,20 @@ public class DimService extends AccessibilityService {
         layer = new FrameLayout(this);
         layer.setBackgroundColor(Color.argb(shownAlpha, 0, 0, 0));
         float d = getResources().getDisplayMetrics().density;
-        label = new TextView(this);
-        label.setTextColor(0xFFF3E7D8);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        label.setPadding(Math.round(18 * d), Math.round(8 * d), Math.round(18 * d), Math.round(8 * d));
-        GradientDrawable pill = new GradientDrawable();
-        pill.setColor(0xCC1A1410);
-        pill.setCornerRadius(99 * d);
-        label.setBackground(pill);
-        label.setAlpha(0f);
+
+        label = pill(d);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         lp.bottomMargin = Math.round(48 * d);
         layer.addView(label, lp);
+
+        note = pill(d);
+        FrameLayout.LayoutParams np = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        np.gravity = Gravity.TOP | Gravity.END;
+        np.topMargin = Math.round(32 * d);
+        np.rightMargin = Math.round(40 * d);
+        layer.addView(note, np);
+
         WindowManager.LayoutParams wp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -192,9 +417,10 @@ public class DimService extends AccessibilityService {
         try {
             wm.addView(layer, wp);
         } catch (Exception e) {
-            Log.w("EmberDim", "couldn't add the dim layer: " + e);
+            Log.w("EmberDim", "couldn't add the layer: " + e);
             layer = null;
             label = null;
+            note = null;
         }
     }
 
@@ -206,12 +432,13 @@ public class DimService extends AccessibilityService {
         }
         layer = null;
         label = null;
+        note = null;
         shownAlpha = 0;
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Only here for the remote button and the overlay.
+        // Only here for the remote button and the layer.
     }
 
     @Override

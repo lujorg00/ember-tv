@@ -5,6 +5,11 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /screensaver  -> calendar events, Pi service status, Pi health, photo list
   GET /status       -> cards for the projects strip on Ember's Apps page
   GET /photo/<name> -> a photo from your photos folder
+  GET /cats         -> just the cats, in or out (polled often, for the pop-ups)
+  GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
+  GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
+  GET /progress     -> where you stopped part-way through films and episodes (Trakt)
+  GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -394,7 +399,8 @@ def status_cards():
             cards += extra.get("cards", [])
         except Exception:
             pass
-    return {"ticker": ticker, "lucapi": {"ok": not down, "text": text}, "cats": cats, "cards": cards[:5]}
+    return {"ticker": ticker, "lucapi": {"ok": not down, "text": text}, "cats": cats, "cards": cards[:5],
+            "weather": weather()}
 
 
 def screensaver(base_url):
@@ -405,7 +411,156 @@ def screensaver(base_url):
         "health": pi_health(),
         "photos": photos(base_url),
         "secondsPerPhoto": CFG["photos"]["seconds_per_photo"],
+        "weather": weather(),
     }
+
+# ------------------------------------------------------------------ night: the next shift (for the dimmer)
+
+
+def night():
+    """The next shift that starts within 36 hours, so the TV can dim earlier before an early start."""
+    now = datetime.now(TZ)
+    for e in cached("events", 300, _fetch_events):
+        if not e.get("shift") or e.get("allDay"):
+            continue
+        s = datetime.fromisoformat(e["start"])
+        if now < s <= now + timedelta(hours=36):
+            return {"shift": {"title": e["title"], "start": s.isoformat()}}
+    return {"shift": None}
+
+# ------------------------------------------------------------------ weather (Open-Meteo, no key needed)
+
+_WMO = {0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Cloudy", 45: "Fog", 48: "Fog",
+        51: "Drizzle", 53: "Drizzle", 55: "Drizzle", 56: "Freezing drizzle", 57: "Freezing drizzle",
+        61: "Light rain", 63: "Rain", 65: "Heavy rain", 66: "Freezing rain", 67: "Freezing rain",
+        71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+        80: "Showers", 81: "Showers", 82: "Heavy showers", 85: "Snow showers", 86: "Snow showers",
+        95: "Thunderstorms", 96: "Thunderstorms", 99: "Thunderstorms"}
+
+
+def _weather():
+    w = CFG.get("weather", {})
+    lat, lon = w.get("lat", 53.48), w.get("lon", -2.29)
+    url = ("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+           "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,"
+           "sunrise,sunset,precipitation_probability_max&timezone=%s&forecast_days=1"
+           % (lat, lon, urllib.parse.quote(CFG["timezone"])))
+    d = json.loads(http_get(url, timeout=10))
+    cur, day = d["current"], d["daily"]
+    code = int(cur.get("weather_code", 0))
+    return {"tempC": round(cur["temperature_2m"]), "code": code, "text": _WMO.get(code, ""),
+            "isDay": bool(cur.get("is_day", 1)),
+            "highC": round(day["temperature_2m_max"][0]), "lowC": round(day["temperature_2m_min"][0]),
+            "rainChance": day.get("precipitation_probability_max", [None])[0],
+            "sunrise": day["sunrise"][0][-5:], "sunset": day["sunset"][0][-5:]}
+
+
+def weather():
+    try:
+        return cached("weather", 900, _weather)
+    except Exception:
+        return {}
+
+# ------------------------------------------------------------------ Trakt: where you are in things
+# Reuses your addon's Trakt login (it refreshes its own token; we re-read it each time) unless
+# config.json has "trakt": {"client_id": ..., "access_token": ...}.
+
+_trakt_files = {}
+
+
+def _scan_addon_for_trakt():
+    root = Path(CFG.get("trakt", {}).get("addon_dir", str(Path.home() / "lucaddon")))
+    client, token_file = None, None
+    for env in [root / ".env"] + list(root.glob("*/.env")):
+        if env.exists():
+            for line in env.read_text(errors="ignore").splitlines():
+                k, _, v = line.partition("=")
+                k = k.strip().upper()
+                if "TRAKT" in k and "CLIENT_ID" in k and v.strip():
+                    client = v.strip().strip("'\"")
+                if "TRAKT" in k and "ACCESS_TOKEN" in k and v.strip():
+                    _trakt_files["env_token"] = v.strip().strip("'\"")
+    skip = {"node_modules", ".git", "venv", ".venv", "__pycache__"}
+    for p in sorted(root.rglob("*.json"), key=lambda x: len(x.parts)):
+        if any(part in skip for part in p.parts) or p.stat().st_size > 200_000:
+            continue
+        try:
+            j = json.loads(p.read_text(errors="ignore"))
+        except Exception:
+            continue
+        if isinstance(j, dict) and "access_token" in j and ("trakt" in str(p).lower() or "refresh_token" in j):
+            token_file = p
+            break
+    _trakt_files.update(client=client, token_file=token_file)
+
+
+def trakt_creds():
+    t = CFG.get("trakt", {})
+    if t.get("client_id") and t.get("access_token"):
+        return t["client_id"], t["access_token"]
+    if "client" not in _trakt_files:
+        _scan_addon_for_trakt()
+    token = None
+    f = _trakt_files.get("token_file")
+    if f and Path(f).exists():
+        token = json.loads(Path(f).read_text()).get("access_token")
+    token = token or _trakt_files.get("env_token")
+    return _trakt_files.get("client") or t.get("client_id"), token
+
+
+def _trakt(path):
+    cid, tok = trakt_creds()
+    if not cid or not tok:
+        raise RuntimeError("no Trakt login found (see trakt in config.json)")
+    req = urllib.request.Request("https://api.trakt.tv" + path, headers={
+        "Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": cid,
+        "Authorization": "Bearer " + tok, "User-Agent": "ember-feed/1.0"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+
+def _progress():
+    """Films and episodes you stopped part-way through, newest first, keyed by IMDb id."""
+    out = {}
+    for it in _trakt("/sync/playback?extended=full&limit=60"):
+        pct = float(it.get("progress") or 0)
+        if pct <= 1 or pct >= 95:
+            continue
+        if it.get("type") == "episode":
+            show, ep = it.get("show", {}), it.get("episode", {})
+            imdb = (show.get("ids") or {}).get("imdb")
+            info = {"type": "series", "season": ep.get("season"), "episode": ep.get("number"),
+                    "episodeTitle": ep.get("title") or "", "runtime": ep.get("runtime") or show.get("runtime")}
+        else:
+            mv = it.get("movie", {})
+            imdb = (mv.get("ids") or {}).get("imdb")
+            info = {"type": "movie", "runtime": mv.get("runtime")}
+        if not imdb or imdb in out:
+            continue  # the list is newest first: keep the latest
+        info.update(progress=round(pct, 1), pausedAt=it.get("paused_at"), ago=_ago(it.get("paused_at")))
+        out[imdb] = info
+    return out
+
+
+def progress():
+    try:
+        return {"items": cached("progress", 120, _progress)}
+    except Exception as e:
+        return {"items": {}, "error": str(e)}
+
+
+def next_episode(imdb):
+    """The next episode of a show you're watching (when you're not part-way through one)."""
+    def _n():
+        p = _trakt(f"/shows/{imdb}/progress/watched?hidden=false&specials=false")
+        ne = p.get("next_episode") or {}
+        if not ne:
+            return {}
+        return {"season": ne.get("season"), "episode": ne.get("number"), "episodeTitle": ne.get("title") or ""}
+    try:
+        return cached("next:" + imdb, 600, _n)
+    except Exception as e:
+        return {"error": str(e)}
 
 # ------------------------------------------------------------------ HTTP
 
@@ -439,6 +594,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             elif path == "/status":
                 self._json(status_cards())
+            elif path == "/cats":
+                try:
+                    self._json({"cats": cached("cats", 15, _cats)})
+                except Exception:
+                    self._json({"cats": []})
+            elif path == "/night":
+                self._json(night())
+            elif path == "/weather":
+                self._json(weather())
+            elif path == "/progress":
+                self._json(progress())
+            elif path.startswith("/next/"):
+                imdb = path[len("/next/"):]
+                self._json(next_episode(imdb) if imdb.startswith("tt") and imdb[2:].isdigit() else {})
             elif path == "/screensaver":
                 self._json(screensaver(self._base()))
             elif path == "/addon" or path.startswith("/addon/"):

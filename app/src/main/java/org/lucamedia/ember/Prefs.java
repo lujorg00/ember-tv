@@ -110,5 +110,11 @@ final class Prefs {
     void setDimAuto(boolean b) { sp.edit().putBoolean("dim_auto", b).apply(); }
     String dimAutoNight() { return sp.getString("dim_auto_night", ""); }
     void setDimAutoNight(String n) { sp.edit().putString("dim_auto_night", n).apply(); }
+    // ---- "you were at 10:50": set by Ember when it opens something part-way through, shown once it plays
+    String resumeNote() { return sp.getString("resume_note", ""); }
+    long resumeNoteUntil() { return sp.getLong("resume_note_until", 0); }
+    void setResumeNote(String text, long until) {
+        sp.edit().putLong("resume_note_until", until).putString("resume_note", text).apply();
+    }
     SharedPreferences raw() { return sp; }
 }
