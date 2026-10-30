@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<header><b>Ember</b><span class="tag">PC test build: checks playback and progress before the real app</span></header>
+<header><b>Ember</b><span class="tag">PC test build 2</span></header>
 
 <details id="settings">
   <summary>Settings</summary>
@@ -155,7 +155,7 @@ async function play(url) {
     .join(",");
   try {
     await invoke("play", { url, start: current.start || 0, embed, passthrough: store.get("passthrough") === "1", opts });
-    log(`Playing ${current.name}${current.start ? " from " + fmt(current.start) : ""} (${embed ? "inside the window" : "full screen"}). In the player: Space pauses, Q stops.`);
+    log(`Playing ${current.name}${current.start ? " from " + fmt(current.start) : ""} (${embed ? "inside the window" : "full screen"}). In the player: click the video first, then Space pauses, I shows stream info, # audio, J subtitles, Q stops.`);
   } catch(e) { log("Couldn't start mpv: " + e); }
 }
 $("stop").onclick = () => invoke && invoke("stop");
