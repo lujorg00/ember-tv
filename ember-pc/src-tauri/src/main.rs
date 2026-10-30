@@ -22,7 +22,8 @@ mod layer {
     // The page always draws on top of anything inside its window, so the video gets its own borderless
     // window, owned by Ember's (so it stays above it and minimises with it), kept exactly over the page.
     use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+    use windows_sys::Win32::Graphics::Gdi::{ClientToScreen, GetStockObject, BLACK_BRUSH, HBRUSH};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -40,11 +41,33 @@ mod layer {
         }
     }
 
+    /// Our own plain window class: a STATIC control lets mouse clicks fall through to the window behind it,
+    /// so mpv never got your clicks or the keyboard.
+    fn register_class() -> Vec<u16> {
+        let class = wide("EmberVideo");
+        unsafe {
+            let wc = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(DefWindowProcW),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: GetModuleHandleW(std::ptr::null()),
+                hIcon: std::ptr::null_mut(),
+                hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+                hbrBackground: GetStockObject(BLACK_BRUSH) as HBRUSH,
+                lpszMenuName: std::ptr::null(),
+                lpszClassName: class.as_ptr(),
+            };
+            RegisterClassW(&wc); // fails harmlessly if already registered
+        }
+        class
+    }
+
     pub fn create(parent: isize) -> isize {
         unsafe {
             let parent = parent as HWND;
             let (x, y, w, h) = page_rect(parent);
-            let class = wide("STATIC");
+            let class = register_class();
             let name = wide("Ember");
             let v = CreateWindowExW(
                 WS_EX_TOOLWINDOW, // no extra taskbar button
@@ -57,9 +80,10 @@ mod layer {
                 h,
                 parent, // owner
                 std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
                 std::ptr::null(),
             );
+            SetForegroundWindow(v);
             v as isize
         }
     }

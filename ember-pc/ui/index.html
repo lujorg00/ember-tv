@@ -156,7 +156,7 @@ async function play(url) {
     .join(",");
   try {
     await invoke("play", { url, start: current.start || 0, embed, passthrough: store.get("passthrough") === "1", opts });
-    log(`Playing ${current.name}${current.start ? " from " + fmt(current.start) : ""} (${embed ? "inside the window" : "full screen"}). In the player: click the video first, then Space pauses, I shows stream info, # audio, J subtitles, Q stops.`);
+    log(`Playing ${current.name}${current.start ? " from " + fmt(current.start) : ""} (${embed ? "inside the window" : "full screen"}). In the player: move the mouse for controls; Space pauses, I shows stream info, # audio, J subtitles, Esc goes back to Ember.`);
   } catch(e) { log("Couldn't start mpv: " + e); }
 }
 $("stop").onclick = () => invoke && invoke("stop");

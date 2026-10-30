@@ -36,6 +36,10 @@ local function post(state, sync, finished)
     if sync then done(true, mp.command_native(cmd)) else mp.command_native_async(cmd, done) end
 end
 
+-- Esc or Backspace: stop and go back to Ember (progress is saved as it stops).
+mp.add_forced_key_binding("ESC", "ember-back", function() mp.command("quit") end)
+mp.add_forced_key_binding("BS", "ember-back-bs", function() mp.command("quit") end)
+
 mp.observe_property("time-pos", "number", function(_, v) if v then pos = v end end)
 mp.observe_property("duration", "number", function(_, v) if v then dur = v end end)
 mp.register_event("file-loaded", function() started = true end)
