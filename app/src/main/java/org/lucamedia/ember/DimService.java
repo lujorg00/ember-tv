@@ -41,7 +41,7 @@ import java.util.concurrent.Executors;
  *    learnt in Ember settings). Automatic: Dim at 11:30pm, Heavy at midnight, lifted at 8am. Before an early shift
  *    (starting before 10am) each step comes an hour earlier, with a note saying when the shift is.
  *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
- *    and "Winnie came in" / "Elvis went out" from the cat flap.
+ *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each).
  */
 public class DimService extends AccessibilityService {
 
@@ -51,7 +51,8 @@ public class DimService extends AccessibilityService {
     private static final int EARLY_SHIFT_BEFORE = 10 * 60; // a shift before 10am counts as early
     private static final int EARLY_BY = 60;                // and brings the dimming forward an hour
     private static final long CAT_POLL_MS = 20_000, NIGHT_POLL_MS = 15 * 60_000;
-    private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 8_000;
+    private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 8_000, ALERT_NOTE_MS = 10_000;
+    private static final long ALERT_POLL_MS = 5 * 60_000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService net = Executors.newSingleThreadExecutor();
@@ -70,6 +71,9 @@ public class DimService extends AccessibilityService {
     private volatile String shiftTitle = "";
     private long nightFetchedAt;
 
+    private final java.util.List<Object[]> notesWaiting = new java.util.ArrayList<>();
+    private final java.util.List<Object[]> alertsDue = new java.util.ArrayList<>(); // {id, at millis, text}
+    private long alertsFetchedAt;
     private final Map<String, Boolean> catsHome = new HashMap<>();
     private boolean catsKnown;
 
@@ -77,7 +81,9 @@ public class DimService extends AccessibilityService {
         @Override
         public void run() {
             if (System.currentTimeMillis() - nightFetchedAt > NIGHT_POLL_MS) fetchNight();
+            if (power.isInteractive() && System.currentTimeMillis() - alertsFetchedAt > ALERT_POLL_MS) fetchAlerts();
             checkSchedule();
+            showDueAlerts();
             main.postDelayed(this, 30_000);
         }
     };
@@ -86,6 +92,7 @@ public class DimService extends AccessibilityService {
         @Override
         public void onReceive(Context c, Intent i) {
             checkSchedule(); // the TV may have slept through a step
+            fetchAlerts();
             main.removeCallbacks(catPoll);
             main.post(catPoll);
         }
@@ -289,6 +296,54 @@ public class DimService extends AccessibilityService {
         }
     };
 
+    // ---------------------------------------------------------------- calendar and reminder pop-ups
+
+    private void fetchAlerts() {
+        alertsFetchedAt = System.currentTimeMillis();
+        final String url = feed("/alerts");
+        if (url == null) return;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONArray a = new JSONObject(AddonClient.get(url)).optJSONArray("alerts");
+                    final java.util.List<Object[]> got = new java.util.ArrayList<>();
+                    for (int i = 0; a != null && i < a.length(); i++) {
+                        JSONObject o = a.optJSONObject(i);
+                        if (o == null) continue;
+                        got.add(new Object[]{o.optString("id"), parseIso(o.optString("at")), o.optString("text")});
+                    }
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            alertsDue.clear();
+                            alertsDue.addAll(got);
+                            showDueAlerts();
+                        }
+                    });
+                } catch (Exception e) {
+                    Log.w("EmberDim", "couldn't read alerts: " + e);
+                }
+            }
+        });
+    }
+
+    /** Shows any alert whose time has come and that hasn't been shown yet (remembered across restarts). */
+    private void showDueAlerts() {
+        if (!power.isInteractive()) return;
+        long now = System.currentTimeMillis();
+        java.util.Set<String> shown = prefs.shownAlerts();
+        boolean changed = false;
+        for (Object[] a : alertsDue) {
+            String id = (String) a[0];
+            if ((Long) a[1] > now || shown.contains(id)) continue;
+            shown.add(id);
+            changed = true;
+            showNote((String) a[2], ALERT_NOTE_MS);
+        }
+        if (changed) prefs.setShownAlerts(shown);
+    }
+
     private void catsChanged(JSONArray cats) {
         if (cats == null) return;
         StringBuilder msg = new StringBuilder();
@@ -359,6 +414,10 @@ public class DimService extends AccessibilityService {
 
     /** A note, top-right, for a while. */
     private void showNote(String s, final long ms) {
+        if (System.currentTimeMillis() < noteUntil) { // one at a time: wait for the current note to go
+            notesWaiting.add(new Object[]{s, ms});
+            return;
+        }
         ensureLayer();
         if (note == null) return;
         note.setText(s);
@@ -368,7 +427,18 @@ public class DimService extends AccessibilityService {
         n.animate().alpha(1f).setStartDelay(0).setDuration(300).withEndAction(new Runnable() {
             @Override
             public void run() {
-                n.animate().alpha(0f).setStartDelay(ms).setDuration(600).start();
+                n.animate().alpha(0f).setStartDelay(ms).setDuration(600).withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        noteUntil = 0;
+                        if (!notesWaiting.isEmpty()) {
+                            Object[] next = notesWaiting.remove(0);
+                            showNote((String) next[0], (Long) next[1]);
+                        } else {
+                            scheduleDrop(300);
+                        }
+                    }
+                }).start();
             }
         }).start();
         noteUntil = System.currentTimeMillis() + ms + 700;

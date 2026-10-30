@@ -116,5 +116,12 @@ final class Prefs {
     void setResumeNote(String text, long until) {
         sp.edit().putLong("resume_note_until", until).putString("resume_note", text).apply();
     }
+    // ---- alerts already shown on the TV (so a restart doesn't repeat them); keeps the latest 100
+    java.util.Set<String> shownAlerts() { return new java.util.LinkedHashSet<>(sp.getStringSet("shown_alerts", new java.util.HashSet<String>())); }
+    void setShownAlerts(java.util.Set<String> ids) {
+        java.util.List<String> l = new java.util.ArrayList<>(ids);
+        while (l.size() > 100) l.remove(0);
+        sp.edit().putStringSet("shown_alerts", new java.util.HashSet<>(l)).apply();
+    }
     SharedPreferences raw() { return sp; }
 }

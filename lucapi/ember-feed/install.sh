@@ -9,7 +9,7 @@ cp feed.py ember-feed.service "$DEST"/
 
 python3 -m venv "$DEST/venv"
 "$DEST/venv/bin/pip" install --quiet --upgrade pip
-"$DEST/venv/bin/pip" install --quiet icalendar recurring-ical-events
+"$DEST/venv/bin/pip" install --quiet icalendar recurring-ical-events caldav
 
 PHOTOS=$(python3 -c "import json;print(json.load(open('$DEST/config.json'))['photos']['folder'])")
 if [ -n "$PHOTOS" ]; then sudo mkdir -p "$PHOTOS" && sudo chown luca:luca "$PHOTOS"; fi

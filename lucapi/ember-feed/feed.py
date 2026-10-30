@@ -10,6 +10,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
   GET /progress     -> where you stopped part-way through films and episodes (Trakt)
   GET /next/<imdb>  -> the next episode of a show (Trakt)
+  GET /alerts       -> calendar and reminder pop-ups due in the next hour or so
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -122,6 +123,12 @@ def _fetch_events():
                 e = (dtend.astimezone(TZ) if dtend.tzinfo else dtend.replace(tzinfo=TZ)) if isinstance(dtend, datetime) else s + timedelta(hours=1)
             if e <= now:
                 continue  # already over
+            alarms = []
+            for al in ev.walk("VALARM"):
+                trig = al.get("TRIGGER")
+                d = getattr(trig, "dt", None)
+                if isinstance(d, timedelta):
+                    alarms.append(int(-d.total_seconds() // 60))  # minutes before the start
             out.append({
                 "start": s.isoformat(),
                 "end": e.isoformat(),
@@ -131,6 +138,7 @@ def _fetch_events():
                 "calendar": cal.get("name", ""),
                 "colour": cal.get("colour", "#F0A04B"),
                 "shift": bool(cal.get("shifts", False)),
+                "alarms": alarms,
             })
     out.sort(key=lambda x: (x["start"], not x["allDay"]))
     return out
@@ -562,6 +570,89 @@ def next_episode(imdb):
     except Exception as e:
         return {"error": str(e)}
 
+# ------------------------------------------------------------------ alerts: calendar and reminder pop-ups on the TV
+
+
+def _reminders():
+    """Apple Reminders that are due, over iCloud CalDAV. Off unless config.json has
+    "reminders": {"username": "you@icloud.com", "app_password": "xxxx-xxxx-xxxx-xxxx"}  (an app-specific password)."""
+    r = CFG.get("reminders", {})
+    if not r.get("username") or not r.get("app_password"):
+        return []
+    import caldav
+    client = caldav.DAVClient(url=r.get("url", "https://caldav.icloud.com"),
+                              username=r["username"], password=r["app_password"])
+    wanted = [x.lower() for x in r.get("lists", [])]
+    out = []
+    for cal in client.principal().calendars():
+        try:
+            if "VTODO" not in (cal.get_supported_components() or []):
+                continue
+        except Exception:
+            pass
+        name = str(cal.name or "")
+        if wanted and name.lower() not in wanted:
+            continue
+        try:
+            todos = cal.todos(include_completed=False)
+        except Exception:
+            continue
+        for t in todos:
+            comp = t.icalendar_component
+            due = comp.get("DUE")
+            if not due:
+                continue
+            d = due.dt
+            if not isinstance(d, datetime):
+                d = datetime.combine(d, datetime.min.time(), TZ).replace(hour=r.get("all_day_hour", 9))
+            elif d.tzinfo is None:
+                d = d.replace(tzinfo=TZ)
+            out.append({"title": str(comp.get("SUMMARY", "")).strip() or "Reminder",
+                        "due": d.astimezone(TZ).isoformat(), "list": name})
+    return out
+
+
+def alerts():
+    """Pop-ups for roughly the next 70 minutes: each has an id, a time to show it, and its text.
+    Calendar events use their own alerts when the calendar has them, otherwise 1 hour before a shift and 15 minutes
+    before anything else (both settable in config.json under "alerts")."""
+    a = CFG.get("alerts", {})
+    shift_before = a.get("shift_minutes_before", 60)
+    other_before = a.get("minutes_before", 15)
+    now = datetime.now(TZ)
+    lo, hi = now - timedelta(minutes=30), now + timedelta(minutes=70)
+    out = []
+    for e in cached("events", 300, _fetch_events):
+        if e.get("allDay"):
+            continue
+        s = datetime.fromisoformat(e["start"])
+        befores = e.get("alarms") or [shift_before if e.get("shift") else other_before]
+        for b in befores:
+            at = s - timedelta(minutes=b)
+            if not (lo <= at <= hi) or (b > 0 and s <= now) or (b <= 0 and s < now - timedelta(minutes=5)):
+                continue
+            if at < now and b > 0:  # the TV was off when it was due: say how long is actually left
+                b = max(1, round((s - now).total_seconds() / 60))
+            lead = "Now" if b <= 0 else (f"In {b} min" if b < 60 else f"In {b // 60}h" + (f" {b % 60}m" if b % 60 else ""))
+            text = f"{lead}: {e['title']} · {s.strftime('%H:%M')}"
+            if e.get("shift"):
+                text = f"{lead}: shift · {e['title']} at {s.strftime('%H:%M')}"
+            if e.get("location"):
+                text += f" · {e['location'].splitlines()[0][:40]}"
+            out.append({"id": f"cal|{e['title']}|{e['start']}|{b}", "at": at.isoformat(), "text": text,
+                        "kind": "calendar"})
+    try:
+        rem = cached("reminders", 300, _reminders)
+    except Exception:
+        rem = []
+    for r in rem:
+        at = datetime.fromisoformat(r["due"])
+        if lo <= at <= hi:
+            out.append({"id": f"rem|{r['title']}|{r['due']}", "at": at.isoformat(),
+                        "text": f"Reminder: {r['title']}", "kind": "reminder"})
+    out.sort(key=lambda x: x["at"])
+    return {"now": now.isoformat(), "alerts": out}
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -601,6 +692,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": []})
             elif path == "/night":
                 self._json(night())
+            elif path == "/alerts":
+                self._json(alerts())
             elif path == "/weather":
                 self._json(weather())
             elif path == "/progress":
