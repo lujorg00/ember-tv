@@ -349,7 +349,7 @@ public class HomeActivity extends Activity {
         homeAmbient = new AmbientView(this);
         homeAmbient.setMode(apMode);
         homeAmbient.setAnimate(prefs.motion());
-        homeAmbient.setMoonPosition(0.07f, 0.065f); // top-left, clear of the title and the clock
+        homeAmbient.setMoonPosition(0.33f, 0.065f); // top, clear of the search pill, the title and the clock
         cataloguePage.addView(homeAmbient, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         backdrop = new FadedImageView(this);
@@ -367,6 +367,37 @@ public class HomeActivity extends Activity {
         heroLp.leftMargin = dp(48);
         heroLp.topMargin = dp(70);
         cataloguePage.addView(hero, heroLp);
+
+        // Search, top-left: press Up from the rows to reach it (or the remote's search key).
+        TextView search = text(13, apMuted, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        search.setText("\u2315  Search");
+        search.setPadding(dp(14), dp(6), dp(16), dp(6));
+        final GradientDrawable sIdle = new GradientDrawable();
+        sIdle.setColor(apPill);
+        sIdle.setCornerRadius(dp(99));
+        final GradientDrawable sFocus = new GradientDrawable();
+        sFocus.setColor(apPill);
+        sFocus.setCornerRadius(dp(99));
+        sFocus.setStroke(dp(2), apAccent);
+        search.setBackground(sIdle);
+        search.setFocusable(true);
+        search.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean has) {
+                v.setBackground(has ? sFocus : sIdle);
+                ((TextView) v).setTextColor(has ? apText : apMuted);
+            }
+        });
+        search.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openSearch();
+            }
+        });
+        FrameLayout.LayoutParams sLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sLp.leftMargin = dp(44);
+        sLp.topMargin = dp(24);
+        cataloguePage.addView(search, sLp);
 
         heroTitle = text(34, apText, Typeface.create("sans-serif-medium", Typeface.NORMAL));
         heroTitle.setMaxLines(2);
@@ -1227,6 +1258,25 @@ public class HomeActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- actions
+
+    private void openSearch() {
+        startActivity(new Intent(this, SearchActivity.class));
+    }
+
+    @Override
+    public boolean onKeyDown(int code, android.view.KeyEvent e) {
+        if (code == android.view.KeyEvent.KEYCODE_SEARCH) {
+            openSearch();
+            return true;
+        }
+        return super.onKeyDown(code, e);
+    }
+
+    @Override
+    public boolean onSearchRequested() {
+        openSearch();
+        return true;
+    }
 
     private void openTitle(Meta m) {
         openTitle(m, false);

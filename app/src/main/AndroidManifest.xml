@@ -10,6 +10,9 @@
     <!-- Android 11+ package visibility: lets us list the apps installed on the TV -->
     <queries>
         <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
         </intent>
@@ -63,6 +66,14 @@
             android:exported="true"
             android:excludeFromRecents="true"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".SearchActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="stateVisible|adjustPan"
+            android:theme="@style/Theme.Ember" />
 
         <activity
             android:name=".ScreensaverPreviewActivity"
