@@ -10,7 +10,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
   GET /progress     -> where you stopped part-way through films and episodes (Trakt)
   GET /next/<imdb>  -> the next episode of a show (Trakt)
-  GET /alerts       -> calendar and reminder pop-ups due in the next hour or so
+  GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -613,45 +613,49 @@ def _reminders():
 
 
 def alerts():
-    """Pop-ups for roughly the next 70 minutes: each has an id, a time to show it, and its text.
-    Calendar events use their own alerts when the calendar has them, otherwise 1 hour before a shift and 15 minutes
-    before anything else (both settable in config.json under "alerts")."""
+    """Pop-ups for everything with a time: 12 hours before, 1 hour before, then 30 minutes before, each more urgent.
+    A shift starting before midday gets its first pop-up 9 hours before instead, saying when you need to be up
+    (1 hour before the shift). Each stage carries the window it's valid for, so if the TV was off when it was due
+    it still shows when the TV comes on - until the next stage takes over."""
     a = CFG.get("alerts", {})
-    shift_before = a.get("shift_minutes_before", 60)
-    other_before = a.get("minutes_before", 15)
+    stages = a.get("stages_minutes", [720, 60, 30])
+    early_first = a.get("early_shift_first_minutes", 540)
+    wake_before = a.get("wake_minutes_before_shift", 60)
+    early_before_hour = a.get("early_shift_before_hour", 12)
     now = datetime.now(TZ)
-    lo, hi = now - timedelta(minutes=30), now + timedelta(minutes=70)
-    out = []
+    horizon = now + timedelta(minutes=70)
+
+    items = []
     for e in cached("events", 300, _fetch_events):
-        if e.get("allDay"):
-            continue
-        s = datetime.fromisoformat(e["start"])
-        befores = e.get("alarms") or [shift_before if e.get("shift") else other_before]
-        for b in befores:
-            at = s - timedelta(minutes=b)
-            if not (lo <= at <= hi) or (b > 0 and s <= now) or (b <= 0 and s < now - timedelta(minutes=5)):
-                continue
-            if at < now and b > 0:  # the TV was off when it was due: say how long is actually left
-                b = max(1, round((s - now).total_seconds() / 60))
-            lead = "Now" if b <= 0 else (f"In {b} min" if b < 60 else f"In {b // 60}h" + (f" {b % 60}m" if b % 60 else ""))
-            text = f"{lead}: {e['title']} · {s.strftime('%H:%M')}"
-            if e.get("shift"):
-                text = f"{lead}: shift · {e['title']} at {s.strftime('%H:%M')}"
-            if e.get("location"):
-                text += f" · {e['location'].splitlines()[0][:40]}"
-            out.append({"id": f"cal|{e['title']}|{e['start']}|{b}", "at": at.isoformat(), "text": text,
-                        "kind": "calendar"})
+        if not e.get("allDay"):
+            items.append(("cal", e["title"], datetime.fromisoformat(e["start"]), bool(e.get("shift")),
+                          (e.get("location") or "").splitlines()[0][:40] if e.get("location") else ""))
     try:
-        rem = cached("reminders", 300, _reminders)
+        for r in cached("reminders", 300, _reminders):
+            items.append(("rem", r["title"], datetime.fromisoformat(r["due"]), False, ""))
     except Exception:
-        rem = []
-    for r in rem:
-        at = datetime.fromisoformat(r["due"])
-        if lo <= at <= hi:
-            out.append({"id": f"rem|{r['title']}|{r['due']}", "at": at.isoformat(),
-                        "text": f"Reminder: {r['title']}", "kind": "reminder"})
+        pass
+
+    out = []
+    for kind, title, start, shift, where in items:
+        if start <= now:
+            continue
+        early = shift and start.hour < early_before_hour
+        mins = sorted([early_first] + [m for m in stages if m < early_first] if early else stages, reverse=True)
+        times = [start - timedelta(minutes=m) for m in mins]
+        for i, (m, at) in enumerate(zip(mins, times)):
+            until = times[i + 1] if i + 1 < len(times) else start
+            if until <= now or at > horizon:
+                continue
+            item = {"id": f"{kind}|{title}|{start.isoformat()}|{m}", "at": at.isoformat(), "until": until.isoformat(),
+                    "start": start.isoformat(), "title": title, "where": where, "kind": kind,
+                    "shift": shift, "level": min(3, i + 1)}  # 1 calm, 2 firmer, 3 urgent
+            if early and i == 0:
+                item["wake"] = (start - timedelta(minutes=wake_before)).isoformat()
+            out.append(item)
     out.sort(key=lambda x: x["at"])
     return {"now": now.isoformat(), "alerts": out}
+
 
 # ------------------------------------------------------------------ HTTP
 

@@ -41,7 +41,8 @@ import java.util.concurrent.Executors;
  *    learnt in Ember settings). Automatic: Dim at 11:30pm, Heavy at midnight, lifted at 8am. Before an early shift
  *    (starting before 10am) each step comes an hour earlier, with a note saying when the shift is.
  *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
- *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each).
+ *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each,
+ *    12h / 1h / 30 min before and getting more urgent; early shifts 9h before with when to be up).
  */
 public class DimService extends AccessibilityService {
 
@@ -311,7 +312,11 @@ public class DimService extends AccessibilityService {
                     for (int i = 0; a != null && i < a.length(); i++) {
                         JSONObject o = a.optJSONObject(i);
                         if (o == null) continue;
-                        got.add(new Object[]{o.optString("id"), parseIso(o.optString("at")), o.optString("text")});
+                        String wake = o.optString("wake", "");
+                        got.add(new Object[]{o.optString("id"), parseIso(o.optString("at")), parseIso(o.optString("until")),
+                                parseIso(o.optString("start")), o.optString("title"), o.optString("where"),
+                                o.optString("kind"), o.optBoolean("shift"), o.optInt("level", 1),
+                                wake.isEmpty() ? 0L : parseIso(wake)});
                     }
                     main.post(new Runnable() {
                         @Override
@@ -336,12 +341,43 @@ public class DimService extends AccessibilityService {
         boolean changed = false;
         for (Object[] a : alertsDue) {
             String id = (String) a[0];
-            if ((Long) a[1] > now || shown.contains(id)) continue;
+            if ((Long) a[1] > now || (Long) a[2] <= now || shown.contains(id)) continue;
             shown.add(id);
             changed = true;
-            showNote((String) a[2], ALERT_NOTE_MS);
+            showNote(alertText(a, now), ALERT_NOTE_MS, (Integer) a[8]);
         }
         if (changed) prefs.setShownAlerts(shown);
+    }
+
+    /** Words for an alert, worked out when it's shown so the time left is right even if the TV was off. */
+    private static String alertText(Object[] a, long now) {
+        long start = (Long) a[3], wake = (Long) a[9];
+        String title = (String) a[4], where = (String) a[5], kind = (String) a[6];
+        boolean shift = (Boolean) a[7];
+        int level = (Integer) a[8];
+        String at = new SimpleDateFormat("HH:mm", Locale.UK).format(start);
+        String place = where.isEmpty() ? "" : "  \u00b7  " + where;
+        if (wake > 0) {
+            String up = new SimpleDateFormat("HH:mm", Locale.UK).format(wake);
+            return "Early shift: " + title + " at " + at + "  \u00b7  you need to be up at " + up + ", in " + span(wake - now);
+        }
+        String left = span(start - now);
+        if ("rem".equals(kind)) {
+            return level >= 3 ? "Reminder in " + left + ": " + title + "!" : "Reminder in " + left + ": " + title + " (" + at + ")";
+        }
+        String what = shift ? "Shift: " + title : title;
+        switch (level) {
+            case 1: return "In " + left + "  \u00b7  " + what + " at " + at + place;
+            case 2: return "In " + left + ": " + what + " at " + at + place;
+            default: return what + " starts in " + left + "!  " + at + place;
+        }
+    }
+
+    /** 41 min, 1h 05m, 11h 40m */
+    private static String span(long ms) {
+        long mins = Math.max(1, Math.round(ms / 60_000.0));
+        if (mins < 60) return mins + " min";
+        return (mins / 60) + "h " + String.format(Locale.UK, "%02d", mins % 60) + "m";
     }
 
     private void catsChanged(JSONArray cats) {
@@ -413,13 +449,22 @@ public class DimService extends AccessibilityService {
     }
 
     /** A note, top-right, for a while. */
-    private void showNote(String s, final long ms) {
+    private void showNote(String s, long ms) {
+        showNote(s, ms, 0);
+    }
+
+    /** level 0 = plain note, 1 = calm alert, 2 = firmer (amber), 3 = urgent (red, bigger, pulses). */
+    private void showNote(String s, final long ms, final int level) {
         if (System.currentTimeMillis() < noteUntil) { // one at a time: wait for the current note to go
-            notesWaiting.add(new Object[]{s, ms});
+            notesWaiting.add(new Object[]{s, ms, level});
+            if (level >= 3) { // urgent ones jump the queue
+                notesWaiting.add(0, notesWaiting.remove(notesWaiting.size() - 1));
+            }
             return;
         }
         ensureLayer();
         if (note == null) return;
+        styleNote(note, level);
         note.setText(s);
         note.animate().cancel();
         note.setAlpha(0f);
@@ -433,7 +478,7 @@ public class DimService extends AccessibilityService {
                         noteUntil = 0;
                         if (!notesWaiting.isEmpty()) {
                             Object[] next = notesWaiting.remove(0);
-                            showNote((String) next[0], (Long) next[1]);
+                            showNote((String) next[0], (Long) next[1], (Integer) next[2]);
                         } else {
                             scheduleDrop(300);
                         }
@@ -441,8 +486,58 @@ public class DimService extends AccessibilityService {
                 }).start();
             }
         }).start();
+        if (level >= 3) { // a few slow pulses so it can't be missed
+            final TextView p = note;
+            p.setScaleX(1f);
+            p.setScaleY(1f);
+            p.setPivotX(p.getWidth() > 0 ? p.getWidth() : 600);
+            p.setPivotY(0);
+            for (int i = 0; i < 3; i++) {
+                main.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        p.animate().scaleX(1.06f).scaleY(1.06f).setDuration(350).withEndAction(new Runnable() {
+                            @Override
+                            public void run() {
+                                p.animate().scaleX(1f).scaleY(1f).setDuration(350).start();
+                            }
+                        }).start();
+                    }
+                }, 400 + i * 1200L);
+            }
+        }
         noteUntil = System.currentTimeMillis() + ms + 700;
         scheduleDrop(ms + 900);
+    }
+
+    private void styleNote(TextView t, int level) {
+        float d = getResources().getDisplayMetrics().density;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(99 * d);
+        int textColour = 0xFFF3E7D8;
+        float size = 15;
+        switch (level) {
+            case 2:   // firmer: warm amber edge, a bit bigger
+                bg.setColor(0xF0261708);
+                bg.setStroke(Math.round(2 * d), 0xFFE8A15A);
+                textColour = 0xFFFFE2C2;
+                size = 17;
+                break;
+            case 3:   // urgent: red, bigger, white text
+                bg.setColor(0xF5B3261E);
+                bg.setStroke(Math.round(2 * d), 0xFFFF8A80);
+                textColour = 0xFFFFFFFF;
+                size = 20;
+                break;
+            default:  // plain notes and the calm first alert
+                bg.setColor(0xE01A1410);
+        }
+        t.setBackground(bg);
+        t.setTextColor(textColour);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+        int padH = Math.round((level >= 3 ? 24 : 18) * d), padV = Math.round((level >= 3 ? 12 : 8) * d);
+        t.setPadding(padH, padV, padH, padV);
+        t.setTypeface(Typeface.create("sans-serif-medium", level >= 2 ? Typeface.BOLD : Typeface.NORMAL));
     }
 
     private TextView pill(float d) {
