@@ -1312,6 +1312,151 @@ def picks_streams(code, typ, sid):
     return {"streams": out}
 
 
+# ------------------------------------------------------------------ Jellyfin pass-through (step 1: watch only)
+# Odin logs in to the Pi (port 8096); everything is relayed unchanged to your AIOStreams Jellyfin server, and the
+# requests that matter (playback reports, resume points, stream info) are logged so we can see how it works.
+# Passwords and tokens are never logged. Config: "jellyfin": {"upstream": "https://your-aiostreams/...", "port": 8096}
+
+JF = CFG.get("jellyfin", {})
+JF_LOG = HERE / "jellyfin-log.jsonl"
+_jf_lock = threading.Lock()
+_SECRET_KEYS = re.compile(r"(token|password|pw|api_?key|accesstoken|authorization|session(id)?|deviceid|secret)", re.I)
+_INTERESTING = re.compile(r"/(Sessions/Playing|PlayingItems|PlayedItems|UserPlayedItems|UserData|PlaybackInfo|Resume|NextUp|"
+                          r"Items/[^/]+$|Shows/[^/]+/(Episodes|Seasons)|Items\?|Latest|UserViews|Views)", re.I)
+
+
+def _redact(obj):
+    if isinstance(obj, dict):
+        return {k: ("<hidden>" if _SECRET_KEYS.search(k) else _redact(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(v) for v in obj[:6]] + (["…%d more" % (len(obj) - 6)] if len(obj) > 6 else [])
+    if isinstance(obj, str) and len(obj) > 300:
+        return obj[:300] + "…"
+    return obj
+
+
+def _jf_log(entry):
+    with _jf_lock:
+        try:
+            if JF_LOG.exists() and JF_LOG.stat().st_size > 8 * 1024 * 1024:
+                JF_LOG.replace(JF_LOG.with_suffix(".old"))
+            with open(JF_LOG, "a") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"[ember-feed] jellyfin log failed: {e}", flush=True)
+
+
+class JellyfinProxy(BaseHTTPRequestHandler):
+    server_version = "ember-jellyfin/1.0"
+    protocol_version = "HTTP/1.1"
+
+    def _relay(self):
+        up = JF.get("upstream", "").rstrip("/")
+        t0 = time.time()
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(n) if n else None
+        parsed = urllib.parse.urlparse(self.path)
+        headers = {k: v for k, v in self.headers.items()
+                   if k.lower() not in ("host", "accept-encoding", "connection", "content-length", "keep-alive")}
+        req = urllib.request.Request(up + self.path, data=body, method=self.command, headers=headers)
+        status, rh, out, streamed = 502, {}, b"", False
+        try:
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *a, **k):
+                    return None
+            opener = urllib.request.build_opener(NoRedirect)
+            try:
+                r = opener.open(req, timeout=60)
+            except urllib.error.HTTPError as e:
+                r = e
+            status = r.status if hasattr(r, "status") else r.code
+            rh = dict(r.headers.items())
+            ctype = rh.get("Content-Type", "")
+            big = not ("json" in ctype or "text" in ctype or "xml" in ctype)
+            self.send_response(status)
+            for k, v in rh.items():
+                if k.lower() not in ("transfer-encoding", "connection", "keep-alive", "content-length"):
+                    self.send_header(k, v)
+            if big:  # video, images: stream them straight through
+                streamed = True
+                ln = rh.get("Content-Length")
+                if ln:
+                    self.send_header("Content-Length", ln)
+                    self.end_headers()
+                    shutil.copyfileobj(r, self.wfile, 256 * 1024)
+                else:
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    shutil.copyfileobj(r, self.wfile, 256 * 1024)
+                    self.close_connection = True
+            else:
+                out = r.read()
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as e:
+            try:
+                self.send_response(502)
+                msg = json.dumps({"error": f"couldn't reach AIOStreams' Jellyfin: {e}"}).encode()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(msg)))
+                self.end_headers()
+                self.wfile.write(msg)
+            except Exception:
+                pass
+            status = 502
+        # log it (everything briefly; the interesting ones in detail)
+        q = {k: ("<hidden>" if _SECRET_KEYS.search(k) else v[:3]) for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        entry = {"t": datetime.now(TZ).strftime("%H:%M:%S"), "m": self.command, "path": parsed.path, "q": q,
+                 "status": status, "ms": round((time.time() - t0) * 1000), "client": self.headers.get("User-Agent", "")[:60]}
+        if status in (301, 302, 303, 307, 308):
+            entry["redirect_to"] = urllib.parse.urlparse(rh.get("Location", "")).netloc
+        if _INTERESTING.search(parsed.path + ("?" if parsed.query else "")):
+            for name, raw in (("sent", body), ("got", out)):
+                if raw:
+                    try:
+                        entry[name] = _redact(json.loads(raw))
+                    except Exception:
+                        entry[name] = raw[:300].decode("utf-8", "replace")
+        if streamed:
+            entry["streamed"] = True
+        _jf_log(entry)
+
+    do_GET = do_POST = do_DELETE = do_PUT = do_HEAD = do_OPTIONS = _relay
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def jellyfin_summary():
+    """A short read-out of the log: which calls Odin makes, and samples of the ones about playback and resume."""
+    if not JF_LOG.exists():
+        return {"note": "nothing logged yet"}
+    lines = JF_LOG.read_text(errors="ignore").splitlines()[-3000:]
+    counts, samples = {}, {}
+    for l in lines:
+        try:
+            e = json.loads(l)
+        except Exception:
+            continue
+        key = f"{e['m']} " + re.sub(r"/[0-9a-f]{20,}|/tt\d+[^/]*|/\d{3,}", "/{id}", e["path"])
+        counts[key] = counts.get(key, 0) + 1
+        if ("sent" in e or "got" in e or "redirect_to" in e) and len(samples.get(key, [])) < 2:
+            samples.setdefault(key, []).append(e)
+    return {"calls": dict(sorted(counts.items(), key=lambda x: -x[1])[:60]), "samples": samples}
+
+
+def start_jellyfin_proxy():
+    if not JF.get("upstream"):
+        return
+    port = int(JF.get("port", 8096))
+    srv = ThreadingHTTPServer(("0.0.0.0", port), JellyfinProxy)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    print(f"[ember-feed] Jellyfin pass-through on :{port} -> {urllib.parse.urlparse(JF['upstream']).netloc}", flush=True)
+
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -1407,6 +1552,8 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/picks/[A-Za-z0-9_=-]+/stream/(movie|series)/tt[0-9:]+\.json", path):
                 parts = path.split("/")
                 self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
+            elif path == "/jellyfin/summary":
+                self._json(jellyfin_summary())
             elif path == "/upcoming":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(upcoming(days=int((q.get("days") or [7])[0])))
@@ -1500,6 +1647,7 @@ def main():
         threading.Thread(target=_snapshot_loop, daemon=True).start()
     else:
         print("[ember-feed] no Trakt login found: progress store runs without Trakt", flush=True)
+    start_jellyfin_proxy()
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()
