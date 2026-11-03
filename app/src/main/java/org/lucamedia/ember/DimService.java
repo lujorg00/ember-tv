@@ -363,6 +363,7 @@ public class DimService extends AccessibilityService {
             return "Early shift: " + title + " at " + at + "  \u00b7  you need to be up at " + up + ", in " + span(wake - now);
         }
         String left = span(start - now);
+        if ("ep".equals(kind)) return title; // "New episode out: Severance S2 E7 · Chikhai Bardo"
         if ("rem".equals(kind)) {
             return level >= 3 ? "Reminder in " + left + ": " + title + "!" : "Reminder in " + left + ": " + title + " (" + at + ")";
         }

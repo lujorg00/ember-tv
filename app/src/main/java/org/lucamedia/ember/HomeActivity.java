@@ -349,7 +349,7 @@ public class HomeActivity extends Activity {
         homeAmbient = new AmbientView(this);
         homeAmbient.setMode(apMode);
         homeAmbient.setAnimate(prefs.motion());
-        homeAmbient.setMoonPosition(0.33f, 0.065f); // top, clear of the search pill, the title and the clock
+        homeAmbient.setMoonPosition(0.40f, 0.065f); // top, clear of the search pill, the title and the clock
         cataloguePage.addView(homeAmbient, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         backdrop = new FadedImageView(this);
@@ -394,10 +394,41 @@ public class HomeActivity extends Activity {
                 openSearch();
             }
         });
+        // "What to watch?" beside it: everyone swipes on their phones.
+        TextView match = text(13, apMuted, Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        match.setText("\u2665  What to watch?");
+        match.setPadding(dp(14), dp(6), dp(16), dp(6));
+        final GradientDrawable mIdle = new GradientDrawable();
+        mIdle.setColor(apPill);
+        mIdle.setCornerRadius(dp(99));
+        final GradientDrawable mFocus = new GradientDrawable();
+        mFocus.setColor(apPill);
+        mFocus.setCornerRadius(dp(99));
+        mFocus.setStroke(dp(2), apAccent);
+        match.setBackground(mIdle);
+        match.setFocusable(true);
+        match.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean has) {
+                v.setBackground(has ? mFocus : mIdle);
+                ((TextView) v).setTextColor(has ? apText : apMuted);
+            }
+        });
+        match.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(HomeActivity.this, MatchActivity.class));
+            }
+        });
+        LinearLayout pills = new LinearLayout(this);
+        pills.addView(search);
+        LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mLp.leftMargin = dp(10);
+        pills.addView(match, mLp);
         FrameLayout.LayoutParams sLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         sLp.leftMargin = dp(44);
         sLp.topMargin = dp(24);
-        cataloguePage.addView(search, sLp);
+        cataloguePage.addView(pills, sLp);
 
         heroTitle = text(34, apText, Typeface.create("sans-serif-medium", Typeface.NORMAL));
         heroTitle.setMaxLines(2);
@@ -490,6 +521,7 @@ public class HomeActivity extends Activity {
         rowsBox.removeAllViews();
         progressBars.clear();
         for (int i = 0; i < rows.size(); i++) addMetaRow(i, rows.get(i));
+        addUpcomingRow();
 
         if (rows.isEmpty()) {
             // Nothing to browse yet: the apps page is the useful one.
@@ -1258,6 +1290,73 @@ public class HomeActivity extends Activity {
     }
 
     // ---------------------------------------------------------------- actions
+
+    // ---------------------------------------------------------------- "Out this week": new episodes of your shows
+
+    private List<Meta> upcoming;
+    private long upcomingAt;
+
+    /** Puts the "Out this week" row second, using what we have, and refreshes it every half hour. */
+    private void addUpcomingRow() {
+        if (upcoming != null && !upcoming.isEmpty() && rowsBox.findViewWithTag("upcoming-row") == null) {
+            addMetaRow(900, new AddonClient.Row("Out this week", upcoming));
+            View r = rowsBox.getChildAt(rowsBox.getChildCount() - 1);
+            r.setTag("upcoming-row");
+            rowsBox.removeView(r);
+            rowsBox.addView(r, Math.min(1, rowsBox.getChildCount()));
+        }
+        if (!prefs.feedConfigured() || System.currentTimeMillis() - upcomingAt < 30 * 60_000L) return;
+        upcomingAt = System.currentTimeMillis();
+        final String url = prefs.feedUrl() + "/upcoming?days=7";
+        worker.execute(new Runnable() {
+            @Override
+            public void run() {
+                final List<Meta> got = new ArrayList<>();
+                try {
+                    org.json.JSONArray eps = new org.json.JSONObject(AddonClient.get(url)).optJSONArray("episodes");
+                    java.util.Map<String, org.json.JSONObject> byShow = new java.util.LinkedHashMap<>();
+                    for (int i = 0; eps != null && i < eps.length(); i++) { // one per show: newest out, or next coming
+                        org.json.JSONObject e = eps.getJSONObject(i);
+                        org.json.JSONObject cur = byShow.get(e.optString("imdb"));
+                        if (cur == null || (e.optBoolean("out") && (!cur.optBoolean("out") || e.optString("airs").compareTo(cur.optString("airs")) > 0))) {
+                            byShow.put(e.optString("imdb"), e);
+                        }
+                    }
+                    List<org.json.JSONObject> list = new ArrayList<>(byShow.values());
+                    java.util.Collections.sort(list, new java.util.Comparator<org.json.JSONObject>() {
+                        @Override
+                        public int compare(org.json.JSONObject a, org.json.JSONObject b) {
+                            boolean ao = a.optBoolean("out"), bo = b.optBoolean("out");
+                            if (ao != bo) return ao ? -1 : 1;
+                            return ao ? b.optString("airs").compareTo(a.optString("airs")) : a.optString("airs").compareTo(b.optString("airs"));
+                        }
+                    });
+                    for (org.json.JSONObject e : list) {
+                        org.json.JSONObject m = new org.json.JSONObject();
+                        m.put("id", e.optString("imdb"));
+                        m.put("type", "series");
+                        m.put("name", e.optString("show"));
+                        String ep = "S" + e.optInt("season") + " \u00b7 E" + e.optInt("episode");
+                        m.put("releaseInfo", (e.optBoolean("out") ? "New: " : "Out " + e.optString("day") + ": ") + ep);
+                        m.put("description", (e.optString("title").isEmpty() ? "" : "\u201c" + e.optString("title") + "\u201d  ")
+                                + (e.optBoolean("out") ? "Out now." : "Out " + e.optString("day") + " at " + e.optString("time") + "."));
+                        got.add(Meta.from(m, "series"));
+                    }
+                } catch (Exception ignored) {
+                    return;
+                }
+                main.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        upcoming = got;
+                        View old = rowsBox.findViewWithTag("upcoming-row");
+                        if (old != null) rowsBox.removeView(old);
+                        addUpcomingRow();
+                    }
+                });
+            }
+        });
+    }
 
     private void openSearch() {
         startActivity(new Intent(this, SearchActivity.class));

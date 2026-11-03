@@ -68,6 +68,13 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".MatchActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.Ember" />
+
+        <activity
             android:name=".SearchActivity"
             android:exported="false"
             android:excludeFromRecents="true"

@@ -47,7 +47,8 @@ function progressLine(p) {
 // ---------------------------------------------------------------- navigation
 
 const pages = { home: showHome, search: showSearch, films: () => showBrowse("movie"), series: () => showBrowse("series"),
-  library: showLibrary, settings: showSettings };
+  library: showLibrary, settings: showSettings, match: showMatch, year: showYear };
+const deviceName = () => store.get("deviceName", "Ember PC") || "Ember PC";
 let navStack = [];
 function go(page, ...args) {
   document.querySelectorAll(".nav").forEach(b => b.classList.toggle("on", b.dataset.page === page));
@@ -170,6 +171,7 @@ async function showHome() {
   const cats = await catalogs();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
   const slots = cats.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
+  outThisWeek().then(r => { if (r) (slots[1] || slots[0]).before(r); });
   const results = await Promise.all(cats.map(async (c, i) => {
     const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
     if (metas.length) slots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, pick));
@@ -374,8 +376,9 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
     ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
       <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}
-    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div></div>
+    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div>${togetherBar()}</div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
+  wireTogether(right);
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
   let streams = [];
@@ -438,12 +441,121 @@ async function tryNext(why) {
   return true;
 }
 
+// ---------------------------------------------------------------- new episodes: "Out this week"
+
+async function outThisWeek() {
+  let eps = [];
+  try { eps = (await getJson(`${feed()}/upcoming?days=7`, 8000)).episodes || []; } catch (e) { return null; }
+  if (!eps.length) return null;
+  // one card per show: the newest episode that's out, otherwise the next one coming
+  const byShow = new Map();
+  for (const e of eps) { const cur = byShow.get(e.imdb); if (!cur || (e.out && (!cur.out || e.airs > cur.airs))) byShow.set(e.imdb, e); }
+  const r = h(`<section class="row fade-in"><h2>Out this week <span class="kind">Series</span> <small>${byShow.size}</small></h2><div class="strip"></div></section>`);
+  for (const e of [...byShow.values()].sort((a, b) => (b.out - a.out) || (a.out ? b.airs.localeCompare(a.airs) : a.airs.localeCompare(b.airs)))) {
+    const m = { id: e.imdb, type: "series", name: e.show };
+    const c = card(m, "series");
+    c.appendChild(h(`<div class="airs ${e.out ? "out" : ""}">${e.out ? "New" : esc(e.day)} · S${e.season} E${e.episode}</div>`));
+    c.onclick = () => go("title", "series", e.imdb, m);
+    $(".strip", r).appendChild(c);
+  }
+  return r;
+}
+
+// ---------------------------------------------------------------- your year in watching
+
+async function showYear(year) {
+  year = year || new Date().getFullYear();
+  const v = $("#view");
+  v.innerHTML = `<div class="page-h"><h1>Your ${year} in watching</h1><div class="muted">From your Trakt history: Omni, Ember TV and Ember PC</div></div><div class="empty">Adding it all up…</div>`;
+  let w;
+  try { w = await getJson(`${feed()}/wrapped?year=${year}`, 90000); } catch (e) { $(".empty", v).textContent = "Couldn't get your history from lucapi: " + e.message; return; }
+  const hr = (x) => x == null ? "" : `${((x + 11) % 12) + 1}${x < 12 ? "am" : "pm"}`;
+  const maxM = Math.max(1, ...w.byMonth);
+  const months = "JFMAMJJASOND".split("");
+  v.innerHTML = `<div class="page-h"><h1>Your ${year} in watching</h1>
+      <div class="btns" style="margin-top:8px">${[year - 1, year].map(y => `<button class="chip btn-chip ${y === year ? "on" : ""}" data-y="${y}">${y}</button>`).join("")}</div></div>
+    <div class="wrap fade-in">
+      <div class="big"><b>${w.hours.toLocaleString()}</b><span>hours watched</span></div>
+      <div class="big"><b>${w.episodes.toLocaleString()}</b><span>episodes</span></div>
+      <div class="big"><b>${w.films.toLocaleString()}</b><span>films</span></div>
+      <div class="big"><b>${w.days}</b><span>whole days of telly</span></div>
+      <div class="card2 wide"><h3>By month</h3><div class="months">${w.byMonth.map((m, i) => `<div><i style="height:${Math.round(m / maxM * 100)}%" title="${m} hours"></i><span>${months[i]}</span></div>`).join("")}</div></div>
+      <div class="card2"><h3>Your habits</h3>
+        <p>Your favourite night is <b>${esc(w.favouriteNight || "—")}</b>, and you usually start around <b>${hr(w.favouriteHour)}</b>.</p>
+        ${w.busiestDay ? `<p>Your biggest day was <b>${new Date(w.busiestDay.date).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}</b>: ${w.busiestDay.hours} hours.</p>` : ""}
+        ${w.rewatched.length ? `<p>You couldn't stop rewatching <b>${esc(w.rewatched[0].title)}</b> (${w.rewatched[0].plays} times).</p>` : ""}</div>
+      <div class="card2"><h3>Top shows</h3><ol>${w.topShows.slice(0, 8).map(x => `<li data-id="${esc(x.imdb || "")}" data-t="series">${esc(x.title)} <span class="muted">${x.episodes} eps · ${Math.round(x.minutes / 60)}h</span></li>`).join("")}</ol></div>
+      <div class="card2"><h3>Top films</h3><ol>${w.topFilms.slice(0, 8).map(x => `<li data-id="${esc(x.imdb || "")}" data-t="movie">${esc(x.title)} <span class="muted">${x.year || ""}${x.plays > 1 ? " · " + x.plays + "×" : ""}</span></li>`).join("")}</ol></div>
+    </div>`;
+  v.querySelectorAll("[data-y]").forEach(b => b.onclick = () => { navStack[navStack.length - 1][1] = [+b.dataset.y]; showYear(+b.dataset.y); });
+  v.querySelectorAll("li[data-id]").forEach(li => { if (li.dataset.id) li.onclick = () => go("title", li.dataset.t, li.dataset.id, { name: li.textContent }); });
+}
+
+// ---------------------------------------------------------------- "What shall we watch?"
+
+let matchPoll = 0;
+async function showMatch() {
+  clearInterval(matchPoll);
+  const v = $("#view");
+  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1><div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div><div class="empty">Shuffling the deck…</div>`;
+  let m;
+  try { m = await (await fetch(`${feed()}/match/new`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); }
+  catch (e) { $(".empty", v).textContent = "Couldn't reach lucapi: " + e.message; return; }
+  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1><div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div>
+    <div class="match fade-in">
+      <div class="card2 qr"><img src="${feed()}/match/${m.code}/qr.png" alt="QR code" onerror="this.remove()">
+        <div>Scan with your phone's camera, or go to<br><b>${esc(feed().replace(/^https?:\/\//, ""))}/m/${m.code}</b></div>
+        <div class="code">${m.code}</div><div class="people muted">Waiting for people to join…</div>
+        <button class="btn" id="again">New deck</button></div>
+      <div class="matches"><h3>Matches</h3><div class="grid tight"><div class="muted">None yet. Needs at least two people.</div></div></div>
+    </div>`;
+  $("#again", v).onclick = showMatch;
+  let shown = "";
+  const tick = async () => {
+    if (!document.body.contains($(".match", v))) return clearInterval(matchPoll);
+    let st; try { st = await getJson(`${feed()}/match/${m.code}`, 5000); } catch (e) { return; }
+    $(".people", v).innerHTML = st.people.length ? st.people.map(p => `<span class="chip">${esc(p.name)} · ${p.swiped}/${st.deckSize}</span>`).join(" ") : "Waiting for people to join…";
+    const key = st.matches.map(x => x.id).join();
+    if (key === shown) return;
+    shown = key;
+    const g = $(".matches .grid", v); g.innerHTML = "";
+    if (!st.matches.length) g.innerHTML = `<div class="muted">None yet${st.people.length < 2 ? ". Needs at least two people." : "."}</div>`;
+    st.matches.forEach(x => g.appendChild(card({ ...x }, x.type)));
+    if (st.matches.length) toast(`It's a match: ${st.matches[st.matches.length - 1].name}`);
+  };
+  tick(); matchPoll = setInterval(tick, 2000);
+}
+
+// ---------------------------------------------------------------- watch together
+
+let together = null; // { code } while you're in a room
+function togetherBar() {
+  return `<div class="together">${together
+    ? `<span class="chip on">Together · ${together.code}</span> <button class="linkish" data-tg="leave">Leave</button>`
+    : `<button class="linkish" data-tg="new">Watch together…</button> <input class="tg-code" maxlength="4" placeholder="Code"> <button class="linkish" data-tg="join">Join</button>`}</div>`;
+}
+function wireTogether(el) {
+  el.querySelectorAll("[data-tg]").forEach(b => b.onclick = async () => {
+    if (b.dataset.tg === "leave") together = null;
+    else if (b.dataset.tg === "new") {
+      try { together = await (await fetch(`${feed()}/together/new`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+        toast(`Room ${together.code}: on the other device, open the same episode, type ${together.code} and press Join. Pause, play and skipping stay in step.`, 9000); }
+      catch (e) { toast("Couldn't reach lucapi: " + e.message); }
+    } else {
+      const c = (el.querySelector(".tg-code").value || "").trim().toUpperCase();
+      if (c.length === 4) { together = { code: c }; toast(`Joined ${c}. Press Play: you'll follow the others' pause, play and skips.`, 6000); }
+    }
+    const bar = el.querySelector(".together"); bar.outerHTML = togetherBar(); wireTogether(el);
+  });
+}
+
 async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   if (!chosen) attempt = null; // picked by hand: no automatic switching
   if (!invoke) return toast("Playing only works inside the Ember app.");
   const embed = store.get("playMode", "window") === "window";
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
-    `ember-episode=${episode ?? ""}`, "ember-device=Ember PC"].join(",");
+    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`,
+    `ember-room=${together ? together.code : ""}`, `ember-who=${deviceName().replace(/[,\s]+/g, "-")}`].join(",");
   try {
     await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts });
     if (!retry) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
@@ -469,6 +581,7 @@ function showSettings() {
     <div class="form">
       <label>Your AIOStreams manifest link</label><input type="text" id="aio" placeholder="https://…/manifest.json">
       <label>lucapi (ember-feed)</label><input type="text" id="feed" placeholder="http://192.168.4.141:8090">
+      <label>This computer's name (shown in resume points and watch together)</label><input type="text" id="dev" placeholder="Ember PC">
       <label>Playing</label>
       <label class="check"><input type="radio" name="pm" value="window"> In the Ember window</label>
       <label class="check"><input type="radio" name="pm" value="full"> Full screen</label>
@@ -481,13 +594,13 @@ function showSettings() {
       <label class="check"><input type="checkbox" id="motion"> Moving background (stars at night, embers in the evening)</label>
       <div class="btns" style="margin-top:18px"><button class="btn primary" id="save">Save</button></div>
     </div>`;
-  $("#aio").value = store.get("aio"); $("#feed").value = feed();
+  $("#aio").value = store.get("aio"); $("#feed").value = feed(); $("#dev").value = deviceName();
   document.querySelector(`input[name=pm][value=${store.get("playMode", "window")}]`).checked = true;
   $("#pt").checked = store.get("passthrough", "0") === "1";
   document.querySelector(`input[name=q][value=${store.get("quality", "4k")}]`).checked = true;
   $("#motion").checked = store.get("motion", "1") === "1";
   $("#save").onclick = () => {
-    store.set("aio", $("#aio").value.trim()); store.set("feed", $("#feed").value.trim());
+    store.set("aio", $("#aio").value.trim()); store.set("feed", $("#feed").value.trim()); store.set("deviceName", $("#dev").value.trim().slice(0, 30));
     store.set("playMode", document.querySelector("input[name=pm]:checked").value);
     store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0");
     addonCatalogs = null; sky.start(); toast("Saved");

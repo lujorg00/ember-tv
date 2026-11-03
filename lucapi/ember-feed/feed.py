@@ -15,6 +15,10 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
   GET /pick/<type>/<id>?aio=&quality=4k&runtime=  -> streams best first, the top few tested for speed
   POST /pick/failed -> a player says a stream errored or stalled (it's pushed down next time)
+  GET /upcoming     -> new and upcoming episodes of your shows (Trakt calendar)
+  GET /wrapped?year= -> your year in watching (Trakt history)
+  POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
+  POST /together/new, POST/GET /together/<code> -> watch together (shared pause / play / seek)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -855,6 +859,18 @@ def alerts():
             if early and i == 0:
                 item["wake"] = (start - timedelta(minutes=wake_before)).isoformat()
             out.append(item)
+    # New episodes of your shows, once, when they come out (or when the TV next comes on that day).
+    try:
+        for ep in upcoming(days=2, back=1)["episodes"]:
+            at = datetime.fromisoformat(ep["airs"])
+            until = at + timedelta(hours=14)
+            if until <= now or at > horizon:
+                continue
+            out.append({"id": f"ep|{ep['imdb']}|{ep['season']}|{ep['episode']}", "at": at.isoformat(), "until": until.isoformat(),
+                        "start": at.isoformat(), "title": f"New episode out: {ep['show']} S{ep['season']} E{ep['episode']}"
+                        + (f" \u00b7 {ep['title']}" if ep.get("title") else ""), "where": "", "kind": "ep", "shift": False, "level": 1})
+    except Exception as e:
+        print(f"[ember-feed] episode alerts skipped: {e}", flush=True)
     out.sort(key=lambda x: x["at"])
     return {"now": now.isoformat(), "alerts": out}
 
@@ -1015,6 +1031,268 @@ def pick(typ, sid, aio, want="4k", runtime_min=None, passthrough=False, probe_to
     return {"count": len(streams), "ranked": ranked[:12]}
 
 
+# ------------------------------------------------------------------ new episodes (Trakt calendar)
+
+
+def _calendar(start, days):
+    return _trakt(f"/calendars/my/shows/{start}/{days}?extended=full")
+
+
+def upcoming(days=7, back=1):
+    """Episodes of shows you watch, from `back` days ago to `days` ahead: for the 'Out this week' row and alerts."""
+    start = (datetime.now(TZ) - timedelta(days=back)).strftime("%Y-%m-%d")
+    raw = cached(f"cal:{start}:{days + back}", 1800, lambda: _calendar(start, days + back))
+    eps = []
+    for it in raw or []:
+        show, ep = it.get("show", {}), it.get("episode", {})
+        imdb = (show.get("ids") or {}).get("imdb")
+        if not imdb or not it.get("first_aired"):
+            continue
+        airs = datetime.fromisoformat(it["first_aired"].replace("Z", "+00:00")).astimezone(TZ)
+        eps.append({"imdb": imdb, "show": show.get("title", ""), "season": ep.get("season"), "episode": ep.get("number"),
+                    "title": ep.get("title") or "", "airs": airs.isoformat(), "day": airs.strftime("%a %-d %b"),
+                    "time": airs.strftime("%H:%M"), "out": airs <= datetime.now(TZ)})
+    eps.sort(key=lambda e: e["airs"])
+    return {"episodes": eps}
+
+# ------------------------------------------------------------------ your year in watching (Trakt history)
+
+
+def _history(start_iso, end_iso):
+    out, page = [], 1
+    while page <= 40:
+        batch = _trakt(f"/sync/history?start_at={start_iso}&end_at={end_iso}&extended=full&limit=250&page={page}")
+        if not batch:
+            break
+        out += batch
+        if len(batch) < 250:
+            break
+        page += 1
+    return out
+
+
+def wrapped(year=None):
+    year = int(year or datetime.now(TZ).year)
+
+    def build():
+        items = _history(f"{year}-01-01T00:00:00.000Z", f"{year}-12-31T23:59:59.000Z")
+        mins, shows, films, days, hours, weekdays = 0, {}, {}, {}, [0] * 24, [0] * 7
+        for it in items:
+            t = datetime.fromisoformat(it["watched_at"].replace("Z", "+00:00")).astimezone(TZ)
+            if it.get("type") == "episode":
+                rt = (it.get("episode") or {}).get("runtime") or (it.get("show") or {}).get("runtime") or 0
+                sh = it.get("show") or {}
+                k = (sh.get("ids") or {}).get("imdb") or sh.get("title")
+                rec = shows.setdefault(k, {"imdb": (sh.get("ids") or {}).get("imdb"), "title": sh.get("title", ""), "episodes": 0, "minutes": 0})
+                rec["episodes"] += 1; rec["minutes"] += rt
+            else:
+                mv = it.get("movie") or {}
+                rt = mv.get("runtime") or 0
+                k = (mv.get("ids") or {}).get("imdb") or mv.get("title")
+                rec = films.setdefault(k, {"imdb": (mv.get("ids") or {}).get("imdb"), "title": mv.get("title", ""), "year": mv.get("year"), "plays": 0})
+                rec["plays"] += 1
+            mins += rt
+            d = t.strftime("%Y-%m-%d")
+            days[d] = days.get(d, 0) + rt
+            hours[t.hour] += 1
+            weekdays[t.weekday()] += 1
+        names = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+        top_day = max(days.items(), key=lambda x: x[1]) if days else None
+        top_hour = max(range(24), key=lambda h: hours[h]) if items else None
+        return {
+            "year": year, "plays": len(items), "hours": round(mins / 60), "days": round(mins / 1440, 1),
+            "episodes": sum(s["episodes"] for s in shows.values()), "films": sum(f["plays"] for f in films.values()),
+            "topShows": sorted(shows.values(), key=lambda s: -s["minutes"])[:10],
+            "topFilms": sorted(films.values(), key=lambda f: -f["plays"])[:10],
+            "rewatched": [f for f in sorted(films.values(), key=lambda f: -f["plays"]) if f["plays"] > 1][:5],
+            "busiestDay": {"date": top_day[0], "hours": round(top_day[1] / 60, 1)} if top_day else None,
+            "favouriteNight": names[max(range(7), key=lambda d: weekdays[d])] if items else None,
+            "favouriteHour": top_hour, "byHour": hours, "byWeekday": weekdays,
+            "byMonth": [round(sum(m for d, m in days.items() if int(d[5:7]) == mo) / 60) for mo in range(1, 13)],
+        }
+    return cached(f"wrapped:{year}", 6 * 3600, build)
+
+# ------------------------------------------------------------------ "What shall we watch?" swipe match
+# The TV or PC starts a session and shows a QR code; phones open /m/<code>, swipe the same deck, and anything
+# everyone liked is a match. Sessions live in memory for 3 hours.
+
+_matches = {}
+_match_lock = threading.Lock()
+
+
+def _deck():
+    cards, seen = [], set()
+    try:
+        man = json.loads(http_get(CFG["addon_upstream"].rstrip("/") + "/manifest.json", timeout=15))
+        cats = [c for c in man.get("catalogs", []) if not any(x.get("isRequired") for x in c.get("extra", []))]
+        # recommendations first, then the top lists
+        cats.sort(key=lambda c: 0 if re.search(r"for you|recommend", c.get("name", ""), re.I) else 1)
+        for c in cats[:8]:
+            try:
+                metas = json.loads(http_get(f"{CFG['addon_upstream'].rstrip('/')}/catalog/{c['type']}/{c['id']}.json", timeout=15)).get("metas", [])
+            except Exception:
+                continue
+            for m in metas[:15]:
+                if m.get("id") in seen or not str(m.get("id", "")).startswith("tt"):
+                    continue
+                seen.add(m["id"])
+                cards.append({"id": m["id"], "type": m.get("type") or c["type"], "name": m.get("name", ""),
+                              "poster": m.get("poster") or f"https://images.metahub.space/poster/medium/{m['id']}/img",
+                              "year": m.get("releaseInfo") or m.get("year") or "", "rating": m.get("imdbRating") or "",
+                              "genres": (m.get("genres") or [])[:3], "description": (m.get("description") or "")[:240]})
+    except Exception as e:
+        print(f"[ember-feed] match deck failed: {e}", flush=True)
+    random.shuffle(cards)
+    return cards[:60]
+
+
+def match_new(body):
+    code = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
+    with _match_lock:
+        for k in [k for k, v in _matches.items() if time.time() - v["created"] > 3 * 3600]:
+            del _matches[k]
+        _matches[code] = {"code": code, "created": time.time(), "deck": _deck(), "people": {}, "votes": {},
+                          "kind": body.get("kind", "any")}
+    return match_state(code)
+
+
+def match_state(code):
+    with _match_lock:
+        m = _matches.get(code.upper())
+        if not m:
+            return {"error": "no such session"}
+        people = list(m["people"].values())
+        liked = {}
+        for (pid, cid), v in m["votes"].items():
+            if v:
+                liked.setdefault(cid, set()).add(pid)
+        need = set(m["people"].keys())
+        matches = [c for c in m["deck"] if need and len(need) >= 2 and need <= liked.get(c["id"], set())]
+        done = {pid: sum(1 for (p, _c) in m["votes"] if p == pid) for pid in m["people"]}
+        return {"code": m["code"], "people": [{"name": p["name"], "swiped": done.get(p["id"], 0)} for p in people],
+                "deckSize": len(m["deck"]), "matches": matches}
+
+
+def match_join(code, body):
+    with _match_lock:
+        m = _matches.get(code.upper())
+        if not m:
+            return {"error": "no such session"}
+        pid = body.get("id") or "".join(random.choice("abcdef0123456789") for _ in range(10))
+        m["people"][pid] = {"id": pid, "name": str(body.get("name", "Someone"))[:20] or "Someone"}
+        return {"id": pid, "deck": m["deck"]}
+
+
+def match_vote(code, body):
+    with _match_lock:
+        m = _matches.get(code.upper())
+        if not m or body.get("id") not in m["people"]:
+            return {"error": "join first"}
+        m["votes"][(body["id"], str(body.get("card")))] = bool(body.get("like"))
+    return match_state(code)
+
+
+def match_qr(code, base):
+    """A QR code (PNG) for the phone page. Needs: pip install qrcode[pil]"""
+    import io
+    import qrcode
+    img = qrcode.make(f"{base}/m/{code.upper()}", box_size=10, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+MATCH_PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>What shall we watch?</title>
+<style>
+:root{--bg:#0E0B09;--card:#1C1612;--text:#F3E7DA;--muted:#A8968A;--accent:#F0A04B}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;overflow:hidden;touch-action:none}
+header{padding:14px 18px 6px;display:flex;justify-content:space-between;align-items:baseline}header b{color:var(--accent);font-size:18px}
+#join{padding:30px 22px}#join input{width:100%;padding:14px;border-radius:12px;border:1px solid #3a2a1f;background:var(--card);color:var(--text);font-size:17px}
+button{font:inherit;border:0;border-radius:14px;padding:14px 18px;background:var(--accent);color:#2A1606;font-weight:700}
+#stage{position:relative;height:calc(100% - 150px);margin:6px 16px}
+.c{position:absolute;inset:0;border-radius:20px;background:var(--card) center/cover;box-shadow:0 10px 30px #0008;overflow:hidden;transition:transform .25s}
+.c .i{position:absolute;inset:auto 0 0;padding:60px 16px 16px;background:linear-gradient(transparent,#000d)}
+.c h2{margin:0 0 4px;font-size:22px}.c p{margin:4px 0 0;color:#ddd;font-size:13px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.tag{position:absolute;top:22px;padding:6px 14px;border:3px solid;border-radius:10px;font-weight:800;font-size:22px;opacity:0}
+.yes{left:18px;color:#7CE38B;transform:rotate(-12deg)}.no{right:18px;color:#FF7B7B;transform:rotate(12deg)}
+#btns{display:flex;justify-content:center;gap:28px;padding:12px}#btns button{width:68px;height:68px;border-radius:50%;font-size:28px;padding:0}
+#btns .n{background:#3a2420;color:#FF9A8E}#btns .y{background:#203a24;color:#9FF0A9}
+.muted{color:var(--muted)}#done{display:none;padding:40px 22px;text-align:center}
+</style></head><body>
+<header><b>What shall we watch?</b><span class="muted" id="who"></span></header>
+<div id="join"><p class="muted">Swipe right on anything you'd watch, left if not. Whatever you all like shows up on the TV.</p>
+<input id="name" placeholder="Your name" maxlength="20"><p><button id="go">Start swiping</button></p></div>
+<div id="stage" hidden></div><div id="btns" hidden><button class="n" id="no">✕</button><button class="y" id="yes">♥</button></div>
+<div id="done"><h2>That's all of them</h2><p class="muted">Your matches are on the TV.</p></div>
+<script>
+const code=location.pathname.split('/').pop().toUpperCase(),api='/match/'+code;let me=null,deck=[],i=0;
+const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+document.getElementById('name').value=ls.get('name')||'';
+document.getElementById('go').onclick=async()=>{const name=document.getElementById('name').value.trim()||'Someone';ls.set('name',name);
+ const r=await (await fetch(api+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,id:ls.get('id_'+code)})})).json();
+ if(r.error){alert('That session has ended. Start a new one on the TV.');return}
+ me=r.id;ls.set('id_'+code,me);deck=r.deck;document.getElementById('who').textContent=name;
+ document.getElementById('join').hidden=true;document.getElementById('stage').hidden=false;document.getElementById('btns').hidden=false;show()};
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function show(){const st=document.getElementById('stage');st.innerHTML='';
+ if(i>=deck.length){st.hidden=true;document.getElementById('btns').hidden=true;document.getElementById('done').style.display='block';return}
+ const d=deck[i],c=document.createElement('div');c.className='c';c.style.backgroundImage="url('"+d.poster+"')";
+ c.innerHTML='<span class="tag yes">YES</span><span class="tag no">NOPE</span><div class="i"><h2>'+esc(d.name)+'</h2><div class="muted">'+esc([d.year,d.rating&&'★ '+d.rating,(d.genres||[]).join(', ')].filter(Boolean).join(' · '))+'</div><p>'+esc(d.description)+'</p></div>';
+ st.appendChild(c);let x0=null,dx=0;
+ c.addEventListener('pointerdown',e=>{x0=e.clientX;c.style.transition='none';c.setPointerCapture(e.pointerId)});
+ c.addEventListener('pointermove',e=>{if(x0===null)return;dx=e.clientX-x0;c.style.transform='translateX('+dx+'px) rotate('+dx/20+'deg)';
+  c.querySelector('.yes').style.opacity=Math.max(0,dx/100);c.querySelector('.no').style.opacity=Math.max(0,-dx/100)});
+ c.addEventListener('pointerup',()=>{c.style.transition='';if(Math.abs(dx)>90)vote(dx>0);else c.style.transform='';x0=null;dx=0})}
+async function vote(like){const c=document.querySelector('.c');if(c)c.style.transform='translateX('+(like?600:-600)+'px) rotate('+(like?30:-30)+'deg)';
+ const d=deck[i++];fetch(api+'/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:me,card:d.id,like})});setTimeout(show,180)}
+document.getElementById('yes').onclick=()=>vote(true);document.getElementById('no').onclick=()=>vote(false);
+</script></body></html>"""
+
+# ------------------------------------------------------------------ watch together
+# Players in the same room share pause / play / seek. Each event has a number; players ask for anything newer.
+
+_rooms = {}
+_room_lock = threading.Lock()
+
+
+def room_event(code, body):
+    with _room_lock:
+        r = _rooms.setdefault(code.upper(), {"n": 0, "events": [], "members": {}, "made": time.time()})
+        r["n"] += 1
+        ev = {"n": r["n"], "from": str(body.get("from", ""))[:40], "action": body.get("action"),
+              "pos": float(body.get("pos") or 0), "at": time.time()}
+        if ev["action"] not in ("pause", "play", "seek", "hello", "bye"):
+            raise ValueError("unknown action")
+        r["events"] = (r["events"] + [ev])[-50:]
+        if ev["action"] == "hello":
+            r["members"][ev["from"]] = time.time()
+        elif ev["action"] == "bye":
+            r["members"].pop(ev["from"], None)
+        return {"n": r["n"]}
+
+
+def room_since(code, since, who=""):
+    with _room_lock:
+        r = _rooms.get(code.upper())
+        if not r:
+            return {"n": 0, "events": [], "members": []}
+        if who:
+            r["members"][who] = time.time()
+        live = [m for m, t in r["members"].items() if time.time() - t < 20]
+        return {"n": r["n"], "events": [e for e in r["events"] if e["n"] > since and e["from"] != who], "members": live}
+
+
+def room_new():
+    code = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
+    with _room_lock:
+        for k in [k for k, v in _rooms.items() if time.time() - v["made"] > 12 * 3600]:
+            del _rooms[k]
+        _rooms[code] = {"n": 0, "events": [], "members": {}, "made": time.time()}
+    return {"code": code}
+
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -1063,6 +1341,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(report(body))
             elif path == "/pick/failed":
                 self._json(stream_failed(body))
+            elif path == "/match/new":
+                self._json(match_new(body))
+            elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/join", path):
+                self._json(match_join(path.split("/")[2], body))
+            elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/vote", path):
+                self._json(match_vote(path.split("/")[2], body))
+            elif path == "/together/new":
+                self._json(room_new())
+            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
+                self._json(room_event(path.split("/")[2], body))
             else:
                 self._json({"error": "not found"}, 404)
         except ValueError as e:
@@ -1098,6 +1386,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(weather())
             elif path == "/progress":
                 self._json(progress())
+            elif path == "/upcoming":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(upcoming(days=int((q.get("days") or [7])[0])))
+            elif path == "/wrapped":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(wrapped((q.get("year") or [None])[0]))
+            elif re.fullmatch(r"/m/[A-Za-z0-9]{4}", path):
+                body = MATCH_PAGE.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif re.fullmatch(r"/match/[A-Za-z0-9]{4}", path):
+                self._json(match_state(path.split("/")[2]))
+            elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/qr.png", path):
+                png = match_qr(path.split("/")[2], self._base())
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(png)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(png)
+            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(room_since(path.split("/")[2], int((q.get("since") or [0])[0]), (q.get("who") or [""])[0]))
             elif path.startswith("/pick/"):
                 parts = path.split("/")  # /pick/<type>/<id>
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

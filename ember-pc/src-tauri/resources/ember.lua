@@ -3,7 +3,8 @@
 local mp = require 'mp'
 local utils = require 'mp.utils'
 local msg = require 'mp.msg'
-local o = { feed = "", imdb = "", type = "movie", season = "", episode = "", device = "Ember PC", key = "", title = "" }
+local o = { feed = "", imdb = "", type = "movie", season = "", episode = "", device = "Ember PC", key = "", title = "",
+            room = "", who = "" }
 require('mp.options').read_options(o, "ember")
 if o.feed == "" or o.imdb == "" then
     msg.error("no Pi address or title given, so progress won't be saved (feed='" .. o.feed .. "', imdb='" .. o.imdb .. "')")
@@ -78,3 +79,55 @@ mp.register_event("end-file", function(e)
     sent_end = true
     post("stopped", true, e.reason == "eof")
 end)
+
+-- Watch together: share pause / play / seek with everyone in the same room (via the Pi).
+if o.room ~= "" then
+    local since, quiet_until = 0, 0
+    local function send(action)
+        if mp.get_time() < quiet_until then return end -- this change came from someone else
+        local body = utils.format_json({ from = o.who, action = action, pos = pos or 0 })
+        mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true,
+            args = { "curl", "-s", "-m", "4", "-X", "POST", "-H", "Content-Type: application/json", "-d", body,
+                     o.feed .. "/together/" .. o.room } }, function() end)
+    end
+    local function apply(ev)
+        quiet_until = mp.get_time() + 1.5
+        if ev.action == "pause" then
+            mp.set_property_bool("pause", true)
+            if ev.pos and math.abs((pos or 0) - ev.pos) > 2 then mp.commandv("seek", tostring(ev.pos), "absolute") end
+            mp.osd_message("Paused by " .. ev.from, 2)
+        elseif ev.action == "play" then
+            if ev.pos and math.abs((pos or 0) - ev.pos) > 2 then mp.commandv("seek", tostring(ev.pos), "absolute") end
+            mp.set_property_bool("pause", false)
+            mp.osd_message("Playing (" .. ev.from .. ")", 2)
+        elseif ev.action == "seek" then
+            mp.commandv("seek", tostring(ev.pos), "absolute")
+            mp.osd_message(ev.from .. " jumped to " .. math.floor(ev.pos / 60) .. ":" .. string.format("%02d", math.floor(ev.pos % 60)), 2)
+        elseif ev.action == "hello" then
+            mp.osd_message(ev.from .. " joined", 3)
+        end
+    end
+    local loaded_at = 1e9
+    mp.register_event("file-loaded", function() loaded_at = mp.get_time(); send("hello") end)
+    mp.observe_property("pause", "bool", function(_, p)
+        if started and p ~= nil then send(p and "pause" or "play") end
+    end)
+    local seeking_by_user = false
+    mp.observe_property("seeking", "bool", function(_, s)
+        if s then seeking_by_user = mp.get_time() >= quiet_until and mp.get_time() > loaded_at + 3
+        elseif seeking_by_user then seeking_by_user = false; send("seek") end
+    end)
+    mp.add_periodic_timer(1, function()
+        mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true,
+            args = { "curl", "-s", "-m", "3", o.feed .. "/together/" .. o.room .. "?since=" .. since .. "&who=" .. o.who } },
+            function(ok, r)
+                if not (ok and r and r.status == 0 and r.stdout) then return end
+                local j = utils.parse_json(r.stdout)
+                if not j then return end
+                if since == 0 then since = j.n; return end -- don't replay what happened before you joined
+                since = j.n
+                for _, ev in ipairs(j.events or {}) do apply(ev) end
+            end)
+    end)
+    mp.register_event("shutdown", function() send("bye") end)
+end
