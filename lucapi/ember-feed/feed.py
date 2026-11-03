@@ -18,6 +18,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /upcoming     -> new and upcoming episodes of your shows (Trakt calendar)
   GET /wrapped?year= -> your year in watching (Trakt history)
   POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
+  GET /picks/<code>/manifest.json -> "Ember picks", the picker as a Stremio addon for Omni and friends
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -1007,7 +1008,7 @@ def pick(typ, sid, aio, want="4k", runtime_min=None, passthrough=False, probe_to
         sc -= i * 0.5  # keep AIOStreams' own order as the tie-break
         scored.append({"i": i, "score": round(sc, 1), "why": why, "need_mbps": round(need, 1) if need else None, "url": s["url"],
                        "name": s.get("name", ""), "title": s.get("title") or s.get("description") or "",
-                       "filename": (s.get("behaviorHints") or {}).get("filename", "")})
+                       "filename": (s.get("behaviorHints") or {}).get("filename", ""), "hints": s.get("behaviorHints") or {}})
     scored.sort(key=lambda x: -x["score"])
     top = [x for x in scored if x["score"] > -1e8][:probe_top]
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(top))) as ex:
@@ -1249,6 +1250,68 @@ async function vote(like){const c=document.querySelector('.c');if(c)c.style.tran
 document.getElementById('yes').onclick=()=>vote(true);document.getElementById('no').onclick=()=>vote(false);
 </script></body></html>"""
 
+# ------------------------------------------------------------------ "Ember picks": the picker as a Stremio addon
+# For Omni (or any app that takes Stremio addons): the same streams as AIOStreams, but tested and best first,
+# each labelled with why. Install from  http://<pi>:8090/picks/<code>/manifest.json  where <code> is your
+# AIOStreams link, base64url-encoded (Ember PC's Settings shows the ready-made link).
+
+import base64
+
+
+def _aio_from_code(code):
+    if code in ("", "default"):
+        return CFG.get("aiostreams_url", "")
+    pad = "=" * (-len(code) % 4)
+    return base64.urlsafe_b64decode(code + pad).decode()
+
+
+def picks_manifest(code):
+    return {"id": "org.lucamedia.ember.picks", "version": "1.0.0", "name": "Ember picks",
+            "description": "Your AIOStreams results, tested for speed and sorted best first by lucapi.",
+            "resources": ["stream"], "types": ["movie", "series"], "idPrefixes": ["tt"], "catalogs": [],
+            "behaviorHints": {"configurable": False}}
+
+
+def _runtime_for(typ, imdb):
+    """Running time in minutes, from Cinemeta, so the picker can tell how heavy a file is."""
+    def get():
+        m = json.loads(http_get(f"https://v3-cinemeta.strem.io/meta/{typ}/{imdb}.json", timeout=10)).get("meta", {})
+        rt = re.search(r"\d+", str(m.get("runtime") or ""))
+        return int(rt.group()) if rt else None
+    try:
+        return cached(f"rt:{typ}:{imdb}", 7 * 86400, get)
+    except Exception:
+        return None
+
+
+def picks_streams(code, typ, sid):
+    aio = _aio_from_code(code)
+    q = CFG.get("picker", {}).get("addon_quality", "4k")
+    r = cached(f"picks:{typ}:{sid}:{q}", 600, lambda: pick(typ, sid, aio, q, _runtime_for(typ, sid.split(":")[0])))
+    out = []
+    for n, x in enumerate(r["ranked"]):
+        text = f"{x['name']}\n{x['title']}\n{x['filename']}"
+        tags = [t for t, rx in [("4K", r"\b(2160p|4k|uhd)\b"), ("1080p", r"\b1080p\b"), ("DV", r"\b(dv|dovi|dolby ?vision)\b"),
+                                ("HDR", r"\bhdr"), ("Atmos", r"\batmos\b"), ("DD+", r"\b(ddp|dd\+|e-?ac-?3)")] if re.search(rx, text, re.I)]
+        if "4K" in tags and "1080p" in tags:
+            tags.remove("1080p")
+        if "DV" in tags and "HDR" in tags:
+            tags.remove("HDR")
+        size = _SIZE.search(text)
+        pr = x.get("probe") or {}
+        speed = f"tested {pr['mbps']:.0f} Mbit/s" if pr.get("ok") else ("didn't answer the test" if pr else "")
+        head = ("★ Ember pick" if n == 0 else f"#{n + 1}") + (f"\n{tags[0]}" if tags else "")
+        line1 = " · ".join(tags + ([f"{size.group(1)} {size.group(2).upper()}"] if size else []) + (["⚡ cached"] if "cached" in x["why"] else []))
+        line2 = " · ".join([w for w in [speed] + [w for w in x["why"] if w not in ("cached", "HDR", "Dolby Vision")] if w])
+        orig = (x["filename"] or x["title"].split("\n")[0])[:90]
+        st = {"name": head, "description": "\n".join([l for l in [line1, line2, orig] if l]), "url": x["url"]}
+        hints = dict(x.get("hints") or {})
+        hints.setdefault("bingeGroup", "ember-picks")
+        st["behaviorHints"] = hints
+        out.append(st)
+    return {"streams": out}
+
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -1339,6 +1402,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(weather())
             elif path == "/progress":
                 self._json(progress())
+            elif re.fullmatch(r"/picks/[A-Za-z0-9_=-]+/manifest\.json", path):
+                self._json(picks_manifest(path.split("/")[2]))
+            elif re.fullmatch(r"/picks/[A-Za-z0-9_=-]+/stream/(movie|series)/tt[0-9:]+\.json", path):
+                parts = path.split("/")
+                self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
             elif path == "/upcoming":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(upcoming(days=int((q.get("days") or [7])[0])))

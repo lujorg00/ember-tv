@@ -568,17 +568,27 @@ function showSettings() {
       <label>Background</label>
       <label class="check"><input type="checkbox" id="motion"> Moving background (stars at night, embers in the evening)</label>
       <div class="btns" style="margin-top:18px"><button class="btn primary" id="save">Save</button></div>
+      <label style="margin-top:28px">Ember picks for Omni (or any app that takes Stremio addons)</label>
+      <div class="muted" style="font-size:13px">Add this as an addon in Omni: it gives the same streams as AIOStreams, tested and sorted best first by lucapi. It works at home, where the Apple TV can reach the Pi. It contains your AIOStreams link, so keep it to yourself.</div>
+      <div class="btns"><input type="text" id="picksUrl" readonly style="flex:1;min-width:380px"><button class="btn" id="copyPicks">Copy</button></div>
     </div>`;
   $("#aio").value = store.get("aio"); $("#feed").value = feed(); $("#dev").value = deviceName();
   document.querySelector(`input[name=pm][value=${store.get("playMode", "window")}]`).checked = true;
   $("#pt").checked = store.get("passthrough", "0") === "1";
   document.querySelector(`input[name=q][value=${store.get("quality", "4k")}]`).checked = true;
   $("#motion").checked = store.get("motion", "1") === "1";
+  const picksUrl = () => {
+    const aio = store.get("aio"); if (!aio) return "Add your AIOStreams link above first";
+    const b64 = btoa(unescape(encodeURIComponent(aio))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${feed()}/picks/${b64}/manifest.json`;
+  };
+  $("#picksUrl").value = picksUrl();
+  $("#copyPicks").onclick = async () => { try { await navigator.clipboard.writeText($("#picksUrl").value); toast("Copied"); } catch (e) { $("#picksUrl").select(); } };
   $("#save").onclick = () => {
     store.set("aio", $("#aio").value.trim()); store.set("feed", $("#feed").value.trim()); store.set("deviceName", $("#dev").value.trim().slice(0, 30));
     store.set("playMode", document.querySelector("input[name=pm]:checked").value);
     store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0");
-    addonCatalogs = null; sky.start(); toast("Saved");
+    addonCatalogs = null; sky.start(); $("#picksUrl").value = picksUrl(); toast("Saved");
   };
 }
 
