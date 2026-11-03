@@ -18,7 +18,6 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /upcoming     -> new and upcoming episodes of your shows (Trakt calendar)
   GET /wrapped?year= -> your year in watching (Trakt history)
   POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
-  POST /together/new, POST/GET /together/<code> -> watch together (shared pause / play / seek)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -1250,49 +1249,6 @@ async function vote(like){const c=document.querySelector('.c');if(c)c.style.tran
 document.getElementById('yes').onclick=()=>vote(true);document.getElementById('no').onclick=()=>vote(false);
 </script></body></html>"""
 
-# ------------------------------------------------------------------ watch together
-# Players in the same room share pause / play / seek. Each event has a number; players ask for anything newer.
-
-_rooms = {}
-_room_lock = threading.Lock()
-
-
-def room_event(code, body):
-    with _room_lock:
-        r = _rooms.setdefault(code.upper(), {"n": 0, "events": [], "members": {}, "made": time.time()})
-        r["n"] += 1
-        ev = {"n": r["n"], "from": str(body.get("from", ""))[:40], "action": body.get("action"),
-              "pos": float(body.get("pos") or 0), "at": time.time()}
-        if ev["action"] not in ("pause", "play", "seek", "hello", "bye"):
-            raise ValueError("unknown action")
-        r["events"] = (r["events"] + [ev])[-50:]
-        if ev["action"] == "hello":
-            r["members"][ev["from"]] = time.time()
-        elif ev["action"] == "bye":
-            r["members"].pop(ev["from"], None)
-        return {"n": r["n"]}
-
-
-def room_since(code, since, who=""):
-    with _room_lock:
-        r = _rooms.get(code.upper())
-        if not r:
-            return {"n": 0, "events": [], "members": []}
-        if who:
-            r["members"][who] = time.time()
-        live = [m for m, t in r["members"].items() if time.time() - t < 20]
-        return {"n": r["n"], "events": [e for e in r["events"] if e["n"] > since and e["from"] != who], "members": live}
-
-
-def room_new():
-    code = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
-    with _room_lock:
-        for k in [k for k, v in _rooms.items() if time.time() - v["made"] > 12 * 3600]:
-            del _rooms[k]
-        _rooms[code] = {"n": 0, "events": [], "members": {}, "made": time.time()}
-    return {"code": code}
-
-
 # ------------------------------------------------------------------ HTTP
 
 
@@ -1347,10 +1303,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(match_join(path.split("/")[2], body))
             elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/vote", path):
                 self._json(match_vote(path.split("/")[2], body))
-            elif path == "/together/new":
-                self._json(room_new())
-            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
-                self._json(room_event(path.split("/")[2], body))
+
             else:
                 self._json({"error": "not found"}, 404)
         except ValueError as e:
@@ -1409,9 +1362,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(png)
-            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
-                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                self._json(room_since(path.split("/")[2], int((q.get("since") or [0])[0]), (q.get("who") or [""])[0]))
             elif path.startswith("/pick/"):
                 parts = path.split("/")  # /pick/<type>/<id>
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

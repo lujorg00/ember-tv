@@ -376,9 +376,8 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
     ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
       <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}
-    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div>${togetherBar()}</div>
+    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div></div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
-  wireTogether(right);
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
   let streams = [];
@@ -526,36 +525,12 @@ async function showMatch() {
   tick(); matchPoll = setInterval(tick, 2000);
 }
 
-// ---------------------------------------------------------------- watch together
-
-let together = null; // { code } while you're in a room
-function togetherBar() {
-  return `<div class="together">${together
-    ? `<span class="chip on">Together · ${together.code}</span> <button class="linkish" data-tg="leave">Leave</button>`
-    : `<button class="linkish" data-tg="new">Watch together…</button> <input class="tg-code" maxlength="4" placeholder="Code"> <button class="linkish" data-tg="join">Join</button>`}</div>`;
-}
-function wireTogether(el) {
-  el.querySelectorAll("[data-tg]").forEach(b => b.onclick = async () => {
-    if (b.dataset.tg === "leave") together = null;
-    else if (b.dataset.tg === "new") {
-      try { together = await (await fetch(`${feed()}/together/new`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
-        toast(`Room ${together.code}: on the other device, open the same episode, type ${together.code} and press Join. Pause, play and skipping stay in step.`, 9000); }
-      catch (e) { toast("Couldn't reach lucapi: " + e.message); }
-    } else {
-      const c = (el.querySelector(".tg-code").value || "").trim().toUpperCase();
-      if (c.length === 4) { together = { code: c }; toast(`Joined ${c}. Press Play: you'll follow the others' pause, play and skips.`, 6000); }
-    }
-    const bar = el.querySelector(".together"); bar.outerHTML = togetherBar(); wireTogether(el);
-  });
-}
-
 async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   if (!chosen) attempt = null; // picked by hand: no automatic switching
   if (!invoke) return toast("Playing only works inside the Ember app.");
   const embed = store.get("playMode", "window") === "window";
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
-    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`,
-    `ember-room=${together ? together.code : ""}`, `ember-who=${deviceName().replace(/[,\s]+/g, "-")}`].join(",");
+    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`].join(",");
   try {
     await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts });
     if (!retry) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
@@ -581,7 +556,7 @@ function showSettings() {
     <div class="form">
       <label>Your AIOStreams manifest link</label><input type="text" id="aio" placeholder="https://…/manifest.json">
       <label>lucapi (ember-feed)</label><input type="text" id="feed" placeholder="http://192.168.4.141:8090">
-      <label>This computer's name (shown in resume points and watch together)</label><input type="text" id="dev" placeholder="Ember PC">
+      <label>This computer's name (shown in resume points)</label><input type="text" id="dev" placeholder="Ember PC">
       <label>Playing</label>
       <label class="check"><input type="radio" name="pm" value="window"> In the Ember window</label>
       <label class="check"><input type="radio" name="pm" value="full"> Full screen</label>
