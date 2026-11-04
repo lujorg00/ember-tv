@@ -708,7 +708,7 @@ async function weekCalendar() {
   let first = null;
   for (const d of days) {
     const n = on(d).length;
-    const b = h(`<button class="wk-d ${key(d) === today ? "today" : ""}" title="${n} new"><span>${key(d) === today ? "Today" : d.toLocaleDateString("en-GB", { weekday: "short" })}</span><b>${d.getDate()}</b>${n ? "<i></i>" : ""}</button>`);
+    const b = h(`<button class="wk-d ${key(d) === today ? "today" : ""}" title="${n} new"><span>${d.toLocaleDateString("en-GB", { weekday: "short" }).slice(0, 2)}</span><b>${d.getDate()}</b>${n ? "<i></i>" : ""}</button>`);
     b.onclick = (ev) => { ev.stopPropagation(); show(d, b); };
     $(".wk-days", box).appendChild(b);
     if (key(d) === today) first = [d, b];
