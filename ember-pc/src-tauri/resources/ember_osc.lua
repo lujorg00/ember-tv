@@ -15,7 +15,7 @@ local ICON, FONT = "modernz-icons", "Segoe UI"
 local ov = mp.create_osd_overlay("ass-events")
 local W, H, S = 1920, 1080, 1
 local visible, last_move = true, mp.get_time()
-local panel, dragging, seek_hover = false, false, nil
+local panel = false
 local scroll = { audio = 0, sub = 0 }
 local hits, out = {}, {}
 local mx, my = -1, -1
@@ -100,7 +100,7 @@ local function jump_icon(cx, cy, s, dir, c)
     local tri = { tip[1], tip[2], a1[1], a1[2], a2[1], a2[2] }
     if dir > 0 then for i = 1, #tri, 2 do tri[i] = 2 * cx - tri[i] end end
     poly(tri, c, "00", 0.02 * s)
-    text(cx, cy + 0.02 * s, 5, 0.40 * s, "10", { bold = true, c = c, shadow = false })
+    text(cx, cy + 0.03 * s, 5, 0.42 * s, "10", { bold = true, c = c, shadow = false })
 end
 
 local function icon(x, y, size, name, c, a)
@@ -129,6 +129,26 @@ local function icon(x, y, size, name, c, a)
         for i, h in ipairs(hs) do
             local bx = x + (i - 3) * 0.16 * s
             stroke({ bx, y - h * s / 2, bx, y + h * s / 2 }, 0.07 * s, c)
+        end
+    elseif name == "back" then
+        stroke({ x + 0.32 * s, y, x - 0.30 * s, y }, 0.08 * s, c)
+        stroke({ x - 0.06 * s, y - 0.26 * s, x - 0.32 * s, y, x - 0.06 * s, y + 0.26 * s }, 0.08 * s, c)
+    elseif name == "volume" or name == "muted" then
+        poly({ x - 0.40 * s, y - 0.13 * s, x - 0.22 * s, y - 0.13 * s, x + 0.0 * s, y - 0.34 * s,
+            x + 0.0 * s, y + 0.34 * s, x - 0.22 * s, y + 0.13 * s, x - 0.40 * s, y + 0.13 * s }, c, a, 0.02 * s)
+        if name == "muted" then
+            stroke({ x + 0.12 * s, y - 0.14 * s, x + 0.40 * s, y + 0.14 * s }, 0.07 * s, c)
+            stroke({ x + 0.12 * s, y + 0.14 * s, x + 0.40 * s, y - 0.14 * s }, 0.07 * s, c)
+        else
+            for _, rr in ipairs({ 0.17, 0.33 }) do
+                local pts = {}
+                for dg = -50, 50, 10 do
+                    local th = math.rad(dg)
+                    pts[#pts + 1] = x + 0.04 * s + rr * s * math.cos(th)
+                    pts[#pts + 1] = y + rr * s * math.sin(th)
+                end
+                stroke(pts, 0.065 * s, c)
+            end
         end
     elseif name == "check" then
         stroke({ x - 0.30 * s, y, x - 0.08 * s, y + 0.22 * s, x + 0.32 * s, y - 0.22 * s }, 0.11 * s, c)
@@ -195,133 +215,163 @@ local function tracks(kind)
     return list
 end
 
--- The Audio & Subtitles panel, on the right.
+-- The Audio & Subtitles panel: opens above the controls, bottom right.
+local function panel_box()
+    local n = math.max(#tracks("audio"), #tracks("sub") + 1)
+    local pw, ph = 540 * S, math.min(H - 300 * S, 430 * S, (58 + 38 * n + 36) * S)
+    return W - 40 * S - pw, H - 128 * S - ph, pw, ph
+end
 local function draw_panel()
-    local pw, ph = 760 * S, math.min(H - 300 * S, 640 * S)
-    local px, py = W - 100 * S - pw, 170 * S
-    rrect(px, py, pw, ph, 22 * S, "141414", "18")
+    local px, py, pw, ph = panel_box()
+    rrect(px, py, pw, ph, 14 * S, "161616", "1A")
     hit(px, py, px + pw, py + ph, function() end) -- clicks inside don't close it
-    local row, colw = 54 * S, pw / 2
+    local row, colw = 38 * S, pw / 2
     for ci, kind in ipairs({ "audio", "sub" }) do
-        local x = px + (ci - 1) * colw + 34 * S
-        text(x, py + 34 * S, 7, 30 * S, kind == "audio" and "Audio" or "Subtitles", { bold = true })
+        local x = px + (ci - 1) * colw + 22 * S
+        text(x, py + 20 * S, 7, 19 * S, kind == "audio" and "Audio" or "Subtitles", { bold = true, shadow = false })
         local items = {}
         if kind == "sub" then items[1] = { id = "no", label = "Off", selected = not mp.get_property_native("sid") } end
         for _, t in ipairs(tracks(kind)) do items[#items + 1] = { id = t.id, label = label(t), selected = t.selected } end
-        local top = py + 96 * S
-        local fit = math.floor((py + ph - 24 * S - top) / row)
+        local top = py + 58 * S
+        local fit = math.floor((py + ph - 30 * S - top) / row)
         scroll[kind] = math.max(0, math.min(scroll[kind], #items - fit))
-        for i = 1, math.min(fit, #items - scroll[kind]) do
-            local it = items[i + scroll[kind]]
-            local y = top + (i - 1) * row
-            local hov = over(x - 14 * S, y, x + colw - 40 * S, y + row)
-            if hov then rrect(x - 14 * S, y + 4 * S, colw - 30 * S, row - 8 * S, 10 * S, "FFFFFF", "E6") end
-            if it.selected then icon(x + 6 * S, y + row / 2, 26 * S, "check", ACCENT) end
-            text(x + 34 * S, y + row / 2, 4, 25 * S, it.label,
-                { bold = it.selected, c = it.selected and "FFFFFF" or "D8D8D8", shadow = false })
-            hit(x - 14 * S, y, x + colw - 40 * S, y + row, function()
+        for k = 1, math.min(fit, #items - scroll[kind]) do
+            local it = items[k + scroll[kind]]
+            local y = top + (k - 1) * row
+            local hov = over(x - 10 * S, y, x + colw - 30 * S, y + row)
+            if hov then rrect(x - 10 * S, y + 3 * S, colw - 22 * S, row - 6 * S, 7 * S, "FFFFFF", "E6") end
+            if it.selected then icon(x + 4 * S, y + row / 2, 17 * S, "check", ACCENT) end
+            text(x + 22 * S, y + row / 2, 4, 16 * S, it.label,
+                { bold = it.selected, c = it.selected and "FFFFFF" or "D0D0D0", shadow = false })
+            hit(x - 10 * S, y, x + colw - 30 * S, y + row, function()
                 mp.set_property(kind == "audio" and "aid" or "sid", tostring(it.id))
             end)
         end
         if #items > fit then
-            text(x, py + ph - 14 * S, 1, 20 * S, string.format("Scroll for more  ·  %d", #items), { c = "9A9A9A", shadow = false })
+            text(x, py + ph - 12 * S, 1, 14 * S, string.format("Scroll for more  ·  %d", #items), { c = "8A8A8A", shadow = false })
         end
     end
 end
 
--- Subtitles sit above the seek bar while the controls are showing, and drop back down when they hide.
+-- Subtitles sit above the controls while they're showing, and drop back down when they hide.
 local sub_base = mp.get_property_number("sub-pos", 100)
 local subs_up = nil
 local function lift_subs(up)
     if subs_up == up then return end
     subs_up = up
-    mp.set_property_number("sub-pos", up and math.min(sub_base, 85) or sub_base)
+    mp.set_property_number("sub-pos", up and math.min(sub_base, 88) or sub_base)
+end
+
+-- A soft fade (top or bottom) so the controls read without dimming the whole picture.
+local function fade(y1, y2, a1, a2)
+    local steps = 32
+    for k = 0, steps - 1 do
+        local f = (k + 0.5) / steps
+        local a = math.floor(a1 + (a2 - a1) * f)
+        rrect(0, y1 + (y2 - y1) * k / steps, W, (y2 - y1) / steps + 1, 0, "000000", string.format("%02X", a))
+    end
+end
+
+local drag = nil -- "seek" or "volume" while the mouse button is held on one
+local bars = {}
+
+local function set_from_mouse(final)
+    if drag == "seek" and bars.seek then
+        local b = bars.seek
+        local f = math.max(0, math.min(1, (mx - b.x1) / (b.x2 - b.x1)))
+        mp.commandv("seek", tostring(f * 100), "absolute-percent", final and "exact" or "keyframes")
+    elseif drag == "volume" and bars.vol then
+        local b = bars.vol
+        local f = math.max(0, math.min(1, (mx - b.x1) / (b.x2 - b.x1)))
+        mp.set_property_number("volume", math.floor(f * 100 + 0.5))
+        if f > 0 then mp.set_property_bool("mute", false) end
+    end
+end
+
+local function button(x, y, size, name, fn, active)
+    local h2 = size * 0.75
+    local hov = over(x - h2, y - h2, x + h2, y + h2)
+    if hov then circle(x, y, h2, "FFFFFF", "E0") end
+    icon(x, y, size, name, (hov or active) and ACCENT or "FFFFFF")
+    hit(x - h2, y - h2, x + h2, y + h2, fn)
 end
 
 local function render()
     local d = mp.get_property_native("osd-dimensions") or {}
     W, H = d.w or 0, d.h or 0
     if W < 50 or H < 50 then return end
-    S = H / 1080
+    S = math.max(0.6, H / 1080)
     out, hits = {}, {}
     ov.res_x, ov.res_y = W, H
     lift_subs(visible or panel)
     if not (visible or panel) then ov.data = ""; ov:update(); return end
 
-    rrect(0, 0, W, H, 0, "000000", "78") -- dim the picture
+    fade(0, 130 * S, 0x70, 0xFF)
+    fade(H - 210 * S, H, 0xFF, 0x48)
     local paused = mp.get_property_native("pause")
+    local M = 40 * S
 
     -- top left: back to Ember
-    local cx, cy, r = 110 * S, 105 * S, 44 * S
-    circle(cx, cy, r, "FFFFFF", over(cx - r, cy - r, cx + r, cy + r) and "B0" or "C8")
-    icon(cx, cy, 40 * S, "close")
-    hit(cx - r, cy - r, cx + r, cy + r, function() mp.commandv("quit") end)
+    button(M + 18 * S, 46 * S, 30 * S, "back", function() mp.commandv("quit") end)
 
-    -- top right: audio and subtitles
-    local cell, pill_h = 96 * S, 88 * S
-    local px2, py = W - 100 * S, 61 * S
-    rrect(px2 - 2 * cell, py, 2 * cell, pill_h, pill_h / 2, "FFFFFF", "C8")
-    for i, name in ipairs({ "subtitles", "audio" }) do
-        local ix = px2 - 2 * cell + (i - 0.5) * cell
-        local hov = over(ix - cell / 2, py, ix + cell / 2, py + pill_h)
-        icon(ix, py + pill_h / 2, 44 * S, name, (panel or hov) and ACCENT or "FFFFFF")
-        hit(ix - cell / 2, py, ix + cell / 2, py + pill_h, function() panel = not panel end)
-    end
-
-    -- middle: back 10, play/pause, forward 10
-    local mxc, myc = W / 2, H / 2
-    local gap = 250 * S
-    local big, small = 150 * S, 92 * S
-    for _, b in ipairs({
-        { mxc - gap, small, "back10", function() mp.commandv("seek", "-10", "relative", "exact") end },
-        { mxc, big, paused and "play" or "pause", function() mp.commandv("cycle", "pause") end },
-        { mxc + gap, small, "fwd10", function() mp.commandv("seek", "10", "relative", "exact") end },
-    }) do
-        local x, size, name, fn = b[1], b[2], b[3], b[4]
-        local hov = over(x - size / 2, myc - size / 2, x + size / 2, myc + size / 2)
-        icon(x, myc, size * (hov and 1.06 or 1), name, hov and ACCENT or "FFFFFF")
-        hit(x - size / 2, myc - size / 2, x + size / 2, myc + size / 2, fn)
-    end
-
-    -- bottom: episode line and title, next episode, seek bar
-    local M = 140 * S
-    local show, ep = titles()
-    if ep ~= "" then text(M, H - 236 * S, 1, 30 * S, ep, { c = "E8E8E8" }) end
-    text(M, H - 168 * S, 1, 50 * S, show, { bold = true })
-    if opts.next then
-        local nx, ny, ns = W - M - 30 * S, H - 196 * S, 66 * S
-        local hov = over(nx - ns / 2, ny - ns / 2, nx + ns / 2, ny + ns / 2)
-        icon(nx, ny, ns, "next", hov and ACCENT or "FFFFFF")
-        hit(nx - ns / 2, ny - ns / 2, nx + ns / 2, ny + ns / 2, function() mp.commandv("quit", "5") end)
-    end
-
+    -- seek bar, with the time left at its right
     local pos, dur = mp.get_property_number("time-pos", 0), mp.get_property_number("duration", 0)
-    local by = H - 104 * S
-    local x1, x2 = M + 118 * S, W - M - 118 * S
-    text(M, by, 4, 30 * S, fmt(pos), { c = "E8E8E8" })
-    text(W - M, by, 6, 30 * S, fmt(dur), { c = "E8E8E8" })
-    rrect(x1, by - 4 * S, x2 - x1, 8 * S, 4 * S, "FFFFFF", "B0")
-    -- what's buffered ahead
+    local by = H - 96 * S
+    local x1, x2 = M + 6 * S, W - M - 92 * S
+    text(W - M, by, 6, 18 * S, dur > 0 and ("-" .. fmt(dur - pos)) or fmt(pos), { c = "E0E0E0" })
+    rrect(x1, by - 2.5 * S, x2 - x1, 5 * S, 2.5 * S, "FFFFFF", "B8")
     local cache = mp.get_property_native("demuxer-cache-state")
     if cache and cache["cache-end"] and dur > 0 then
-        local ce = math.min(1, cache["cache-end"] / dur)
-        local cp = math.min(1, pos / dur)
-        if ce > cp then rrect(x1 + (x2 - x1) * cp, by - 4 * S, (x2 - x1) * (ce - cp), 8 * S, 4 * S, "FFFFFF", "90") end
+        local ce, cp = math.min(1, cache["cache-end"] / dur), math.min(1, pos / dur)
+        if ce > cp then rrect(x1 + (x2 - x1) * cp, by - 2.5 * S, (x2 - x1) * (ce - cp), 5 * S, 2.5 * S, "FFFFFF", "98") end
     end
     local frac = dur > 0 and math.min(1, pos / dur) or 0
-    rrect(x1, by - 4 * S, (x2 - x1) * frac, 8 * S, 4 * S, "FFFFFF", "00")
-    local bar_hov = over(x1 - 10 * S, by - 30 * S, x2 + 10 * S, by + 30 * S)
-    circle(x1 + (x2 - x1) * frac, by, (bar_hov or dragging) and 20 * S or 16 * S, "FFFFFF", "00")
-    if (bar_hov or dragging) and dur > 0 then
+    rrect(x1, by - 2.5 * S, (x2 - x1) * frac, 5 * S, 2.5 * S, ACCENT, "00")
+    local bar_hov = over(x1 - 6 * S, by - 14 * S, x2 + 6 * S, by + 14 * S)
+    circle(x1 + (x2 - x1) * frac, by, (bar_hov or drag == "seek") and 9 * S or 7 * S, "FFFFFF", "00")
+    if (bar_hov or drag == "seek") and dur > 0 then
         local f = math.max(0, math.min(1, (mx - x1) / (x2 - x1)))
-        text(x1 + (x2 - x1) * f, by - 34 * S, 2, 26 * S, fmt(f * dur), { bold = true })
+        local tx = math.max(x1 + 30 * S, math.min(x2 - 30 * S, x1 + (x2 - x1) * f))
+        rrect(tx - 34 * S, by - 46 * S, 68 * S, 26 * S, 6 * S, "000000", "40")
+        text(tx, by - 33 * S, 5, 16 * S, fmt(f * dur), { bold = true, shadow = false })
     end
-    seek_hover = { x1 = x1, x2 = x2 }
-    hit(x1 - 10 * S, by - 30 * S, x2 + 10 * S, by + 30 * S, function()
-        dragging = true
-        local f = math.max(0, math.min(1, (mx - x1) / (x2 - x1)))
-        mp.commandv("seek", tostring(f * 100), "absolute-percent", "keyframes")
-    end)
+    bars.seek = { x1 = x1, x2 = x2 }
+    hit(x1 - 6 * S, by - 14 * S, x2 + 6 * S, by + 14 * S, function() drag = "seek"; set_from_mouse(false) end)
+
+    -- controls row
+    local ry = H - 46 * S
+    local x = M + 18 * S
+    button(x, ry, 30 * S, paused and "play" or "pause", function() mp.commandv("cycle", "pause") end)
+    x = x + 56 * S
+    button(x, ry, 34 * S, "back10", function() mp.commandv("seek", "-10", "relative", "exact") end)
+    x = x + 52 * S
+    button(x, ry, 34 * S, "fwd10", function() mp.commandv("seek", "10", "relative", "exact") end)
+    x = x + 54 * S
+    local muted = mp.get_property_native("mute")
+    local vol = mp.get_property_number("volume", 100)
+    button(x, ry, 28 * S, (muted or vol == 0) and "muted" or "volume", function() mp.commandv("cycle", "mute") end)
+    local vx1, vx2 = x + 26 * S, x + 116 * S
+    rrect(vx1, ry - 2 * S, vx2 - vx1, 4 * S, 2 * S, "FFFFFF", "B8")
+    local vf = muted and 0 or math.min(1, vol / 100)
+    rrect(vx1, ry - 2 * S, (vx2 - vx1) * vf, 4 * S, 2 * S, "FFFFFF", "00")
+    if over(vx1 - 6 * S, ry - 14 * S, vx2 + 6 * S, ry + 14 * S) or drag == "volume" then
+        circle(vx1 + (vx2 - vx1) * vf, ry, 6 * S, "FFFFFF", "00")
+    end
+    bars.vol = { x1 = vx1, x2 = vx2 }
+    hit(vx1 - 6 * S, ry - 14 * S, vx2 + 6 * S, ry + 14 * S, function() drag = "volume"; set_from_mouse(false) end)
+
+    -- middle of the row: the title
+    local show, ep = titles()
+    add(string.format("{\\an5\\pos(%.1f,%.1f)\\fn%s\\fs%.1f\\bord0\\shad1\\4c&H000000&\\4a&H70&\\1c&HFFFFFF&\\b1}%s%s",
+        W / 2, ry, FONT, 20 * S, clean(show),
+        ep ~= "" and string.format("{\\b0\\1c&HB8B8B8&}   %s", clean(ep)) or ""))
+
+    -- right: next episode, audio & subtitles
+    local rx = W - M - 16 * S
+    button(rx, ry, 30 * S, "subtitles", function() panel = not panel end, panel)
+    if opts.next then
+        button(rx - 58 * S, ry, 28 * S, "next", function() mp.commandv("quit", "5") end)
+    end
 
     if panel then draw_panel() end
     ov.data = table.concat(out, "\n")
@@ -338,33 +388,20 @@ mp.observe_property("mouse-pos", "native", function(_, p)
     if not p then return end
     local moved = p.x ~= mx or p.y ~= my
     mx, my = p.x, p.y
-    if dragging and seek_hover then
-        local dur = mp.get_property_number("duration", 0)
-        if dur > 0 then
-            local f = math.max(0, math.min(1, (mx - seek_hover.x1) / (seek_hover.x2 - seek_hover.x1)))
-            mp.commandv("seek", tostring(f * 100), "absolute-percent", "keyframes")
-        end
-    end
+    if drag then set_from_mouse(false) end
     if moved then poke() end
 end)
 
 mp.add_forced_key_binding("MBTN_LEFT", "ember_osc_click", function(e)
     if e.event == "up" then
-        if dragging then
-            dragging = false
-            if seek_hover then
-                local f = math.max(0, math.min(1, (mx - seek_hover.x1) / (seek_hover.x2 - seek_hover.x1)))
-                mp.commandv("seek", tostring(f * 100), "absolute-percent", "exact")
-            end
-            render()
-        end
+        if drag then set_from_mouse(true); drag = nil; render() end
         return
     end
     if e.event ~= "down" and e.event ~= "press" then return end
     if not (visible or panel) then poke(); return end
     last_move = mp.get_time()
-    for i = #hits, 1, -1 do
-        local h = hits[i]
+    for k = #hits, 1, -1 do
+        local h = hits[k]
         if mx >= h[1] and mx <= h[3] and my >= h[2] and my <= h[4] then
             h[5]()
             render()
@@ -377,16 +414,17 @@ mp.add_forced_key_binding("MBTN_LEFT", "ember_osc_click", function(e)
 end, { complex = true })
 mp.add_forced_key_binding("MBTN_LEFT_DBL", "ember_osc_dbl", function() end)
 
--- In the panel, the mouse wheel scrolls the list under it; elsewhere it does what mpv normally does.
+-- Mouse wheel: in the panel it scrolls the list under it; elsewhere it's volume.
 local function wheel(dir)
     return function()
         if panel then
-            local pw = 760 * S
-            local px = W - 100 * S - pw
-            scroll[(mx < px + pw / 2) and "audio" or "sub"] = scroll[(mx < px + pw / 2) and "audio" or "sub"] + dir
+            local px, _, pw = panel_box()
+            local k = (mx < px + pw / 2) and "audio" or "sub"
+            scroll[k] = scroll[k] + dir
             render()
         else
-            mp.commandv("seek", tostring(dir * -10), "relative")
+            mp.commandv("add", "volume", tostring(-dir * 5))
+            poke()
         end
     end
 end
@@ -395,7 +433,7 @@ mp.add_forced_key_binding("WHEEL_DOWN", "ember_osc_wdown", wheel(1))
 
 -- Hide after 3 seconds without the mouse moving (never while paused, dragging or choosing tracks).
 mp.add_periodic_timer(0.25, function()
-    if visible and not panel and not dragging and not mp.get_property_native("pause")
+    if visible and not panel and not drag and not mp.get_property_native("pause")
         and mp.get_time() - last_move > 3 then
         visible = false
     end
