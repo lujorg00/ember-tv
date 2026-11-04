@@ -56,7 +56,7 @@ input { font: inherit; color: var(--text); }
 .row h2 { font-size: 15px; font-weight: 600; margin: 0 48px 10px; display: flex; align-items: baseline; gap: 10px; }
 .row h2 .kind { color: var(--accent); font-weight: 500; }
 .row h2 small { color: var(--faint); font-weight: 400; font-size: 12px; }
-.strip { display: flex; gap: 14px; overflow-x: auto; overflow-y: visible; padding: 8px 48px 14px; scroll-behavior: smooth; }
+.strip { display: flex; gap: 14px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-y: none; padding: 8px 48px 14px; scroll-behavior: smooth; }
 .strip::-webkit-scrollbar { height: 0; }
 .poster { flex: none; width: 138px; aspect-ratio: 2/3; border-radius: 10px; background: var(--card) center/cover; position: relative; cursor: pointer;
   transition: transform .18s ease, box-shadow .18s; box-shadow: 0 6px 18px #0006; }
