@@ -364,6 +364,34 @@ function top10Row(title, metas, onPick) {
   return r;
 }
 
+// Designed tiles (Omni-style): a brand-colour gradient with the logo big in the middle, no film artwork.
+// [gradient from, gradient to, logo ink]: w = white, k = black, o = its own colours
+const BRAND = {
+  "netflix": ["#9b1111", "#1d0404", "w"], "prime video": ["#79bdf7", "#2f86e0", "k"], "apple tv+": ["#3a3a3a", "#050505", "w"],
+  "disney+": ["#1d3a9c", "#070f33", "w"], "hbo max": ["#262626", "#000000", "w"], "hulu": ["#1ed27a", "#0a6b3b", "w"],
+  "paramount +": ["#3c7bff", "#1238b8", "w"], "paramount+": ["#3c7bff", "#1238b8", "w"], "peacock": ["#2a2a2a", "#000000", "w"],
+  "discovery +": ["#2468e8", "#0a2a7a", "w"], "discovery+": ["#2468e8", "#0a2a7a", "w"], "crunchyroll": ["#ff8a3d", "#c24a0c", "w"],
+  "marvel studios": ["#d3191f", "#5c080b", "o"], "dc studios": ["#2a6be8", "#0a2a72", "o"], "pixar": ["#3a3a3a", "#0a0a0a", "w"],
+  "walt disney": ["#1a2f80", "#070d29", "w"], "walt disney animation studios": ["#1a2f80", "#070d29", "w"],
+  "dreamworks animation": ["#2a62c9", "#0a1f4f", "w"], "illumination studios": ["#ffd23a", "#d39a00", "k"],
+  "sony pictures animation": ["#4b7fe0", "#13306e", "w"], "sony pictures": ["#2a2a2a", "#000000", "w"],
+  "studio ghibli": ["#72b6e3", "#1f5f8f", "w"], "universal pictures": ["#14284f", "#02060f", "w"],
+  "warner brothers": ["#2357b0", "#0a2350", "o"], "warner brothers animation": ["#2357b0", "#0a2350", "o"],
+  "lionsgate": ["#4a4a4a", "#111111", "w"], "miramax": ["#2a2a2a", "#000000", "w"], "mgm": ["#8a6a24", "#2b1d06", "w"],
+  "searchlight pictures": ["#24384e", "#070d14", "w"],
+  "cbeebies": ["#ffd400", "#f0a000", "o"], "cartoon network": ["#2a2a2a", "#000000", "o"], "nickelodeon": ["#ff7a1a", "#c94a00", "w"],
+  "disney kids": ["#4b33b5", "#1a1150", "w"], "imdb top 250": ["#f5c518", "#c99a00", "o"],
+};
+// Awards: [gradient from, to, small line, big title]
+const AWARD = {
+  "oscar winners": ["#432466", "#120a22", "The Academy Awards", "OSCARS"],
+  "academy award winners": ["#432466", "#120a22", "The Academy Awards", "OSCARS"],
+  "bafta": ["#2e2142", "#0d0914", "The British Academy Film Awards", "BAFTA"],
+  "golden globes": ["#7a4416", "#2a1505", "Golden Globe Awards", "GOLDEN GLOBES"],
+  "cannes": ["#14295a", "#060f28", "Festival de Cannes", "CANNES"],
+  "certified fresh": ["#fa320a", "#8f1500", "Rotten Tomatoes", "CERTIFIED FRESH"],
+};
+
 /** Streaming services, genres, directors, studios, collections, decades (from TMDB, via the Pi). */
 async function tileRows(hidden = new Set(), typ = "") {
   const t = await layout();
@@ -379,13 +407,24 @@ async function tileRows(hidden = new Set(), typ = "") {
       if (tile.kind === "cat") tileInfo[tile.id] = tile;
       if (tile.logo && tile.logo.startsWith("/")) tile = { ...tile, logo: feed() + tile.logo }; // kept on the Pi
       let inner;
-      if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      const key = (tile.title || "").toLowerCase().trim(), br = BRAND[key], aw = AWARD[key];
+      if (aw) inner = `<div class="tile brand award" style="--a:${aw[0]};--b:${aw[1]}"><small>${esc(aw[2])}</small><b>${esc(aw[3])}</b></div>`;
+      else if (br) {
+        const ink = tile.logo_kind === "icon" ? "o" : ["duo", "box"].includes(tile.logo_mode) && br[2] === "w" ? "o" : br[2];
+        inner = `<div class="tile brand ink-${ink} ${tile.logo_kind === "icon" ? "icon" : ""}" style="--a:${br[0]};--b:${br[1]}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      }
+      else if (g.style === "person") {
+        const parts = (tile.title || "").split(" "), last = parts.length > 1 ? parts.pop() : "";
+        inner = `<div class="tile director"><div class="ph" style="background-image:url('${esc(tile.image)}')"></div><b>${esc(parts.join(" "))}<br>${esc(last)}</b></div>`;
+      }
+      else if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
       else inner = `<div class="tile art ${tile.logo ? "haslogo" : ""}" style="background-image:url('${esc(tile.image || "")}')">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       const el = h(inner);
       // A logo that doesn't load: show the name instead.
       el.querySelectorAll("img").forEach(img => {
         img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); };
+        if (br) return; // designed tile: its colours are set
         const mode = { mono: "lg-white", duo: "lg-gray", box: "lg-gray", ok: "lg-white", dark: "lg-white" }[tile.logo_mode];
         if (g.style === "logo") { img.classList.add("lg-full"); if (!tile.logo_mode) serviceTile(img, el); }
         else if (mode) img.classList.add(mode);
@@ -595,7 +634,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
+    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
       ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // Resume: the streams for that episode, best first; one more click plays.
@@ -631,6 +670,24 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     const metas = (r.metas || []).filter(m => m.id !== id);
     if (metas.length && document.body.contains(page)) $(".tp-more", page).appendChild(row("You may also like", metas, type));
   }).catch(() => {});
+
+  // Watchlist: your Trakt watchlist, which your Watchlist rows are built from.
+  const wl = $("#wlBtn", head);
+  let onList = false;
+  const wlLabel = () => { wl.textContent = onList ? "✓  On watchlist" : "＋  Watchlist"; wl.classList.toggle("done", onList); };
+  getJson(`${feed()}/watchlist`, 8000).then(r => { onList = (r.items || []).includes(id); wlLabel(); }).catch(() => {});
+  wl.onclick = async () => {
+    wl.disabled = true;
+    try {
+      const r = await fetch(`${feed()}/watchlist`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imdb: id, type, add: !onList }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+      onList = j.on; wlLabel();
+      toast(onList ? `Added ${mm.name} to your watchlist.` : `Took ${mm.name} off your watchlist.`);
+    } catch (err) { toast("Couldn't change your watchlist: " + err.message); }
+    wl.disabled = false;
+  };
 
   // Marking what you watched before Ember: saved on the Pi and in your Trakt history.
   const isDone = (k) => !!(saved[k] || {}).finished;

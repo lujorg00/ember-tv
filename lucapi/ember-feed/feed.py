@@ -11,6 +11,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
   GET /progress/<imdb> -> every saved position for one title (episode lists)
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
+  GET /watchlist, POST /watchlist {imdb, type, add} -> your Trakt watchlist (what your Watchlist rows show)
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
@@ -762,6 +763,43 @@ def dismiss(body):
     threading.Thread(target=clear_trakt, daemon=True).start()
     print(f"[ember-feed] removed {imdb} from continue watching", flush=True)
     return {"ok": True}
+
+
+def _watchlist_ids():
+    ids = set()
+    for kind in ("movies", "shows"):
+        for it in _trakt(f"/sync/watchlist/{kind}"):
+            i = (((it.get("movie") or it.get("show")) or {}).get("ids") or {}).get("imdb")
+            if i:
+                ids.add(i)
+    return sorted(ids)
+
+
+def watchlist():
+    """What's on your Trakt watchlist (which your Watchlist rows come from): {"items": [imdb, ...]}."""
+    if not all(trakt_creds()):
+        return {"items": [], "error": "no Trakt login"}
+    try:
+        return {"items": cached("watchlist", 300, _watchlist_ids)}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
+def watchlist_set(body):
+    """Add a film or show to your Trakt watchlist, or take it off. body: {"imdb", "type": movie|series, "add": true|false}"""
+    imdb = str(body.get("imdb", ""))
+    if not (imdb.startswith("tt") and imdb[2:].isdigit()):
+        raise ValueError("imdb must look like tt1234567")
+    if not all(trakt_creds()):
+        raise RuntimeError("no Trakt login on lucapi")
+    add = body.get("add", True) is not False
+    item = {"ids": {"imdb": imdb}}
+    payload = {"shows": [item]} if body.get("type") == "series" else {"movies": [item]}
+    _trakt("/sync/watchlist" if add else "/sync/watchlist/remove", payload)
+    with _cache_lock:
+        _cache.pop("watchlist", None)
+    print(f"[ember-feed] Trakt watchlist: {imdb} {'added' if add else 'removed'}", flush=True)
+    return {"ok": True, "on": add}
 
 
 def _watched_status():
@@ -1818,6 +1856,11 @@ STUDIO_WORDS = re.compile(r"studios?\b|pictures|brothers|\bbros\b|lionsgate|mira
 KNOWN_PEOPLE = {"alfred hitchcock", "christopher nolan", "denis villeneuve", "david fincher", "james cameron", "john carpenter",
                 "martin scorsese", "paul thomas anderson", "quentin tarantino", "ridley scott", "stanley kubrick", "steven spielberg",
                 "coen brothers", "wes anderson", "yorgos lanthimos", "david attenborough", "greta gerwig", "edgar wright"}
+SERVICE_WIKI = {"netflix": "Netflix", "prime video": "Amazon Prime Video|Prime Video", "apple tv+": "Apple TV+|Apple TV",
+                "disney+": "Disney+", "hbo max": "HBO Max|Max (streaming service)", "hulu": "Hulu",
+                "paramount +": "Paramount+", "paramount+": "Paramount+", "peacock": "Peacock (streaming service)",
+                "discovery +": "Discovery+", "discovery+": "Discovery+", "crunchyroll": "Crunchyroll", "now": "Now (Sky)",
+                "bbc iplayer": "BBC iPlayer", "itvx": "ITVX", "channel 4": "Channel 4", "mubi": "Mubi"}
 PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
 # Wikipedia article for a tile whose logo comes from Wikidata (the "logo image" on its entry).
 WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards|Academy of Motion Picture Arts and Sciences",
@@ -2053,8 +2096,16 @@ def _build_tiles():
     def art(t):
         if t["box"] == "services":
             pname = SERVICE_NAMES.get(t["title"].lower(), t["title"])
-            t["logo"] = logos.get(pname.lower()) or next((v for k, v in logos.items() if k.startswith(pname.lower())), "")
             t["colour"] = SERVICE_COLOURS.get(pname, "#1E1A17")
+            # the wordmark (NETFLIX, prime video...) from Wikidata; TMDB's square app icon if there isn't one
+            for article in SERVICE_WIKI.get(t["title"].lower(), t["title"]).split("|"):
+                t["logo"] = _wikidata_logo(article)
+                if t["logo"]:
+                    t["logo_kind"] = "wordmark"
+                    break
+            if not t.get("logo"):
+                t["logo"] = logos.get(pname.lower()) or next((v for k, v in logos.items() if k.startswith(pname.lower())), "")
+                t["logo_kind"] = "icon"
         elif t["box"] == "people" and tmdb_ok:
             try:
                 q = PERSON_PHOTO.get(t["title"].lower(), t["title"])
@@ -2085,7 +2136,7 @@ def _build_tiles():
             try:
                 info = _logo(t["logo"])
                 t["logo"], t["logo_mode"] = info["src"], info["mode"]
-                if t["box"] == "services" and info.get("edge"):
+                if t["box"] == "services" and info.get("edge") and t.get("logo_kind") == "icon":
                     t["colour"] = info["edge"]
             except Exception as e:
                 print(f"[ember-feed] logo for {t['title']} failed: {e}", flush=True)
@@ -2279,6 +2330,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(report(body))
             elif path == "/progress/dismiss":
                 self._json(dismiss(body))
+            elif path == "/watchlist":
+                self._json(watchlist_set(body))
             elif path == "/progress/watched":
                 self._json(mark_watched(body))
             elif path == "/pick/failed":
@@ -2347,6 +2400,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             elif path == "/jellyfin/summary":
                 self._json(jellyfin_summary())
+            elif path == "/watchlist":
+                self._json(watchlist())
             elif path == "/watched":
                 self._json(watched_status())
             elif path == "/progress/dismissed":
