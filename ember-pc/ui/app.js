@@ -131,6 +131,27 @@ function row(title, metas, type, onPick) {
   return r;
 }
 
+// ---------------------------------------------------------------- row arrows
+// Every sideways row gets ‹ › buttons (shown on hover, hidden at either end); added automatically to any row on any page.
+function arrowize(strip) {
+  if (strip.dataset.arrows) return;
+  strip.dataset.arrows = "1";
+  const wrap = document.createElement("div"); wrap.className = "strip-wrap";
+  strip.parentNode.insertBefore(wrap, strip); wrap.appendChild(strip);
+  const l = h(`<button class="sa left" aria-label="Scroll left">‹</button>`), r = h(`<button class="sa right" aria-label="Scroll right">›</button>`);
+  wrap.append(l, r);
+  const by = () => Math.max(300, strip.clientWidth * 0.8);
+  l.onclick = () => strip.scrollBy({ left: -by(), behavior: "smooth" });
+  r.onclick = () => strip.scrollBy({ left: by(), behavior: "smooth" });
+  const upd = () => { l.classList.toggle("off", strip.scrollLeft < 5); r.classList.toggle("off", strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 5); };
+  strip.addEventListener("scroll", upd, { passive: true });
+  new ResizeObserver(upd).observe(strip);
+  new MutationObserver(upd).observe(strip, { childList: true });
+  setTimeout(upd, 400);
+}
+new MutationObserver(() => document.querySelectorAll("#view .strip:not([data-arrows])").forEach(arrowize))
+  .observe(document.getElementById("view"), { childList: true, subtree: true });
+
 // ---------------------------------------------------------------- home
 
 // Kept while Ember is open, but fetched again after an hour so new or renamed lists show up without a restart.
@@ -177,7 +198,8 @@ let heroTimer = 0;
 function createHero(pageName) {
   clearInterval(heroTimer);
   const hero = h(`<header class="hero ${pageName ? "named" : ""}"><div class="bd a"></div><div class="bd b"></div>
-    ${pageName ? `<div class="pagename">${esc(pageName)}</div>` : ""}<div class="info"></div><div class="dots"></div></header>`);
+    ${pageName ? `<div class="pagename">${esc(pageName)}</div>` : ""}<div class="info"></div>
+    <div class="hnav"><button class="hn prev" aria-label="Previous">‹</button><div class="dots"></div><button class="hn next" aria-label="Next">›</button></div></header>`);
   let flip = false, heroFor = null, pool = [], idx = 0, heldUntil = 0;
 
   const setHero = async (m) => {
@@ -214,6 +236,9 @@ function createHero(pageName) {
     if (!pool.length) return;
     hero.querySelector(".dots").innerHTML = pool.map(() => "<i></i>").join("");
     hero.querySelectorAll(".dots i").forEach((d, k) => d.onclick = () => { idx = k; pick(pool[k]); });
+    const step = (dir) => { idx = (idx + dir + pool.length) % pool.length; heldUntil = Date.now() + HERO_HOLD_MS; setHero(pool[idx]); };
+    hero.querySelector(".hn.prev").onclick = () => step(-1);
+    hero.querySelector(".hn.next").onclick = () => step(1);
     setHero(pool[0]);
     clearInterval(heroTimer);
     heroTimer = setInterval(() => {

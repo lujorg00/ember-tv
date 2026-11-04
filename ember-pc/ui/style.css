@@ -37,7 +37,7 @@ input { font: inherit; color: var(--text); }
   -webkit-mask-composite: source-in; mask-composite: intersect; }
 .hero .bd.show { opacity: .78; }
 .hero .info { position: relative; max-width: 560px; }
-.dots { position: absolute; left: 48px; bottom: 18px; display: flex; gap: 7px; }
+.dots { display: flex; gap: 7px; }
 .dots i { width: 7px; height: 7px; border-radius: 9px; background: rgba(255, 230, 200, .25); cursor: pointer; transition: width .3s, background .3s; }
 .dots i.on { width: 22px; background: var(--accent); }
 .hero h1 { font: 600 40px/1.1 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 26px 0 8px; letter-spacing: -.3px; text-shadow: 0 2px 24px #0008; }
@@ -352,3 +352,18 @@ input { font: inherit; color: var(--text); }
 
 /* You may also like, under the episodes */
 .tp-more { position: relative; z-index: 1; padding: 0 0 60px; }
+
+/* Row arrows */
+.strip-wrap { position: relative; }
+.sa { position: absolute; top: 8px; bottom: 14px; width: 52px; z-index: 3; display: grid; place-items: center; font-size: 40px; line-height: 1;
+  color: #fff; opacity: 0; transition: opacity .2s, color .15s; }
+.sa.left { left: 0; background: linear-gradient(90deg, rgba(14,11,9,.92), rgba(14,11,9,0)); }
+.sa.right { right: 0; background: linear-gradient(270deg, rgba(14,11,9,.92), rgba(14,11,9,0)); }
+.strip-wrap:hover .sa:not(.off) { opacity: 1; }
+.sa.off { pointer-events: none; }
+.sa:hover { color: var(--accent); }
+/* Hero: ‹ dots › */
+.hnav { position: absolute; left: 40px; bottom: 10px; z-index: 2; display: flex; align-items: center; gap: 10px; }
+.hn { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; line-height: 1; color: #fff;
+  background: rgba(20,15,11,.55); border: 1px solid rgba(255,255,255,.12); transition: background .15s, color .15s; }
+.hn:hover { background: rgba(240,160,75,.9); color: var(--accent-ink); }
