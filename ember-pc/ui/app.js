@@ -237,7 +237,6 @@ async function showHome() {
   const isTop = (c) => /\btop\b/i.test(c.name || "");
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
-  const slotOut = document.createElement("div"); rows.appendChild(slotOut);
   const hidden = hiddenRows();
   const shown = cats.filter(c => !hidden.has(catKey(c)));
   const tops = shown.filter(isTop), others = shown.filter(c => !isTop(c) && !isContinue(c));
@@ -247,7 +246,7 @@ async function showHome() {
 
   const cwCat = cats.filter(isContinue);
   if (!hidden.has("cw")) continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
-  if (!hidden.has("out")) weekCalendar().then(r => { if (r) slotOut.replaceWith(r); });
+  if (!hidden.has("out")) weekCalendar().then(r => { if (r) hero.el.appendChild(r); });
   tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
   const [topLists, otherLists] = await Promise.all([
     Promise.all(tops.map(async (c, i) => {
@@ -675,6 +674,7 @@ async function outThisWeek() {
 }
 
 /** This week, as a calendar: seven days from yesterday, each with the new episodes of your shows that day. */
+/** This week: a small panel at the top right of the hero. Pick a day; its new episodes show underneath. */
 async function weekCalendar() {
   let eps = [];
   try { eps = (await getJson(`${feed()}/upcoming?days=6`, 8000)).episodes || []; } catch (e) { return null; }
@@ -683,27 +683,40 @@ async function weekCalendar() {
   const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(day0); d.setDate(d.getDate() + i); return d; });
   const key = (d) => d.toDateString();
   const today = key(new Date());
-  const r = h(`<section class="row fade-in"><h2>This week</h2><div class="week"></div></section>`);
-  for (const d of days) {
-    const list = eps.filter(e => key(new Date(e.airs)) === key(d));
-    const col = h(`<div class="wday ${key(d) === today ? "today" : ""} ${list.length ? "" : "empty"}">
-      <div class="wd-h"><b>${key(d) === today ? "Today" : d.toLocaleDateString("en-GB", { weekday: "short" })}</b><span>${d.getDate()}</span></div></div>`);
-    for (const e of list) {
+  const on = (d) => eps.filter(e => key(new Date(e.airs)) === key(d));
+  const box = h(`<aside class="wk fade-in"><div class="wk-h">This week</div><div class="wk-days"></div><div class="wk-list"></div></aside>`);
+  const list = $(".wk-list", box);
+  const show = (d, btn) => {
+    box.querySelectorAll(".wk-d").forEach(b => b.classList.toggle("on", b === btn));
+    list.innerHTML = "";
+    const these = on(d);
+    if (!these.length) { list.appendChild(h(`<div class="wk-none">Nothing new ${key(d) === today ? "today" : "on " + d.toLocaleDateString("en-GB", { weekday: "long" })}</div>`)); return; }
+    for (const e of these.slice(0, 4)) {
       const t = new Date(e.airs);
-      const card = h(`<div class="wep"><div class="wep-art"></div><div class="wep-t">${esc(e.show)}</div>
-        <div class="wep-d">S${e.season} E${e.episode} · ${e.out ? "<span class='acc'>Out now</span>" : t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div></div>`);
-      card.onclick = () => go("title", "series", e.imdb, { name: e.show });
-      col.appendChild(card);
+      const it = h(`<div class="wk-ep"><div class="wk-art"></div><div><div class="wk-t">${esc(e.show)}</div>
+        <div class="wk-s">S${e.season} E${e.episode} · ${e.out ? "<span class='acc'>Out now</span>" : t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div></div></div>`);
+      it.onclick = () => go("title", "series", e.imdb, { name: e.show });
+      list.appendChild(it);
       meta("series", e.imdb).then(m => {
         const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
         const art = (ep && ep.thumbnail) || backdrop({ ...m, id: e.imdb });
-        if (art) $(".wep-art", card).style.backgroundImage = `url('${art}')`;
+        if (art) $(".wk-art", it).style.backgroundImage = `url('${art}')`;
       });
     }
-    if (!list.length) col.appendChild(h(`<div class="wnone">Nothing new</div>`));
-    $(".week", r).appendChild(col);
+    if (these.length > 4) list.appendChild(h(`<div class="wk-none">and ${these.length - 4} more</div>`));
+  };
+  let first = null;
+  for (const d of days) {
+    const n = on(d).length;
+    const b = h(`<button class="wk-d ${key(d) === today ? "today" : ""}" title="${n} new"><span>${key(d) === today ? "Today" : d.toLocaleDateString("en-GB", { weekday: "short" })}</span><b>${d.getDate()}</b>${n ? "<i></i>" : ""}</button>`);
+    b.onclick = (ev) => { ev.stopPropagation(); show(d, b); };
+    $(".wk-days", box).appendChild(b);
+    if (key(d) === today) first = [d, b];
   }
-  return r;
+  // Open on today, or the next day with something new if today has nothing.
+  const next = days.map((d, i) => [d, box.querySelectorAll(".wk-d")[i]]).find(([d]) => d >= new Date(new Date().setHours(0, 0, 0, 0)) && on(d).length);
+  show(...(first && on(first[0]).length ? first : next || first));
+  return box;
 }
 
 // ---------------------------------------------------------------- your year in watching
@@ -826,7 +839,7 @@ function showSettings() {
   (async () => {
     const list = [{ key: "cw", name: "Continue watching" }];
     for (const c of (await homeCats()).rows) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${c.name || c.id} (${c.type === "movie" ? "films" : "series"})` });
-    list.push({ key: "out", name: "Out this week" });
+    list.push({ key: "out", name: "This week (top right of Home)" });
     try { for (const g of (await layout()).groups || []) list.push({ key: "tiles:" + g.title, name: g.title }); } catch (e) {}
     const hid = hiddenRows();
     const box = $("#rowToggles"); if (!box) return;
