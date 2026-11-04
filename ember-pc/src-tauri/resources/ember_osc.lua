@@ -2,7 +2,7 @@
 --   ✕ top left (back to Ember), audio & subtitles top right,
 --   ⟲10  ▶/❚❚  ⟳10 in the middle, episode + title bottom left, next episode bottom right,
 --   a thin seek bar with the times at each end. Everything dims the picture while it's showing.
--- Icons come from the ModernZ icon font (fonts/modernz-icons.ttf); text is Segoe UI.
+-- Icons are drawn as shapes; text is Segoe UI.
 
 local mp = require "mp"
 local msg = require "mp.msg"
@@ -54,7 +54,86 @@ local function text(x, y, an, size, str, opt)
         opt.c or "FFFFFF", opt.a or "00", clean(str)))
 end
 
-local function icon(x, y, size, name, c, a) text(x, y, 5, size, name, { font = ICON, c = c, a = a, shadow = false }) end
+-- Icons are drawn as shapes (no icon font needed, so they can't go missing).
+local function poly(pts, c, a, bord)
+    local p = string.format("m %.1f %.1f", pts[1], pts[2])
+    for i = 3, #pts, 2 do p = p .. string.format(" l %.1f %.1f", pts[i], pts[i + 1]) end
+    add(string.format("{\\an7\\pos(0,0)\\bord%.1f\\shad0\\3c&H%s&\\3a&H%s&\\1c&H%s&\\1a&H%s&\\p1}%s{\\p0}",
+        bord or 0, c, a or "00", c, a or "00", p))
+end
+-- a line through the points, t thick, with round ends
+local function stroke(pts, t, c, a)
+    local p = string.format("m %.1f %.1f", pts[1], pts[2])
+    for i = 3, #pts, 2 do p = p .. string.format(" l %.1f %.1f", pts[i], pts[i + 1]) end
+    for i = #pts - 3, 1, -2 do p = p .. string.format(" l %.1f %.1f", pts[i], pts[i + 1]) end
+    add(string.format("{\\an7\\pos(0,0)\\bord%.1f\\shad0\\3c&H%s&\\3a&H%s&\\1a&HFF&\\p1}%s{\\p0}", t / 2, c, a or "00", p))
+end
+local function rrect_line(x, y, w, h, r, t, c)
+    local k = r * 0.5523
+    add(string.format("{\\an7\\pos(0,0)\\bord%.1f\\shad0\\3c&H%s&\\1a&HFF&\\p1}" ..
+        "m %.1f %.1f l %.1f %.1f b %.1f %.1f %.1f %.1f %.1f %.1f l %.1f %.1f b %.1f %.1f %.1f %.1f %.1f %.1f " ..
+        "l %.1f %.1f b %.1f %.1f %.1f %.1f %.1f %.1f l %.1f %.1f b %.1f %.1f %.1f %.1f %.1f %.1f{\\p0}", t / 2, c,
+        x + r, y, x + w - r, y, x + w - r + k, y, x + w, y + r - k, x + w, y + r,
+        x + w, y + h - r, x + w, y + h - r + k, x + w - r + k, y + h, x + w - r, y + h,
+        x + r, y + h, x + r - k, y + h, x, y + h - r + k, x, y + h - r,
+        x, y + r, x, y + r - k, x + r - k, y, x + r, y))
+end
+-- the circular arrow round "10": dir -1 = back, 1 = forward
+local function jump_icon(cx, cy, s, dir, c)
+    local r, t = 0.34 * s, 0.075 * s
+    local pts = {}
+    for d = -80, 200, 10 do
+        local th = math.rad(d)
+        pts[#pts + 1] = cx + r * math.cos(th)
+        pts[#pts + 1] = cy + r * math.sin(th)
+    end
+    -- mirror for "forward" so the gap and arrow sit top right
+    if dir > 0 then for i = 1, #pts, 2 do pts[i] = 2 * cx - pts[i] end end
+    stroke(pts, t, c)
+    local th = math.rad(-80)
+    local px, py = cx + r * math.cos(th), cy + r * math.sin(th)
+    local tx, ty = math.sin(th), -math.cos(th) -- along the circle, backwards
+    local nx, ny = math.cos(th), math.sin(th)  -- out from the centre
+    local tip = { px + tx * 0.17 * s, py + ty * 0.17 * s }
+    local a1 = { px + nx * 0.13 * s, py + ny * 0.13 * s }
+    local a2 = { px - nx * 0.13 * s, py - ny * 0.13 * s }
+    local tri = { tip[1], tip[2], a1[1], a1[2], a2[1], a2[2] }
+    if dir > 0 then for i = 1, #tri, 2 do tri[i] = 2 * cx - tri[i] end end
+    poly(tri, c, "00", 0.02 * s)
+    text(cx, cy + 0.02 * s, 5, 0.40 * s, "10", { bold = true, c = c, shadow = false })
+end
+
+local function icon(x, y, size, name, c, a)
+    c = c or "FFFFFF"
+    local s = size
+    if name == "close" then
+        local d = 0.26 * s
+        stroke({ x - d, y - d, x + d, y + d }, 0.075 * s, c, a)
+        stroke({ x - d, y + d, x + d, y - d }, 0.075 * s, c, a)
+    elseif name == "play" then
+        poly({ x - 0.26 * s, y - 0.36 * s, x + 0.38 * s, y, x - 0.26 * s, y + 0.36 * s }, c, a, 0.04 * s)
+    elseif name == "pause" then
+        rrect(x - 0.30 * s, y - 0.36 * s, 0.22 * s, 0.72 * s, 0.05 * s, c, a)
+        rrect(x + 0.08 * s, y - 0.36 * s, 0.22 * s, 0.72 * s, 0.05 * s, c, a)
+    elseif name == "next" then
+        poly({ x - 0.30 * s, y - 0.30 * s, x + 0.16 * s, y, x - 0.30 * s, y + 0.30 * s }, c, a, 0.03 * s)
+        rrect(x + 0.19 * s, y - 0.30 * s, 0.09 * s, 0.60 * s, 0.03 * s, c, a)
+    elseif name == "back10" then jump_icon(x, y, s, -1, c)
+    elseif name == "fwd10" then jump_icon(x, y, s, 1, c)
+    elseif name == "subtitles" then
+        rrect_line(x - 0.40 * s, y - 0.28 * s, 0.80 * s, 0.56 * s, 0.10 * s, 0.06 * s, c)
+        stroke({ x - 0.24 * s, y + 0.08 * s, x + 0.24 * s, y + 0.08 * s }, 0.06 * s, c)
+        stroke({ x - 0.24 * s, y - 0.07 * s, x + 0.04 * s, y - 0.07 * s }, 0.06 * s, c)
+    elseif name == "audio" then
+        local hs = { 0.18, 0.36, 0.52, 0.36, 0.18 }
+        for i, h in ipairs(hs) do
+            local bx = x + (i - 3) * 0.16 * s
+            stroke({ bx, y - h * s / 2, bx, y + h * s / 2 }, 0.07 * s, c)
+        end
+    elseif name == "check" then
+        stroke({ x - 0.30 * s, y, x - 0.08 * s, y + 0.22 * s, x + 0.32 * s, y - 0.22 * s }, 0.11 * s, c)
+    end
+end
 
 local function hit(x1, y1, x2, y2, fn) hits[#hits + 1] = { x1, y1, x2, y2, fn } end
 local function over(x1, y1, x2, y2) return mx >= x1 and mx <= x2 and my >= y1 and my <= y2 end
@@ -137,7 +216,7 @@ local function draw_panel()
             local y = top + (i - 1) * row
             local hov = over(x - 14 * S, y, x + colw - 40 * S, y + row)
             if hov then rrect(x - 14 * S, y + 4 * S, colw - 30 * S, row - 8 * S, 10 * S, "FFFFFF", "E6") end
-            if it.selected then text(x + 6 * S, y + row / 2, 5, 28 * S, "✓", { c = ACCENT, bold = true, shadow = false }) end
+            if it.selected then icon(x + 6 * S, y + row / 2, 26 * S, "check", ACCENT) end
             text(x + 34 * S, y + row / 2, 4, 25 * S, it.label,
                 { bold = it.selected, c = it.selected and "FFFFFF" or "D8D8D8", shadow = false })
             hit(x - 14 * S, y, x + colw - 40 * S, y + row, function()
@@ -175,14 +254,14 @@ local function render()
     -- top left: back to Ember
     local cx, cy, r = 110 * S, 105 * S, 44 * S
     circle(cx, cy, r, "FFFFFF", over(cx - r, cy - r, cx + r, cy + r) and "B0" or "C8")
-    icon(cx, cy, 40 * S, "window_close")
+    icon(cx, cy, 40 * S, "close")
     hit(cx - r, cy - r, cx + r, cy + r, function() mp.commandv("quit") end)
 
     -- top right: audio and subtitles
     local cell, pill_h = 96 * S, 88 * S
     local px2, py = W - 100 * S, 61 * S
     rrect(px2 - 2 * cell, py, 2 * cell, pill_h, pill_h / 2, "FFFFFF", "C8")
-    for i, name in ipairs({ "fluent_subtitles", "fluent_surround_sound" }) do
+    for i, name in ipairs({ "subtitles", "audio" }) do
         local ix = px2 - 2 * cell + (i - 0.5) * cell
         local hov = over(ix - cell / 2, py, ix + cell / 2, py + pill_h)
         icon(ix, py + pill_h / 2, 44 * S, name, (panel or hov) and ACCENT or "FFFFFF")
@@ -194,9 +273,9 @@ local function render()
     local gap = 250 * S
     local big, small = 150 * S, 92 * S
     for _, b in ipairs({
-        { mxc - gap, small, "fluent_replay_10_filled", function() mp.commandv("seek", "-10", "relative", "exact") end },
-        { mxc, big, paused and "fluent_play_arrow_filled" or "fluent_pause_filled", function() mp.commandv("cycle", "pause") end },
-        { mxc + gap, small, "fluent_forward_10_filled", function() mp.commandv("seek", "10", "relative", "exact") end },
+        { mxc - gap, small, "back10", function() mp.commandv("seek", "-10", "relative", "exact") end },
+        { mxc, big, paused and "play" or "pause", function() mp.commandv("cycle", "pause") end },
+        { mxc + gap, small, "fwd10", function() mp.commandv("seek", "10", "relative", "exact") end },
     }) do
         local x, size, name, fn = b[1], b[2], b[3], b[4]
         local hov = over(x - size / 2, myc - size / 2, x + size / 2, myc + size / 2)
@@ -212,7 +291,7 @@ local function render()
     if opts.next then
         local nx, ny, ns = W - M - 30 * S, H - 196 * S, 66 * S
         local hov = over(nx - ns / 2, ny - ns / 2, nx + ns / 2, ny + ns / 2)
-        icon(nx, ny, ns, "fluent_skip_next_filled", hov and ACCENT or "FFFFFF")
+        icon(nx, ny, ns, "next", hov and ACCENT or "FFFFFF")
         hit(nx - ns / 2, ny - ns / 2, nx + ns / 2, ny + ns / 2, function() mp.commandv("quit", "5") end)
     end
 

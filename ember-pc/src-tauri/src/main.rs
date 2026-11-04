@@ -100,6 +100,13 @@ mod layer {
     }
 }
 
+/// A path as mpv understands it: Windows can hand us "\\?\C:\..." paths, which mpv's own folder handling
+/// (config folder, fonts) doesn't follow, so that prefix is dropped.
+fn plain(p: &std::path::Path) -> String {
+    let s = p.display().to_string();
+    s.strip_prefix(r"\\?\").map(|x| x.to_string()).unwrap_or(s)
+}
+
 fn main_hwnd(app: &tauri::AppHandle) -> isize {
     #[cfg(windows)]
     {
@@ -155,8 +162,8 @@ async fn play(
     let mut cmd = Command::new(&mpv);
     cmd.arg(&url)
         .arg(format!("--start={}", start.max(0.0)))
-        .arg(format!("--script={}", script.display()))
-        .arg(format!("--script={}", controls.display()))
+        .arg(format!("--script={}", plain(&script)))
+        .arg(format!("--script={}", plain(&controls)))
         .arg("--load-scripts=no") // only Ember's own scripts (its controls replace ModernZ)
         .arg(format!("--script-opts={}", opts))
         .arg(format!("--log-file={}", logfile.display()))
@@ -169,7 +176,7 @@ async fn play(
         .arg("--input-default-bindings=yes")
         .arg("--input-vo-keyboard=yes")
         .arg("--osc=no") // Ember draws its own controls (ember_osc.lua)
-        .arg(format!("--config-dir={}", res.join("mpv-config").display()))
+        .arg(format!("--config-dir={}", plain(&res.join("mpv-config"))))
         .arg(format!("--force-media-title={}", title.unwrap_or_default()))
         .arg("--sub-auto=fuzzy")
         .arg("--slang=en,eng")
