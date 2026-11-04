@@ -43,6 +43,16 @@ jobs:
           Remove-Item $dest/.keep -ErrorAction SilentlyContinue
           Get-ChildItem $dest
 
+      - name: Fetch ModernZ (the player controls)
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/Samillion/ModernZ.git modernz-src
+          $cfg = "ember-pc/src-tauri/resources/mpv-config"
+          foreach ($f in @("modernz.lua")) { Get-ChildItem modernz-src -Recurse -Filter $f | Select-Object -First 1 | Copy-Item -Destination "$cfg/scripts/" }
+          foreach ($f in @("fluent-system-icons.ttf", "material-design-icons.ttf")) { Get-ChildItem modernz-src -Recurse -Filter $f | Select-Object -First 1 | Copy-Item -Destination "$cfg/fonts/" }
+          Get-ChildItem -Recurse $cfg | Select-Object FullName
+          if (-not (Test-Path "$cfg/scripts/modernz.lua")) { throw "modernz.lua not found" }
+
       - name: Build
         working-directory: ember-pc
         run: |

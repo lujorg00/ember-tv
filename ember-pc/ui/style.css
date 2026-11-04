@@ -167,3 +167,38 @@ input { font: inherit; color: var(--text); }
 .match .code { font: 700 36px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: 8px; color: var(--accent); }
 .match .people { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .grid.tight { padding: 4px 0; }
+
+/* page name over the hero (Films / Series) */
+.hero.named { padding-top: 26px; }
+.hero .pagename { position: relative; z-index: 1; font: 800 74px/0.9 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: -2px;
+  background: linear-gradient(180deg, #FFF4E6 10%, rgba(240,160,75,.85) 65%, rgba(240,160,75,0) 100%); -webkit-background-clip: text; background-clip: text;
+  color: transparent; text-shadow: none; filter: drop-shadow(0 6px 30px rgba(0,0,0,.45)); margin-bottom: -6px; }
+.hero.named h1 { margin-top: 14px; }
+
+/* loading screen */
+#loader { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; opacity: 0; transition: opacity .35s ease; }
+#loader.show { opacity: 1; }
+#loader .ld-bg { position: absolute; inset: -40px; background: #0E0B09 center/cover; filter: blur(34px) saturate(1.2); transform: scale(1.08); opacity: .55; transition: background-image .4s; }
+#loader .ld-shade { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(14,11,9,.55) 0%, rgba(14,11,9,.92) 70%); }
+#loader .ld-box { position: relative; display: flex; flex-direction: column; align-items: center; gap: 18px; width: min(520px, 80vw); text-align: center; }
+#loader .ld-title img { max-width: 380px; max-height: 120px; filter: drop-shadow(0 8px 30px #000c); }
+#loader .ld-title h2 { margin: 0; font: 600 34px "Segoe UI Variable Display", "Segoe UI", sans-serif; }
+#loader .ld-title .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.ld-flame { position: relative; width: 46px; height: 60px; }
+.ld-flame i { position: absolute; inset: 0; border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
+  background: radial-gradient(circle at 50% 72%, #FFF1D2 0 18%, #FFC27A 34%, #F0A04B 55%, #C2621F 80%, transparent 82%);
+  animation: flick 1.4s ease-in-out infinite; filter: drop-shadow(0 0 22px #F0A04B); transform-origin: 50% 90%; }
+.ld-flame b { position: absolute; left: 50%; bottom: -14px; width: 120px; height: 30px; transform: translateX(-50%); border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(240,160,75,.45), transparent 70%); animation: glow 1.4s ease-in-out infinite; }
+@keyframes flick { 0%,100% { transform: scale(1, 1) rotate(-2deg); } 30% { transform: scale(.94, 1.06) rotate(2deg); } 60% { transform: scale(1.04, .95) rotate(-1deg); } }
+@keyframes glow { 0%,100% { opacity: .7; } 50% { opacity: 1; } }
+.ld-steps { display: flex; flex-direction: column; gap: 8px; min-width: 300px; text-align: left; }
+.ld-steps div { display: flex; gap: 10px; align-items: center; color: var(--faint); font-size: 14px; transition: color .3s; }
+.ld-steps div::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid currentColor; flex: none; }
+.ld-steps div.on { color: var(--text); } .ld-steps div.on::before { border-color: var(--accent); background: transparent; animation: glow 1s infinite; }
+.ld-steps div.done { color: var(--muted); } .ld-steps div.done::before { background: var(--accent); border-color: var(--accent); }
+.ld-bar { width: 100%; height: 3px; border-radius: 3px; background: rgba(255,230,200,.1); overflow: hidden; }
+.ld-bar i { display: block; width: 35%; height: 100%; border-radius: 3px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: slide 1.3s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+.ld-note { color: var(--faint); font-size: 12px; min-height: 16px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-badges { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }

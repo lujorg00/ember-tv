@@ -44,10 +44,43 @@ function progressLine(p) {
   return `${ep}${fmt(p.position)} in, ${left}  ·  ${p.device || ""}${p.ago ? ", " + p.ago + " ago" : ""}`;
 }
 
+// ---------------------------------------------------------------- loading screen
+
+const loader = (() => {
+  const el = $("#loader");
+  let steps = [], hideTimer = 0;
+  return {
+    /** opts: { art, logo, title, sub, steps: ["Finding streams", ...] } */
+    show(o = {}) {
+      clearTimeout(hideTimer);
+      $(".ld-bg", el).style.backgroundImage = o.art ? `url('${o.art}')` : "none";
+      $(".ld-title", el).innerHTML = (o.logo ? `<img src="${esc(o.logo)}" alt="">` : `<h2>${esc(o.title || "Ember")}</h2>`)
+        + (o.sub ? `<div class="sub">${esc(o.sub)}</div>` : "");
+      const img = $(".ld-title img", el); if (img) img.onerror = () => img.replaceWith(h(`<h2>${esc(o.title || "")}</h2>`));
+      steps = o.steps || [];
+      $(".ld-steps", el).innerHTML = steps.map(t => `<div>${esc(t)}</div>`).join("");
+      $(".ld-note", el).textContent = "";
+      el.hidden = false; requestAnimationFrame(() => el.classList.add("show"));
+      this.step(0);
+    },
+    step(i, label) {
+      $(".ld-steps", el).querySelectorAll("div").forEach((d, k) => {
+        d.classList.toggle("done", k < i); d.classList.toggle("on", k === i);
+        if (k === i && label) d.innerHTML = label;
+      });
+    },
+    note(t) { $(".ld-note", el).textContent = t || ""; },
+    hide(delay = 0) {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => { el.classList.remove("show"); setTimeout(() => { if (!el.classList.contains("show")) el.hidden = true; }, 380); }, delay);
+    },
+  };
+})();
+
 // ---------------------------------------------------------------- navigation
 
 const pages = { home: showHome, search: showSearch, films: () => showBrowse("movie"), series: () => showBrowse("series"),
-  library: showLibrary, settings: showSettings, match: showMatch, year: showYear };
+  settings: showSettings, match: showMatch, year: showYear };
 const deviceName = () => store.get("deviceName", "Ember PC") || "Ember PC";
 let navStack = [];
 function go(page, ...args) {
@@ -117,13 +150,11 @@ function homeRowName(name, type) {
 const HERO_EVERY_MS = 10000, HERO_HOLD_MS = 60000;
 let heroTimer = 0;
 
-async function showHome() {
+/** The big slideshow at the top of Home, Films and Series. A page name ("Films") sits over it, blending in. */
+function createHero(pageName) {
   clearInterval(heroTimer);
-  const v = $("#view");
-  v.innerHTML = "";
-  const hero = h(`<header class="hero"><div class="bd a"></div><div class="bd b"></div><div class="info"></div><div class="dots"></div></header>`);
-  const rows = h(`<div class="rows"></div>`);
-  v.append(hero, rows);
+  const hero = h(`<header class="hero ${pageName ? "named" : ""}"><div class="bd a"></div><div class="bd b"></div>
+    ${pageName ? `<div class="pagename">${esc(pageName)}</div>` : ""}<div class="info"></div><div class="dots"></div></header>`);
   let flip = false, heroFor = null, pool = [], idx = 0, heldUntil = 0;
 
   const setHero = async (m) => {
@@ -152,10 +183,12 @@ async function showHome() {
     const i = pool.findIndex(x => x.id === m.id);
     hero.querySelectorAll(".dots i").forEach((d, k) => d.classList.toggle("on", k === i));
   };
-
   // A poster you click goes to the top and stays a minute before the slideshow carries on.
   const pick = (m) => { heldUntil = Date.now() + HERO_HOLD_MS; setHero(m); $("#view").scrollTo({ top: 0, behavior: "smooth" }); };
-  const startSlideshow = () => {
+  const start = (items) => {
+    const seen = new Set();
+    pool = items.filter(m => m && !seen.has(m.id) && seen.add(m.id)).slice(0, 10);
+    if (!pool.length) return;
     hero.querySelector(".dots").innerHTML = pool.map(() => "<i></i>").join("");
     hero.querySelectorAll(".dots i").forEach((d, k) => d.onclick = () => { idx = k; pick(pool[k]); });
     setHero(pool[0]);
@@ -166,7 +199,18 @@ async function showHome() {
       idx = (idx + 1) % pool.length; setHero(pool[idx]);
     }, HERO_EVERY_MS);
   };
+  return { el: hero, pick, start };
+}
 
+/** The top two from each row, in turn: the slideshow's titles. */
+const slideshowFrom = (lists) => { const out = []; for (let k = 0; k < 2; k++) for (const l of lists) if (l[k]) out.push(l[k]); return out; };
+
+async function showHome() {
+  const v = $("#view");
+  v.innerHTML = "";
+  const hero = createHero("");
+  const rows = h(`<div class="rows"></div>`);
+  v.append(hero.el, rows);
   await loadProgress();
   const cats = await catalogs();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
@@ -174,16 +218,10 @@ async function showHome() {
   outThisWeek().then(r => { if (r) (slots[1] || slots[0]).before(r); });
   const results = await Promise.all(cats.map(async (c, i) => {
     const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
-    if (metas.length) slots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, pick));
+    if (metas.length) slots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
     return metas;
   }));
-  // The slideshow: the top two from each row, no repeats, up to 10.
-  const seen = new Set();
-  for (let k = 0; k < 2; k++) for (const metas of results) {
-    const m = metas[k];
-    if (m && !seen.has(m.id) && pool.length < 10) { seen.add(m.id); pool.push(m); }
-  }
-  if (pool.length) startSlideshow();
+  hero.start(slideshowFrom(results));
 }
 
 // ---------------------------------------------------------------- search
@@ -217,31 +255,22 @@ async function showSearch(q = "") {
 
 async function showBrowse(type) {
   const v = $("#view");
-  v.innerHTML = `<div class="page-h"><h1>${type === "movie" ? "Films" : "Series"}</h1></div>`;
-  const rows = h(`<div class="rows"></div>`); v.appendChild(rows);
+  v.innerHTML = "";
+  const hero = createHero(type === "movie" ? "Films" : "Series");
+  const rows = h(`<div class="rows"></div>`);
+  v.append(hero.el, rows);
   await loadProgress();
   const mine = (await catalogs()).filter(c => c.type === type);
   const lists = [...mine.map(c => ({ name: c.name || c.id, load: () => catalogRow(c) })),
     { name: "Popular", load: () => getJson(`${CINEMETA}/catalog/${type}/top.json`).then(j => j.metas || []).catch(() => []) },
     { name: "Featured", load: () => getJson(`${CINEMETA}/catalog/${type}/imdbRating.json`).then(j => j.metas || []).catch(() => []) }];
   const slots = lists.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
-  await Promise.all(lists.map(async (l, i) => {
+  const results = await Promise.all(lists.map(async (l, i) => {
     const metas = (await l.load()).map(m => ({ ...m, type }));
-    if (metas.length) slots[i].replaceWith(row(l.name, metas, type));
+    if (metas.length) slots[i].replaceWith(row(l.name, metas, type, hero.pick));
+    return metas;
   }));
-}
-
-// ---------------------------------------------------------------- library: everything you're part-way through
-
-async function showLibrary() {
-  const v = $("#view");
-  v.innerHTML = `<div class="page-h"><h1>Library</h1><div class="muted">Everything you're part-way through, on any device</div></div>`;
-  await loadProgress();
-  const ids = Object.keys(progress);
-  if (!ids.length) { v.appendChild(h(`<div class="empty">Nothing in progress yet.</div>`)); return; }
-  const grid = h(`<div class="grid fade-in"></div>`); v.appendChild(grid);
-  const metas = await Promise.all(ids.slice(0, 60).map(async id => ({ id, type: progress[id].type, ...(await meta(progress[id].type, id)) })));
-  metas.forEach(m => grid.appendChild(card(m, m.type)));
+  hero.start(slideshowFrom(results));
 }
 
 // ---------------------------------------------------------------- title page
@@ -412,17 +441,25 @@ async function playBest(mm, season, episode, epTitle, start) {
 }
 async function playBestInner(mm, season, episode, epTitle, start) {
   if (!aioBase()) { go("settings"); return toast("Add your AIOStreams link first."); }
-  toast("Finding the best stream…", 15000);
+  const full = { ...(await meta(mm.type, mm.id)), ...mm };
+  loader.show({ art: backdrop(full), logo: full.logo, title: full.name,
+    sub: season ? `S${season} · E${episode}${epTitle ? " · " + epTitle : ""}${start ? "  ·  from " + fmt(start) : ""}` : (start ? "from " + fmt(start) : ""),
+    steps: ["Finding streams", "Testing the best ones for speed", "Starting playback"] });
+  const t2 = setTimeout(() => loader.step(1), 1800);
   const id = mm.type === "series" ? `${mm.id}:${season}:${episode}` : mm.id;
   const runtime = parseInt(mm.runtime) || "";
   let res;
   try {
     res = await getJson(`${feed()}/pick/${mm.type}/${encodeURIComponent(id)}?aio=${encodeURIComponent(store.get("aio"))}` +
       `&quality=${store.get("quality", "4k")}&runtime=${runtime}&passthrough=${store.get("passthrough", "0")}`, 60000);
-  } catch (e) { return toast("Couldn't ask lucapi for the best stream: " + e.message); }
+  } catch (e) { clearTimeout(t2); loader.hide(); return toast("Couldn't ask lucapi for the best stream: " + e.message); }
+  clearTimeout(t2);
   const ranked = (res.ranked || []).filter(x => !x.probe || x.probe.ok);
-  if (!ranked.length) return toast("No working streams found for this one.");
+  if (!ranked.length) { loader.hide(); return toast("No working streams found for this one."); }
   attempt = { mm, season, episode, epTitle, ranked, n: 0 };
+  const b = ranked[0], btext = `${b.name}\n${b.title}\n${b.filename}`;
+  loader.step(2, `Starting <span class="ld-badges">${badges(btext)}</span>`);
+  loader.note(`${b.probe && b.probe.ok ? `tested ${Math.round(b.probe.mbps)} Mbit/s · ` : ""}${(b.filename || b.title.split("\n")[0]).slice(0, 80)}`);
   return play(ranked[0].url, mm, season, episode, epTitle, start, ranked[0]);
 }
 
@@ -441,7 +478,10 @@ async function tryNext(why) {
     const p = r.positions.find(p => a.mm.type === "movie" ? p.season == null : (p.season == a.season && p.episode == a.episode));
     if (p && !p.finished) start = p.position;
   } catch (e) {}
-  toast(`That stream ${why}. Trying the next best (${a.n + 1} of ${Math.min(4, a.ranked.length)})…`, 6000);
+  const full = { ...(await meta(a.mm.type, a.mm.id)), ...a.mm };
+  loader.show({ art: backdrop(full), logo: full.logo, title: full.name, sub: `That stream ${why}`,
+    steps: [`Switching to the next best (${a.n + 1} of ${Math.min(4, a.ranked.length)})`, "Starting playback"] });
+  loader.note((a.ranked[a.n].filename || a.ranked[a.n].title.split("\n")[0]).slice(0, 80));
   await play(a.ranked[a.n].url, a.mm, a.season, a.episode, a.epTitle, start, a.ranked[a.n], true);
   return true;
 }
@@ -537,9 +577,11 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   const embed = store.get("playMode", "window") === "window";
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
     `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`].join(",");
+  const title = mm.name + (season ? `  ·  S${season} E${episode}${epTitle ? "  ·  " + epTitle : ""}` : "");
   try {
-    await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts });
-    if (!retry) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
+    await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts, title });
+    loader.hide(1600); // mpv's window is up and covering us by then
+    if (!retry && !chosen) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
     sky.pause(true);
     clearInterval(watching);
     watching = setInterval(async () => {
@@ -551,7 +593,7 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
       const cur = navStack[navStack.length - 1];
       if (cur && cur[0] === "title" && cur[1][1] === mm.id) { navStack.pop(); go("title", ...cur[1].slice(0, 3)); } // refresh resume points
     }, 2000);
-  } catch (e) { toast("Couldn't start the player: " + e); }
+  } catch (e) { loader.hide(); toast("Couldn't start the player: " + e); }
 }
 
 // ---------------------------------------------------------------- settings
@@ -652,4 +694,6 @@ const sky = (() => {
 // ---------------------------------------------------------------- start
 
 sky.start();
+loader.show({ title: "Ember", steps: [] });
+loader.hide(1400);
 if (!store.get("aio")) { go("settings"); toast("Paste your AIOStreams link to get streams."); } else go("home");

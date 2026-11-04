@@ -123,6 +123,7 @@ async fn play(
     embed: bool,
     passthrough: bool,
     opts: String,
+    title: Option<String>,
 ) -> Result<String, String> {
     let player: Player = (*player).clone();
     let res = app.path().resource_dir().map_err(|e| e.to_string())?;
@@ -151,7 +152,9 @@ async fn play(
         .arg("--keep-open=no")
         .arg("--input-default-bindings=yes")
         .arg("--input-vo-keyboard=yes")
-        .arg("--osc=yes")
+        .arg("--osc=no") // ModernZ draws the controls instead
+        .arg(format!("--config-dir={}", res.join("mpv-config").display()))
+        .arg(format!("--force-media-title={}", title.unwrap_or_default()))
         .arg("--sub-auto=fuzzy")
         .arg("--slang=en,eng")
         .arg("--alang=en,eng");

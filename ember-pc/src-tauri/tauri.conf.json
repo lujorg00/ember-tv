@@ -1,21 +1,51 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ember",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "identifier": "org.lucamedia.ember.pc",
-  "build": { "frontendDist": "../ui" },
+  "build": {
+    "frontendDist": "../ui"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      { "label": "main", "title": "Ember", "width": 1440, "height": 880, "minWidth": 960, "minHeight": 600 }
+      {
+        "label": "main",
+        "title": "Ember",
+        "width": 1440,
+        "height": 880,
+        "minWidth": 960,
+        "minHeight": 600
+      }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png", "icons/icon.ico"],
-    "resources": { "resources/mpv/*": "mpv/", "resources/ember.lua": "ember.lua" },
-    "windows": { "nsis": { "installMode": "currentUser" } }
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/mpv/*": "mpv/",
+      "resources/ember.lua": "ember.lua",
+      "resources/mpv-config/mpv.conf": "mpv-config/mpv.conf",
+      "resources/mpv-config/script-opts/modernz.conf": "mpv-config/script-opts/modernz.conf",
+      "resources/mpv-config/scripts/modernz.lua": "mpv-config/scripts/modernz.lua",
+      "resources/mpv-config/fonts/fluent-system-icons.ttf": "mpv-config/fonts/fluent-system-icons.ttf",
+      "resources/mpv-config/fonts/material-design-icons.ttf": "mpv-config/fonts/material-design-icons.ttf"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

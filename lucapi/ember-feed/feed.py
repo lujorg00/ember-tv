@@ -1131,12 +1131,12 @@ def _deck():
         cats = [c for c in man.get("catalogs", []) if not any(x.get("isRequired") for x in c.get("extra", []))]
         # recommendations first, then the top lists
         cats.sort(key=lambda c: 0 if re.search(r"for you|recommend", c.get("name", ""), re.I) else 1)
-        for c in cats[:8]:
+        for c in cats[:12]:
             try:
                 metas = json.loads(http_get(f"{CFG['addon_upstream'].rstrip('/')}/catalog/{c['type']}/{c['id']}.json", timeout=15)).get("metas", [])
             except Exception:
                 continue
-            for m in metas[:15]:
+            for m in metas[:20]:
                 if m.get("id") in seen or not str(m.get("id", "")).startswith("tt"):
                     continue
                 seen.add(m["id"])
@@ -1147,7 +1147,9 @@ def _deck():
     except Exception as e:
         print(f"[ember-feed] match deck failed: {e}", flush=True)
     random.shuffle(cards)
-    return cards[:60]
+    films = [c for c in cards if c["type"] == "movie"][:50]
+    series = [c for c in cards if c["type"] == "series"][:50]
+    return films + series
 
 
 def match_new(body):
@@ -1158,6 +1160,12 @@ def match_new(body):
         _matches[code] = {"code": code, "created": time.time(), "deck": _deck(), "people": {}, "votes": {},
                           "kind": body.get("kind", "any")}
     return match_state(code)
+
+
+def match_kind(code):
+    with _match_lock:
+        m = _matches.get(code.upper())
+        return {"kind": m["kind"], "chooser": m.get("chooser", "")} if m else {"error": "no such session"}
 
 
 def match_state(code):
@@ -1173,8 +1181,9 @@ def match_state(code):
         need = set(m["people"].keys())
         matches = [c for c in m["deck"] if need and len(need) >= 2 and need <= liked.get(c["id"], set())]
         done = {pid: sum(1 for (p, _c) in m["votes"] if p == pid) for pid in m["people"]}
-        return {"code": m["code"], "people": [{"name": p["name"], "swiped": done.get(p["id"], 0)} for p in people],
-                "deckSize": len(m["deck"]), "matches": matches}
+        deck = [c for c in m["deck"] if m["kind"] == "any" or c["type"] == m["kind"]]
+        return {"code": m["code"], "kind": m["kind"], "people": [{"name": p["name"], "swiped": done.get(p["id"], 0)} for p in people],
+                "deckSize": len(deck), "matches": [c for c in matches if m["kind"] == "any" or c["type"] == m["kind"]]}
 
 
 def match_join(code, body):
@@ -1184,7 +1193,12 @@ def match_join(code, body):
             return {"error": "no such session"}
         pid = body.get("id") or "".join(random.choice("abcdef0123456789") for _ in range(10))
         m["people"][pid] = {"id": pid, "name": str(body.get("name", "Someone"))[:20] or "Someone"}
-        return {"id": pid, "deck": m["deck"]}
+        # the first person to choose Films or Series decides for everyone
+        if m["kind"] == "any" and body.get("kind") in ("movie", "series"):
+            m["kind"] = body["kind"]
+            m["chooser"] = m["people"][pid]["name"]
+        deck = [c for c in m["deck"] if m["kind"] == "any" or c["type"] == m["kind"]]
+        return {"id": pid, "deck": deck, "kind": m["kind"], "chooser": m.get("chooser", "")}
 
 
 def match_vote(code, body):
@@ -1213,35 +1227,46 @@ MATCH_PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{--bg:#0E0B09;--card:#1C1612;--text:#F3E7DA;--muted:#A8968A;--accent:#F0A04B}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;overflow:hidden;touch-action:none}
 header{padding:14px 18px 6px;display:flex;justify-content:space-between;align-items:baseline}header b{color:var(--accent);font-size:18px}
-#join{padding:30px 22px}#join input{width:100%;padding:14px;border-radius:12px;border:1px solid #3a2a1f;background:var(--card);color:var(--text);font-size:17px}
-button{font:inherit;border:0;border-radius:14px;padding:14px 18px;background:var(--accent);color:#2A1606;font-weight:700}
+.pane{padding:24px 22px}input{width:100%;padding:14px;border-radius:12px;border:1px solid #3a2a1f;background:var(--card);color:var(--text);font-size:17px}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+.big button{height:150px;border-radius:20px;border:1px solid #3a2a1f;background:var(--card);color:var(--text);font:700 26px -apple-system,system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.big button span{font-size:40px}.big button:active{background:#2a1f18;border-color:var(--accent)}
 #stage{position:relative;height:calc(100% - 150px);margin:6px 16px}
 .c{position:absolute;inset:0;border-radius:20px;background:var(--card) center/cover;box-shadow:0 10px 30px #0008;overflow:hidden;transition:transform .25s}
 .c .i{position:absolute;inset:auto 0 0;padding:60px 16px 16px;background:linear-gradient(transparent,#000d)}
 .c h2{margin:0 0 4px;font-size:22px}.c p{margin:4px 0 0;color:#ddd;font-size:13px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .tag{position:absolute;top:22px;padding:6px 14px;border:3px solid;border-radius:10px;font-weight:800;font-size:22px;opacity:0}
 .yes{left:18px;color:#7CE38B;transform:rotate(-12deg)}.no{right:18px;color:#FF7B7B;transform:rotate(12deg)}
-#btns{display:flex;justify-content:center;gap:28px;padding:12px}#btns button{width:68px;height:68px;border-radius:50%;font-size:28px;padding:0}
+#btns{display:flex;justify-content:center;gap:28px;padding:12px}#btns button{width:68px;height:68px;border-radius:50%;font-size:28px;padding:0;border:0}
 #btns .n{background:#3a2420;color:#FF9A8E}#btns .y{background:#203a24;color:#9FF0A9}
 .muted{color:var(--muted)}#done{display:none;padding:40px 22px;text-align:center}
 </style></head><body>
 <header><b>What shall we watch?</b><span class="muted" id="who"></span></header>
-<div id="join"><p class="muted">Swipe right on anything you'd watch, left if not. Whatever you all like shows up on the TV.</p>
-<input id="name" placeholder="Your name" maxlength="20"><p><button id="go">Start swiping</button></p></div>
+<div id="join" class="pane"><p class="muted" id="intro">Swipe right on anything you'd watch, left if not. Whatever you all like shows up on the TV.</p>
+<input id="name" placeholder="Your name" maxlength="20">
+<div class="big" id="choose"><button data-k="movie"><span>🎬</span>Films</button><button data-k="series"><span>📺</span>Series</button></div>
+<p id="chosen" class="muted" hidden></p><p id="goWrap" hidden><button id="go" style="width:100%;padding:16px;border-radius:14px;border:0;background:var(--accent);color:#2A1606;font-weight:700;font-size:17px">Start swiping</button></p></div>
 <div id="stage" hidden></div><div id="btns" hidden><button class="n" id="no">✕</button><button class="y" id="yes">♥</button></div>
 <div id="done"><h2>That's all of them</h2><p class="muted">Your matches are on the TV.</p></div>
 <script>
 const code=location.pathname.split('/').pop().toUpperCase(),api='/match/'+code;let me=null,deck=[],i=0;
+const $=id=>document.getElementById(id);
 const ls={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-document.getElementById('name').value=ls.get('name')||'';
-document.getElementById('go').onclick=async()=>{const name=document.getElementById('name').value.trim()||'Someone';ls.set('name',name);
- const r=await (await fetch(api+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,id:ls.get('id_'+code)})})).json();
+$('name').value=ls.get('name')||'';
+// if someone already chose, skip the choice
+fetch(api+'/kind').then(r=>r.json()).then(k=>{if(k.error){$('intro').textContent='That session has ended. Start a new one on the TV.';return}
+ if(k.kind&&k.kind!=='any'){$('choose').hidden=true;$('chosen').hidden=false;$('goWrap').hidden=false;
+  $('chosen').textContent=(k.chooser||'Someone')+' picked '+(k.kind==='movie'?'films':'series')+'.'}});
+async function join(kind){const name=$('name').value.trim()||'Someone';ls.set('name',name);
+ const r=await (await fetch(api+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,kind,id:ls.get('id_'+code)})})).json();
  if(r.error){alert('That session has ended. Start a new one on the TV.');return}
- me=r.id;ls.set('id_'+code,me);deck=r.deck;document.getElementById('who').textContent=name;
- document.getElementById('join').hidden=true;document.getElementById('stage').hidden=false;document.getElementById('btns').hidden=false;show()};
+ me=r.id;ls.set('id_'+code,me);deck=r.deck;$('who').textContent=name+' · '+(r.kind==='movie'?'Films':'Series');
+ $('join').hidden=true;$('stage').hidden=false;$('btns').hidden=false;show()}
+document.querySelectorAll('#choose button').forEach(b=>b.onclick=()=>join(b.dataset.k));
+$('go').onclick=()=>join(null);
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function show(){const st=document.getElementById('stage');st.innerHTML='';
- if(i>=deck.length){st.hidden=true;document.getElementById('btns').hidden=true;document.getElementById('done').style.display='block';return}
+function show(){const st=$('stage');st.innerHTML='';
+ if(i>=deck.length){st.hidden=true;$('btns').hidden=true;$('done').style.display='block';return}
  const d=deck[i],c=document.createElement('div');c.className='c';c.style.backgroundImage="url('"+d.poster+"')";
  c.innerHTML='<span class="tag yes">YES</span><span class="tag no">NOPE</span><div class="i"><h2>'+esc(d.name)+'</h2><div class="muted">'+esc([d.year,d.rating&&'★ '+d.rating,(d.genres||[]).join(', ')].filter(Boolean).join(' · '))+'</div><p>'+esc(d.description)+'</p></div>';
  st.appendChild(c);let x0=null,dx=0;
@@ -1251,7 +1276,7 @@ function show(){const st=document.getElementById('stage');st.innerHTML='';
  c.addEventListener('pointerup',()=>{c.style.transition='';if(Math.abs(dx)>90)vote(dx>0);else c.style.transform='';x0=null;dx=0})}
 async function vote(like){const c=document.querySelector('.c');if(c)c.style.transform='translateX('+(like?600:-600)+'px) rotate('+(like?30:-30)+'deg)';
  const d=deck[i++];fetch(api+'/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:me,card:d.id,like})});setTimeout(show,180)}
-document.getElementById('yes').onclick=()=>vote(true);document.getElementById('no').onclick=()=>vote(false);
+$('yes').onclick=()=>vote(true);$('no').onclick=()=>vote(false);
 </script></body></html>"""
 
 # ------------------------------------------------------------------ "Ember picks": the picker as a Stremio addon
@@ -1573,6 +1598,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             elif re.fullmatch(r"/match/[A-Za-z0-9]{4}", path):
                 self._json(match_state(path.split("/")[2]))
+            elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/kind", path):
+                self._json(match_kind(path.split("/")[2]))
             elif re.fullmatch(r"/match/[A-Za-z0-9]{4}/qr.png", path):
                 png = match_qr(path.split("/")[2], self._base())
                 self.send_response(200)
