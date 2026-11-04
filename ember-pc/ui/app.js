@@ -371,7 +371,7 @@ async function tileRows(hidden = new Set(), typ = "") {
   const box = h(`<div></div>`);
   for (const g of t.groups) {
     if (hidden.has("tiles:" + g.title)) continue;
-    if (typ === "series" && g.style === "person") continue; // directors are for films
+    if (typ === "series" && (g.style === "person" || g.title === "Franchises")) continue; // directors and franchises are for films
     const list = g.tiles.filter(x => !typ || !x.types || x.types.includes(typ));
     if (!list.length) continue;
     const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
