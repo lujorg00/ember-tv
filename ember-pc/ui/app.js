@@ -789,6 +789,17 @@ async function weekCalendar() {
     }).catch(() => {});
   }
   if (eps.length > 6) list.appendChild(h(`<div class="wk-none">and ${eps.length - 6} more</div>`));
+  // Names too long for the panel scroll slowly back and forth so you can read them.
+  const marquee = () => box.querySelectorAll(".wk-t").forEach(t => {
+    if (t.querySelector("span")) return;
+    const over = t.scrollWidth - t.clientWidth;
+    if (over <= 2) return;
+    t.innerHTML = `<span>${t.innerHTML}</span>`;
+    t.classList.add("marq");
+    t.style.setProperty("--dist", `-${over + 6}px`);
+    t.style.setProperty("--dur", `${Math.max(6, over / 12 + 4)}s`);
+  });
+  setTimeout(marquee, 500); setTimeout(marquee, 2000);
   return box;
 }
 

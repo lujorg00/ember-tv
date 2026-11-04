@@ -337,3 +337,7 @@ input { font: inherit; color: var(--text); }
 .tile.logo.haslogo { place-items: center; }
 .tile.logo img.lg-full { max-width: none; max-height: none; width: auto; height: 100%; border-radius: 0; }
 .tile.logo.haslogo span { display: none; }
+
+.wk-t.marq { text-overflow: clip; }
+.wk-t.marq span { display: inline-block; animation: wk-marq var(--dur, 8s) ease-in-out infinite; }
+@keyframes wk-marq { 0%, 18% { transform: translateX(0); } 50%, 68% { transform: translateX(var(--dist)); } 100% { transform: translateX(0); } }
