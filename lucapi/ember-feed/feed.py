@@ -26,6 +26,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
 Config lives in config.json next to this file (see config.example.json).
 Needs: python3 -m pip install icalendar recurring-ical-events
 """
+import hashlib
 import json
 import os
 import random
@@ -1826,6 +1827,63 @@ def _franchise_logo(title, metas):
     return f"https://images.metahub.space/logo/medium/{m['id']}/img" if m else ""
 
 
+LOGO_DIR = HERE / "logo-cache"
+
+
+def _logo(url):
+    """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), and works out how to show it:
+    "box"  - it has its own solid background (Marvel, IMDb): show as it is
+    "ok"   - coloured, or light, or has light parts: show as it is
+    "dark" - a dark, one-colour logo: show it in white so it reads on dark artwork
+    plus "edge": the colour around its border (streaming services fill their tile with it)."""
+    if not url:
+        return None
+    key = hashlib.sha1(url.encode()).hexdigest()[:20]
+    info_path = LOGO_DIR / f"{key}.json"
+    if info_path.exists():
+        try:
+            return json.loads(info_path.read_text())
+        except Exception:
+            pass
+    LOGO_DIR.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(url, headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = r.read()
+    info = {"src": f"/logo/{key}", "mode": "ok", "edge": ""}
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(data)).convert("RGBA")
+        out = io.BytesIO()
+        im.save(out, "PNG")
+        data = out.getvalue()
+        sm = im.copy()
+        sm.thumbnail((96, 96))
+        px = list(sm.getdata())
+        solid = [p for p in px if p[3] > 40]
+        clear = 1 - len(solid) / max(1, len(px))
+        lum = lambda p: (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255
+        sat = lambda p: (max(p[:3]) - min(p[:3])) / 255
+        n = max(1, len(solid))
+        light = sum(1 for p in solid if lum(p) > 0.7) / n
+        colourful = sum(1 for p in solid if sat(p) > 0.35 and lum(p) > 0.12) / n
+        if clear < 0.04:
+            info["mode"] = "box"
+        elif colourful > 0.25 or light >= 0.15:
+            info["mode"] = "ok"
+        else:
+            info["mode"] = "dark"
+        w, h = sm.size
+        corners = [sm.getpixel((x, y)) for x, y in ((1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2))]
+        if all(c[3] > 200 for c in corners):
+            info["edge"] = "#%02x%02x%02x" % tuple(sum(c[i] for c in corners) // 4 for i in range(3))
+    except Exception as e:
+        print(f"[ember-feed] logo {url[:60]}: kept as it is ({e})", flush=True)
+    (LOGO_DIR / key).write_bytes(data)
+    info_path.write_text(json.dumps(info))
+    return info
+
+
 def _service_logos():
     out = {}
     for region in ("US", "GB"):
@@ -1907,6 +1965,14 @@ def _build_tiles():
                 pass
         if t["box"] in ("studios", "animation") and not t.get("logo"):
             t["logo"] = _wikidata_logo(t["title"])
+        if t.get("logo"):
+            try:
+                info = _logo(t["logo"])
+                t["logo"], t["logo_mode"] = info["src"], info["mode"]
+                if t["box"] == "services" and info.get("edge"):
+                    t["colour"] = info["edge"]
+            except Exception as e:
+                print(f"[ember-feed] logo for {t['title']} failed: {e}", flush=True)
 
     with concurrent.futures.ThreadPoolExecutor(8) as ex:
         list(ex.map(art, tl))
@@ -2123,6 +2189,21 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/picks/[A-Za-z0-9_=-]+/stream/(movie|series)/tt[0-9:]+\.json", path):
                 parts = path.split("/")
                 self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
+            elif re.fullmatch(r"/logo/[0-9a-f]{20}", path):
+                f = LOGO_DIR / path.split("/")[2]
+                if not f.exists():
+                    self._json({"error": "not found"}, 404)
+                    return
+                body = f.read_bytes()
+                ctype = "image/png" if body[:4] == b"\x89PNG" else "image/jpeg" if body[:2] == b"\xff\xd8" \
+                    else "image/svg+xml" if body.lstrip()[:1] == b"<" else "application/octet-stream"
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "public, max-age=2592000")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
             elif path == "/jellyfin/summary":
                 self._json(jellyfin_summary())
             elif path == "/progress/dismissed":

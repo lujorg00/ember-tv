@@ -334,8 +334,9 @@ async function tileRows(hidden = new Set(), typ = "") {
     const list = g.tiles.filter(x => !typ || !x.types || x.types.includes(typ));
     if (!list.length) continue;
     const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
-    for (const tile of list) {
+    for (let tile of list) {
       if (tile.kind === "cat") tileInfo[tile.id] = tile;
+      if (tile.logo && tile.logo.startsWith("/")) tile = { ...tile, logo: feed() + tile.logo }; // kept on the Pi
       let inner;
       if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
@@ -344,7 +345,10 @@ async function tileRows(hidden = new Set(), typ = "") {
       // A logo that doesn't load: show the name instead.
       el.querySelectorAll("img").forEach(img => {
         img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); };
-        if (g.style === "logo") serviceTile(img, el); else smartLogo(img);
+        const mode = { box: "lg-box", dark: "lg-dark", ok: "lg-ok" }[tile.logo_mode];
+        if (g.style === "logo") { img.classList.add("lg-full"); if (!tile.logo_mode) serviceTile(img, el); }
+        else if (mode) img.classList.add(mode);
+        else smartLogo(img); // an older lucapi: work it out here
       });
       const first = typ || (tile.types || ["movie"])[0];
       el.onclick = () => go("tile", tile.kind, tile.id, tile.title, (g.style === "person" ? "" : tile.image) || "", first);
@@ -868,12 +872,21 @@ async function showMatch() {
   tick(); matchPoll = setInterval(tick, 2000);
 }
 
+/** The episode after this one (the next season's first, at the end of a season), or null. */
+function nextEpisode(mm, season, episode) {
+  if (mm.type !== "series" || !season) return null;
+  const eps = (mm.videos || []).filter(x => x.season > 0).sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const i = eps.findIndex(x => x.season === season && x.episode === episode);
+  return i >= 0 && i + 1 < eps.length ? eps[i + 1] : null;
+}
+
 async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   if (!chosen) attempt = null; // picked by hand: no automatic switching
   if (!invoke) return toast("Playing only works inside the Ember app.");
   const embed = store.get("playMode", "window") === "window";
+  const next = nextEpisode(mm, season, episode);
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
-    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`].join(",");
+    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`, `ember_osc-next=${next ? "yes" : "no"}`].join(",");
   const title = mm.name + (season ? `  ·  S${season} E${episode}${epTitle ? "  ·  " + epTitle : ""}` : "");
   try {
     await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts, title });
@@ -886,6 +899,10 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
       clearInterval(watching);
       const code = await invoke("last_exit");
       if (attempt && (code === 2 || code === 4) && await tryNext(code === 2 ? "wouldn't play" : "kept stalling")) return;
+      if (code === 5 && next) { // "Next episode" in the player
+        attempt = null;
+        return playBest(mm, next.season, next.episode, next.name || next.title || "", 0);
+      }
       attempt = null; sky.pause(false);
       const cur = navStack[navStack.length - 1];
       if (cur && cur[0] === "title" && cur[1][1] === mm.id) { navStack.pop(); go("title", ...cur[1].slice(0, 3)); } // refresh resume points

@@ -142,6 +142,7 @@ async fn play(
     let res = app.path().resource_dir().map_err(|e| e.to_string())?;
     let mpv = res.join("mpv").join("mpv.exe");
     let script = res.join("ember.lua");
+    let controls = res.join("ember_osc.lua");
     if !mpv.exists() {
         return Err(format!("mpv not found at {}", mpv.display()));
     }
@@ -155,9 +156,11 @@ async fn play(
     cmd.arg(&url)
         .arg(format!("--start={}", start.max(0.0)))
         .arg(format!("--script={}", script.display()))
+        .arg(format!("--script={}", controls.display()))
+        .arg("--load-scripts=no") // only Ember's own scripts (its controls replace ModernZ)
         .arg(format!("--script-opts={}", opts))
         .arg(format!("--log-file={}", logfile.display()))
-        .arg("--msg-level=all=warn,ember=v,modernz=v")
+        .arg("--msg-level=all=warn,ember=v,ember_osc=v")
         .arg("--force-window=immediate")
         .arg("--title=Ember")
         .arg("--hwdec=auto-safe")
@@ -165,7 +168,7 @@ async fn play(
         .arg("--keep-open=no")
         .arg("--input-default-bindings=yes")
         .arg("--input-vo-keyboard=yes")
-        .arg("--osc=no") // ModernZ draws the controls instead
+        .arg("--osc=no") // Ember draws its own controls (ember_osc.lua)
         .arg(format!("--config-dir={}", res.join("mpv-config").display()))
         .arg(format!("--force-media-title={}", title.unwrap_or_default()))
         .arg("--sub-auto=fuzzy")
@@ -261,7 +264,7 @@ fn stop(app: tauri::AppHandle, player: tauri::State<Player>) {
 fn player_log(app: tauri::AppHandle) -> String {
     let Ok(dir) = app.path().app_local_data_dir() else { return String::new() };
     let text = std::fs::read_to_string(dir.join("mpv-log.txt")).unwrap_or_else(|_| "No player log yet: play something first.".into());
-    let lines: Vec<&str> = text.lines().filter(|l| l.contains("[ember]") || l.contains("modernz") || l.contains("[osc]") || l.contains("error") || l.contains("Lua") || l.contains("script")).collect();
+    let lines: Vec<&str> = text.lines().filter(|l| l.contains("[ember]") || l.contains("ember_osc") || l.contains("[osc]") || l.contains("error") || l.contains("Lua") || l.contains("script")).collect();
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
 

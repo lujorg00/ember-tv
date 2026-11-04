@@ -37,7 +37,7 @@ local function post(state, sync, finished)
 end
 
 -- Esc or Backspace: stop and go back to Ember (progress is saved as it stops).
-mp.add_forced_key_binding("ESC", "ember-back", function() mp.command("quit") end)
+-- (Esc is handled by ember_osc.lua: it closes the track panel first.)
 mp.add_forced_key_binding("BS", "ember-back-bs", function() mp.command("quit") end)
 
 mp.observe_property("time-pos", "number", function(_, v) if v then pos = v end end)
@@ -84,12 +84,12 @@ end)
 mp.add_timeout(3, function()
     local ok = false
     for _, b in ipairs(mp.get_property_native("input-bindings") or {}) do
-        if b.owner and tostring(b.owner):lower():find("modernz") then ok = true; break end
+        if b.owner and tostring(b.owner):lower():find("ember_osc") then ok = true; break end
     end
     if not ok then
-        msg.warn("ModernZ controls not found: falling back to mpv's standard controls")
+        msg.warn("Ember controls not found: falling back to mpv's standard controls")
         mp.set_property_bool("osc", true)
     else
-        msg.info("ModernZ controls loaded")
+        msg.info("Ember controls loaded (checked)")
     end
 end)
