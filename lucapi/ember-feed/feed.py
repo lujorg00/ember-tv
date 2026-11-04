@@ -669,6 +669,10 @@ def _scrobble(verb, d, pct):
               if d["type"] == "series" else {"movie": {"ids": {"imdb": d["imdb"]}}})
     try:
         _trakt(f"/scrobble/{verb}", dict(target, progress=round(pct, 2), app_version="ember-1"))
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            return  # Trakt already has this one as watched (just now): nothing to do
+        print(f"[ember-feed] Trakt scrobble {verb} failed: {e}", flush=True)
     except Exception as e:
         print(f"[ember-feed] Trakt scrobble {verb} failed: {e}", flush=True)
 
@@ -1582,8 +1586,10 @@ class Handler(BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 g = lambda k, d=None: (q.get(k) or [d])[0]
                 rt = g("runtime")
-                self._json(pick(parts[2], urllib.parse.unquote(parts[3]), g("aio"), g("quality", "4k"),
-                                float(rt) if rt else None, g("passthrough") == "1"))
+                args = (parts[2], urllib.parse.unquote(parts[3]), g("aio"), g("quality", "4k"),
+                        float(rt) if rt else None, g("passthrough") == "1")
+                # the same question within 90 seconds gets the same answer (no flip-flopping between tests)
+                self._json(cached("pick:" + "|".join(map(str, args)), 90, lambda: pick(*args)))
             elif path.startswith("/progress/tt") and path[len("/progress/tt"):].isdigit():
                 self._json(title_positions(path[len("/progress/"):]))
             elif path.startswith("/next/"):

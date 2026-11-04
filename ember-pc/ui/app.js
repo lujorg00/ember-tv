@@ -404,7 +404,13 @@ let watching = null;
 let attempt = null; // { mm, season, episode, epTitle, ranked, n } while the picker is in charge
 
 /** Plays the best stream the Pi's picker finds; if it errors or stalls, the next best, from the same point. */
+let picking = false;
 async function playBest(mm, season, episode, epTitle, start) {
+  if (picking) return; // already finding one: ignore the second press
+  picking = true;
+  try { return await playBestInner(mm, season, episode, epTitle, start); } finally { setTimeout(() => { picking = false; }, 1500); }
+}
+async function playBestInner(mm, season, episode, epTitle, start) {
   if (!aioBase()) { go("settings"); return toast("Add your AIOStreams link first."); }
   toast("Finding the best stream…", 15000);
   const id = mm.type === "series" ? `${mm.id}:${season}:${episode}` : mm.id;
