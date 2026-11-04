@@ -350,7 +350,8 @@ async function tileRows(hidden = new Set(), typ = "") {
 }
 
 /** The page behind a tile: its titles, Films or Series where both exist. */
-async function showTile(kind, id, title, image, typ) {
+const TILE_SORTS = [["", "List order"], ["new", "Newest"], ["old", "Oldest"], ["rating", "Top rated"], ["az", "A–Z"]];
+async function showTile(kind, id, title, image, typ, sort = "") {
   const own = kind === "cat";
   const info = tileInfo[id] || {};
   const both = own ? (info.types || []).length > 1 : ["service", "genre", "company"].includes(kind);
@@ -359,20 +360,24 @@ async function showTile(kind, id, title, image, typ) {
   v.innerHTML = "";
   const head = h(`<header class="tile-head" style="background-image:url('${esc(image)}')"><div class="shade"></div>
     <button class="back">‹ Back</button><h1>${esc(title)}</h1>
-    ${both ? `<div class="chips"><span class="chip btn-chip ${typ === "movie" ? "on" : ""}" data-t="movie">Films</span><span class="chip btn-chip ${typ === "series" ? "on" : ""}" data-t="series">Series</span></div>` : ""}</header>`);
+    <div class="tile-bar">${both ? `<div class="chips"><span class="chip btn-chip ${typ === "movie" ? "on" : ""}" data-t="movie">Films</span><span class="chip btn-chip ${typ === "series" ? "on" : ""}" data-t="series">Series</span></div>` : "<div></div>"}
+    ${own ? `<div class="chips sorts">${TILE_SORTS.map(([k, l]) => `<span class="chip btn-chip ${k === sort ? "on" : ""}" data-s="${k}">${l}</span>`).join("")}</div>` : ""}</div></header>`);
   const grid = h(`<div class="grid fade-in"></div>`);
   const more = h(`<div class="btns" style="padding:0 48px 60px"><button class="btn">More</button></div>`);
   v.append(head, grid, more);
   $(".back", head).onclick = back;
-  head.querySelectorAll("[data-t]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][4] = c.dataset.t; showTile(kind, id, title, image, c.dataset.t); });
+  head.querySelectorAll("[data-t]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][4] = c.dataset.t; showTile(kind, id, title, image, c.dataset.t, sort); });
+  head.querySelectorAll("[data-s]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][5] = c.dataset.s; showTile(kind, id, title, image, typ, c.dataset.s); });
   let page = 1, pages = 1, shown = 0;
   const ids = new Set();
   const load = async () => {
     more.querySelector("button").textContent = "Loading…";
+    if (own && sort && !shown) grid.innerHTML = `<div class="empty">Sorting the whole list…</div>`;
     let r;
-    const url = own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
+    const url = own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}&sort=${sort}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
     try { r = await getJson(url, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
     pages = r.pages || 1;
+    if (own && sort && !shown) grid.innerHTML = "";
     const fresh = (r.metas || []).filter(m => !ids.has(m.id));
     fresh.forEach(m => { ids.add(m.id); grid.appendChild(card(m, m.type || typ)); });
     shown += (r.metas || []).length;

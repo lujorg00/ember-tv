@@ -1864,13 +1864,51 @@ def _build_tiles():
 _TILE_CATS = {}
 
 
-def browse_cat(tid, typ="movie", skip=0):
-    """The titles behind one of your own tiles: its catalogues for that type, merged, without repeats."""
+def _year(m):
+    for k in ("releaseInfo", "year", "released"):
+        y = re.search(r"(18|19|20)\d\d", str(m.get(k) or ""))
+        if y:
+            return int(y.group(0))
+    return 0
+
+
+def _rating(m):
+    try:
+        return float(m.get("imdbRating") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+SORTS = {"new": (lambda m: (_year(m) == 0, -_year(m))), "old": (lambda m: (_year(m) == 0, _year(m))),
+         "rating": (lambda m: -_rating(m)), "az": (lambda m: re.sub(r"^(the|a|an) ", "", (m.get("name") or "").lower()))}
+
+
+def browse_cat(tid, typ="movie", skip=0, sort=""):
+    """The titles behind one of your own tiles: its catalogues for that type, merged, without repeats.
+    With a sort, the whole list (up to 600) is fetched and sorted, in one go."""
     if not _TILE_CATS:
         browse_tiles()
     cats = _TILE_CATS.get(tid, {}).get("movie" if typ == "movie" else "series", [])
     if not cats:
         return {"metas": [], "more": False}
+
+    if sort in SORTS:
+        def build_all():
+            out, seen = [], set()
+            for c in cats:
+                at = 0
+                while len(out) < 600:
+                    page = _cat_metas(c, at)
+                    fresh = [m for m in page if m.get("id") not in seen]
+                    for m in fresh:
+                        seen.add(m.get("id"))
+                        out.append({**m, "type": m.get("type") or c["type"]})
+                    if not c["skip"] or not fresh:
+                        break
+                    at += len(page)
+            out.sort(key=SORTS[sort])
+            return {"metas": out, "more": False}
+        return cached(f"browse:cat:{tid}:{typ}:all:{sort}", 3600, build_all)
 
     def build():
         out, seen, more = [], set(), False
@@ -2033,7 +2071,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(browse_tiles())
             elif re.fullmatch(r"/browse/cat/[a-z0-9-]+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                self._json(browse_cat(path.split("/")[3], (q.get("type") or ["movie"])[0], int((q.get("skip") or [0])[0])))
+                self._json(browse_cat(path.split("/")[3], (q.get("type") or ["movie"])[0], int((q.get("skip") or [0])[0]),
+                                     (q.get("sort") or [""])[0]))
             elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 _, _, kind, tid = path.split("/")

@@ -320,3 +320,6 @@ input { font: inherit; color: var(--text); }
 .tp-dr-x { position: absolute; top: 14px; right: 16px; width: 34px; height: 34px; border-radius: 10px; color: var(--text); background: rgba(255,255,255,.06); }
 .tp-dr-x:hover { background: rgba(255,255,255,.14); }
 .tp-dr .panel.sticky { position: static; }
+
+.tile-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.tile-bar .sorts .chip { font-size: 12.5px; }
