@@ -121,7 +121,6 @@ function row(title, metas, type, onPick) {
   const strip = $(".strip", r);
   metas.forEach(m => {
     const c = card(m, type);
-    if (onPick) c.onclick = () => onPick(m); // home: a click puts it in the big space at the top
     strip.appendChild(c);
   });
   // mouse wheel scrolls the row sideways
@@ -318,8 +317,7 @@ function top10Row(title, metas, onPick) {
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 10).forEach((m, i) => {
     const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span></div></div>`);
-    el.onclick = () => onPick ? onPick(m) : go("title", m.type, m.id, m);
-    el.ondblclick = () => go("title", m.type, m.id, m);
+    el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });
   return r;
