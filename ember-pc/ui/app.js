@@ -431,7 +431,7 @@ const AWARD = {
   "bafta": ["#2e2142", "#0d0914", "The British Academy Film Awards", "BAFTA", "bafta"],
   "golden globes": ["#7a4416", "#2a1505", "Golden Globe Awards", "GOLDEN GLOBES", "globe"],
   "cannes": ["#14295a", "#060f28", "Festival de Cannes", "CANNES", "palme"],
-  "certified fresh": ["#f7cf3a", "#d79a00", "Rotten Tomatoes", "CERTIFIED FRESH", "tomato", "dark"],
+  "certified fresh": ["#1f4a22", "#071509", "Rotten Tomatoes", "CERTIFIED FRESH", "tomato"],
 };
 
 /** Streaming services, genres, directors, studios, collections, decades (from TMDB, via the Pi). */
