@@ -11,6 +11,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
   GET /progress/<imdb> -> every saved position for one title (episode lists)
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
+  POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
   GET /pick/<type>/<id>?aio=&quality=4k&runtime=  -> streams best first, the top few tested for speed
@@ -757,6 +758,59 @@ def dismiss(body):
     threading.Thread(target=clear_trakt, daemon=True).start()
     print(f"[ember-feed] removed {imdb} from continue watching", flush=True)
     return {"ok": True}
+
+
+def mark_watched(body):
+    """Mark a film, or any episodes of a show (one, a season, the lot), as watched or not - for things you saw
+    before Ember. Saved on the Pi (so Ember skips them) and in your Trakt history (so Omni, Odin and Up Next agree).
+    body: {"imdb": "tt..", "type": "movie"|"series", "episodes": [[season, episode], ...], "watched": true|false}"""
+    imdb = str(body.get("imdb", ""))
+    if not (imdb.startswith("tt") and imdb[2:].isdigit()):
+        raise ValueError("imdb must look like tt1234567")
+    typ = "series" if body.get("type") == "series" else "movie"
+    watched = body.get("watched", True) is not False
+    eps = []
+    if typ == "series":
+        for pair in (body.get("episodes") or [])[:3000]:
+            s, e = int(pair[0]), int(pair[1])
+            if s > 0 and e > 0:
+                eps.append((s, e))
+        if not eps:
+            raise ValueError("no episodes given")
+    now = int(time.time())
+    keys = [_key(imdb, typ, s, e) for s, e in eps] if typ == "series" else [_key(imdb, "movie", None, None)]
+    if watched:
+        for k, se in zip(keys, eps or [(None, None)]):
+            old = _get(k) or {}
+            _upsert({"key": k, "imdb": imdb, "type": typ, "season": se[0], "episode": se[1],
+                     "position": old.get("duration") or old.get("position") or 0, "duration": old.get("duration"),
+                     "percent": 100.0, "updated": now, "device": "Marked as watched", "source": "ember",
+                     "finished": 1, "trakt_watched": 1, "episode_title": old.get("episode_title") or ""})
+    else:
+        with _db_lock:
+            db().executemany("DELETE FROM positions WHERE key=?", [(k,) for k in keys])
+            db().commit()
+    with _cache_lock:
+        _cache.pop("progress", None)
+        _cache.pop("next:" + imdb, None)
+
+    def to_trakt():
+        try:
+            if typ == "series":
+                seasons = {}
+                for s, e in eps:
+                    seasons.setdefault(s, []).append({"number": e})
+                item = {"ids": {"imdb": imdb}, "seasons": [{"number": s, "episodes": v} for s, v in sorted(seasons.items())]}
+                payload = {"shows": [item]}
+            else:
+                payload = {"movies": [{"ids": {"imdb": imdb}}]}
+            _trakt("/sync/history" if watched else "/sync/history/remove", payload)
+            print(f"[ember-feed] Trakt: {imdb} {len(keys)} item(s) marked {'watched' if watched else 'unwatched'}", flush=True)
+        except Exception as e:
+            print(f"[ember-feed] Trakt mark {'watched' if watched else 'unwatched'} failed: {e}", flush=True)
+    if all(trakt_creds()):
+        threading.Thread(target=to_trakt, daemon=True).start()
+    return {"ok": True, "watched": watched, "count": len(keys)}
 
 
 def _progress():
@@ -2140,6 +2194,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(report(body))
             elif path == "/progress/dismiss":
                 self._json(dismiss(body))
+            elif path == "/progress/watched":
+                self._json(mark_watched(body))
             elif path == "/pick/failed":
                 self._json(stream_failed(body))
             elif path == "/match/new":

@@ -337,3 +337,15 @@ input { font: inherit; color: var(--text); }
 .btn-chip { cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
 .btn-chip:hover { border-color: rgba(240,160,75,.6); color: #fff; }
 .btn-chip.on { background: var(--accent); border-color: var(--accent); color: #1A0F08; font-weight: 700; }
+
+/* Marking things watched */
+.tp-eps-head .grow { flex: 1; }
+.btn.sm { padding: 7px 14px; font-size: 13px; border-radius: 10px; }
+.btn.ghost { background: transparent; border: 1px solid var(--line); }
+.btn.done { color: var(--accent); }
+.epc .ep-mark { position: absolute; right: 8px; top: 8px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%;
+  font-size: 12px; font-weight: 800; line-height: 1; color: #fff; background: rgba(14,11,9,.65); border: 1px solid rgba(255,255,255,.35);
+  opacity: 0; transition: opacity .15s, background .15s; cursor: pointer; }
+.epc:hover .ep-mark { opacity: 1; }
+.epc .ep-mark:hover { background: rgba(240,160,75,.85); color: var(--accent-ink); border-color: transparent; }
+.epc .ep-mark.on { opacity: 1; background: var(--accent); color: var(--accent-ink); border-color: transparent; }

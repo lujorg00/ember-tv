@@ -553,7 +553,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button>
+    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
       ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // Resume: the streams for that episode, best first; one more click plays.
@@ -584,25 +584,74 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     if (ev.key === "Escape" && isOpen()) { ev.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
 
+  // Marking what you watched before Ember: saved on the Pi and in your Trakt history.
+  const isDone = (k) => !!(saved[k] || {}).finished;
+  const aired = (e) => !e.released || new Date(e.released) <= new Date();
+  const mark = async (list, watched) => {
+    try {
+      const r = await fetch(`${feed()}/progress/watched`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imdb: id, type, watched, episodes: list.map(e => [e.season, e.episode]) }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
+    } catch (err) { toast("Couldn't update lucapi: " + err.message); return false; }
+    const keys = type === "series" ? list.map(e => e.season + ":" + e.episode) : [":"];
+    for (const k of keys) { if (watched) saved[k] = { ...(saved[k] || {}), finished: true, percent: 100 }; else delete saved[k]; }
+    const pk = p ? (type === "series" ? p.season + ":" + p.episode : ":") : null;
+    if (pk && keys.includes(pk)) delete progress[id];
+    if (type === "series" && (!cur || isDone(cur.season + ":" + cur.episode))) {
+      const n = eps.find(e => aired(e) && !isDone(e.season + ":" + e.episode));
+      if (n) cur = { season: n.season, episode: n.episode };
+    }
+    $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
+    return true;
+  };
+  // A second click within 4 seconds confirms (for big changes, like a whole show).
+  const twice = (btn, ask, fn) => {
+    if (btn.dataset.armed) { delete btn.dataset.armed; return fn(); }
+    btn.dataset.armed = "1"; const was = btn.textContent; btn.textContent = ask;
+    setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = was; } }, 4000);
+  };
+  if (type === "movie") {
+    const mb = $("#markBtn", head);
+    const label = () => { mb.textContent = isDone(":") ? "✓  Watched" : "Mark as watched"; mb.classList.toggle("done", isDone(":")); };
+    label();
+    mb.onclick = async () => { if (await mark([], !isDone(":"))) { label(); toast(isDone(":") ? `Marked ${mm.name} as watched.` : `${mm.name} is unwatched again.`); } };
+  }
+
   if (type === "series") {
     const seasons = [...new Set(eps.map(e => e.season))];
     let season = cur ? cur.season : seasons[0];
     const drawEps = () => {
       const opt = seasons.map(s => `<option value="${s}" ${s === season ? "selected" : ""}>Season ${s}</option>`).join("");
       const count = eps.filter(e => e.season === season).length;
-      epsBox.innerHTML = `<div class="tp-eps-head"><div class="select"><select>${opt}</select></div><span class="muted">${count} episodes</span></div><div class="ep-grid"></div>`;
+      const inSeason = eps.filter(e => e.season === season && aired(e));
+      const seasonDone = inSeason.length && inSeason.every(e => isDone(e.season + ":" + e.episode));
+      const allAired = eps.filter(aired);
+      const showDone = allAired.length && allAired.every(e => isDone(e.season + ":" + e.episode));
+      epsBox.innerHTML = `<div class="tp-eps-head"><div class="select"><select>${opt}</select></div><span class="muted">${count} episodes</span>
+        <div class="grow"></div>
+        <button class="btn sm ${seasonDone ? "done" : ""}" id="markSeason">${seasonDone ? "✓  Season watched" : "Mark season watched"}</button>
+        <button class="btn sm ghost" id="markShow">${showDone ? "Mark show unwatched" : "Mark whole show watched"}</button></div><div class="ep-grid"></div>`;
       $("select", epsBox).onchange = (e) => { season = +e.target.value; drawEps(); };
+      $("#markSeason", epsBox).onclick = async () => {
+        if (!inSeason.length) return toast("Nothing in this season has aired yet.");
+        if (await mark(inSeason, !seasonDone)) { toast(seasonDone ? `Season ${season} is unwatched again.` : `Marked season ${season} as watched.`); drawEps(); }
+      };
+      $("#markShow", epsBox).onclick = (ev) => twice(ev.currentTarget, showDone ? "Click again: unwatch all" : `Click again: mark all ${allAired.length}`, async () => {
+        if (await mark(allAired, !showDone)) { toast(showDone ? `${mm.name} is unwatched again.` : `Marked all of ${mm.name} as watched.`); drawEps(); }
+      });
       const grid = $(".ep-grid", epsBox);
       eps.filter(e => e.season === season).forEach(e => {
         const sp = saved[e.season + ":" + e.episode];
         const isCur = cur && cur.season === e.season && cur.episode === e.episode;
         const el = h(`<div class="epc ${isCur ? "sel" : ""}">
             <div class="thumb" style="background-image:url('${esc(e.thumbnail || "")}')">
-              ${sp && sp.finished ? `<span class="watched">✓</span>` : ""}
+              ${aired(e) ? `<button class="ep-mark ${sp && sp.finished ? "on" : ""}" title="${sp && sp.finished ? "Watched (click to undo)" : "Mark as watched"}">✓</button>` : ""}
               ${sp && !sp.finished ? `<div class="bar"><i style="width:${Math.max(3, sp.percent)}%"></i></div>` : ""}
               <span class="num">E${e.episode}</span></div>
             <div class="t">${esc(e.name || e.title || "Episode " + e.episode)}</div>
             <div class="d">${esc((e.released || "").slice(0, 10))}${sp && !sp.finished ? ` · <span class="acc">${fmt(sp.position)} in</span>` : ""}</div></div>`);
+        const mk = $(".ep-mark", el);
+        if (mk) mk.onclick = async (ev) => { ev.stopPropagation(); const done = isDone(e.season + ":" + e.episode); if (await mark([e], !done)) drawEps(); };
         el.onclick = () => { grid.querySelectorAll(".epc").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
           cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
           if (isOpen()) pick(e.season, e.episode, e.name || e.title || ""); };
