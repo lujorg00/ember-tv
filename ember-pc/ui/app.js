@@ -756,48 +756,39 @@ async function outThisWeek() {
 }
 
 /** This week, as a calendar: seven days from yesterday, each with the new episodes of your shows that day. */
-/** This week: a small panel at the top right of the hero. Pick a day; its new episodes show underneath. */
+/** New This Week: a small list at the top right of the hero. "Out now", or when it lands ("Fri 2am"). */
 async function weekCalendar() {
   let eps = [];
   try { eps = (await getJson(`${feed()}/upcoming?days=6`, 8000)).episodes || []; } catch (e) { return null; }
+  const from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - 1);
+  eps = eps.filter(e => new Date(e.airs) >= from).sort((a, b) => new Date(a.airs) - new Date(b.airs));
   if (!eps.length) return null;
-  const day0 = new Date(); day0.setHours(0, 0, 0, 0); day0.setDate(day0.getDate() - 1);
-  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(day0); d.setDate(d.getDate() + i); return d; });
-  const key = (d) => d.toDateString();
-  const today = key(new Date());
-  const on = (d) => eps.filter(e => key(new Date(e.airs)) === key(d));
-  const box = h(`<aside class="wk fade-in"><div class="wk-h">This week</div><div class="wk-days"></div><div class="wk-list"></div></aside>`);
-  const list = $(".wk-list", box);
-  const show = (d, btn) => {
-    box.querySelectorAll(".wk-d").forEach(b => b.classList.toggle("on", b === btn));
-    list.innerHTML = "";
-    const these = on(d);
-    if (!these.length) { list.appendChild(h(`<div class="wk-none">Nothing new ${key(d) === today ? "today" : "on " + d.toLocaleDateString("en-GB", { weekday: "long" })}</div>`)); return; }
-    for (const e of these.slice(0, 4)) {
-      const t = new Date(e.airs);
-      const it = h(`<div class="wk-ep"><div class="wk-art"></div><div><div class="wk-t">${esc(e.show)}</div>
-        <div class="wk-s">S${e.season} E${e.episode} · ${e.out ? "<span class='acc'>Out now</span>" : t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div></div></div>`);
-      it.onclick = () => go("title", "series", e.imdb, { name: e.show });
-      list.appendChild(it);
-      meta("series", e.imdb).then(m => {
-        const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
-        const art = (ep && ep.thumbnail) || backdrop({ ...m, id: e.imdb });
-        if (art) $(".wk-art", it).style.backgroundImage = `url('${art}')`;
-      });
-    }
-    if (these.length > 4) list.appendChild(h(`<div class="wk-none">and ${these.length - 4} more</div>`));
+  const when = (e) => {
+    if (e.out) return "<span class='acc'>Out now</span>";
+    const t = new Date(e.airs), d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    const days = Math.round((new Date(t).setHours(0, 0, 0, 0) - d0) / 864e5);
+    const hm = t.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true }).replace(":00", "").replace(" ", "").toLowerCase();
+    const day = days === 0 ? "Today" : days === 1 ? "Tomorrow" : t.toLocaleDateString("en-GB", { weekday: "short" });
+    return `${day} ${hm}`;
   };
-  let first = null;
-  for (const d of days) {
-    const n = on(d).length;
-    const b = h(`<button class="wk-d ${key(d) === today ? "today" : ""}" title="${n} new"><span>${d.toLocaleDateString("en-GB", { weekday: "short" }).slice(0, 2)}</span><b>${d.getDate()}</b>${n ? "<i></i>" : ""}</button>`);
-    b.onclick = (ev) => { ev.stopPropagation(); show(d, b); };
-    $(".wk-days", box).appendChild(b);
-    if (key(d) === today) first = [d, b];
+  const box = h(`<aside class="wk fade-in"><div class="wk-h">New This Week</div><div class="wk-list"></div></aside>`);
+  const list = $(".wk-list", box);
+  for (const e of eps.slice(0, 6)) {
+    const it = h(`<div class="wk-ep"><div class="wk-art"></div><div><div class="wk-t">${esc(e.show)}</div>
+      <div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div></div>`);
+    const art = $(".wk-art", it);
+    // The show's artwork straight away; the episode still on top once there is one.
+    const show = `url('https://images.metahub.space/background/small/${e.imdb}/img'), url('https://images.metahub.space/poster/small/${e.imdb}/img')`;
+    art.style.backgroundImage = show;
+    it.onclick = () => go("title", "series", e.imdb, { name: e.show });
+    list.appendChild(it);
+    meta("series", e.imdb).then(m => {
+      const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
+      const better = (ep && ep.thumbnail) || m.background || "";
+      if (better) art.style.backgroundImage = `url('${better}'), ${show}`;
+    }).catch(() => {});
   }
-  // Open on today, or the next day with something new if today has nothing.
-  const next = days.map((d, i) => [d, box.querySelectorAll(".wk-d")[i]]).find(([d]) => d >= new Date(new Date().setHours(0, 0, 0, 0)) && on(d).length);
-  show(...(first && on(first[0]).length ? first : next || first));
+  if (eps.length > 6) list.appendChild(h(`<div class="wk-none">and ${eps.length - 6} more</div>`));
   return box;
 }
 
