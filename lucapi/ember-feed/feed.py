@@ -1718,6 +1718,11 @@ KNOWN_PEOPLE = {"alfred hitchcock", "christopher nolan", "denis villeneuve", "da
                 "martin scorsese", "paul thomas anderson", "quentin tarantino", "ridley scott", "stanley kubrick", "steven spielberg",
                 "coen brothers", "wes anderson", "yorgos lanthimos", "david attenborough", "greta gerwig", "edgar wright"}
 PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
+# Wikipedia article for a tile whose logo comes from Wikidata (the "logo image" on its entry).
+WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards", "academy award winners": "Academy Awards",
+             "bafta": "British Academy Film Awards", "golden globes": "Golden Globe Awards", "cannes": "Cannes Film Festival",
+             "certified fresh": "Rotten Tomatoes", "cbeebies": "CBeebies", "cartoon network": "Cartoon Network",
+             "nickelodeon": "Nickelodeon", "disney kids": "Disney Channel", "cbbc": "CBBC", "disney junior": "Disney Junior"}
 # Catalogues that should share one tile: tile title -> the catalogue names that go in it.
 MERGE = {"IMDb Top 250": ["IMDb Top Movies", "IMDb Top Shows"], "Certified Fresh": ["100% Certified Fresh Movies"],
          "Oscar winners": ["Academy Award Winners"]}
@@ -1780,6 +1785,45 @@ def _bg(m):
     return f"https://images.metahub.space/background/medium/{m['id']}/img" if str(m.get("id", "")).startswith("tt") else ""
 
 
+def _wikidata_logo(article):
+    """The logo on a Wikipedia article's Wikidata entry, as a PNG from Wikimedia Commons ("" if it has none)."""
+    def get():
+        q = urllib.parse.urlencode({"action": "wbgetentities", "sites": "enwiki", "titles": article, "props": "claims",
+                                    "format": "json", "redirects": "yes"})
+        req = urllib.request.Request(f"https://www.wikidata.org/w/api.php?{q}",
+                                     headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            ents = json.loads(r.read()).get("entities", {})
+        for e in ents.values():
+            for c in e.get("claims", {}).get("P154", []):
+                f = c.get("mainsnak", {}).get("datavalue", {}).get("value")
+                if f:
+                    return "https://commons.wikimedia.org/wiki/Special:FilePath/" + urllib.parse.quote(f.replace(" ", "_")) + "?width=500"
+        return ""
+    try:
+        return cached(f"wikilogo:{article}", 30 * 24 * 3600, get)
+    except Exception:
+        return ""
+
+
+def _franchise_logo(title, metas):
+    """A franchise's title logo: the first film of its TMDB collection, else the top title in your list."""
+    try:
+        res = _tmdb("/search/collection", query=title).get("results", [])
+        col = next((c for c in res if title.lower().split()[0] in c.get("name", "").lower()), None)
+        if col:
+            parts = sorted(_tmdb(f"/collection/{col['id']}").get("parts", []), key=lambda x: x.get("release_date") or "9999")
+            for part in parts[:2]:
+                logos = _tmdb(f"/movie/{part['id']}/images", include_image_language="en,null").get("logos", [])
+                logos.sort(key=lambda l: (l.get("iso_639_1") != "en", -l.get("vote_average", 0)))
+                if logos:
+                    return _img(logos[0]["file_path"], "w500")
+    except Exception:
+        pass
+    m = next((x for x in metas if str(x.get("id", "")).startswith("tt")), None)
+    return f"https://images.metahub.space/logo/medium/{m['id']}/img" if m else ""
+
+
 def _service_logos():
     out = {}
     for region in ("US", "GB"):
@@ -1800,7 +1844,7 @@ def _build_tiles():
     cats = [c for c in man.get("catalogs", []) if c.get("type") in ("movie", "series")
             and not any(x.get("isRequired") for x in c.get("extra", []))]
     merged_into = {src.lower(): title for title, srcs in MERGE.items() for src in srcs}
-    tmdb_ok = bool(CFG.get("tmdb"))
+    tmdb_ok = bool(_tmdb_creds())  # from config.json, or found in your addon's .env
     home, hero, tiles = [], [], {}
     for c in cats:
         name = (c.get("name") or c["id"]).strip()
@@ -1822,13 +1866,15 @@ def _build_tiles():
     with concurrent.futures.ThreadPoolExecutor(8) as ex:
         firsts = list(ex.map(lambda t: _cat_metas((t["cats"].get("movie") or t["cats"].get("series"))[0])[:12], tl))
     used = set()
+    tops = {}
     for t, metas in zip(tl, firsts):
+        tops[t["id"]] = metas
         m = next((x for x in metas if x.get("id") not in used and _bg(x)), metas[0] if metas else None)
         if m:
             used.add(m.get("id"))
             t["image"] = _bg(m)
     logos = _service_logos() if tmdb_ok else {}
-    for t in tl:
+    def art(t):
         if t["box"] == "services":
             pname = SERVICE_NAMES.get(t["title"].lower(), t["title"])
             t["logo"] = logos.get(pname.lower()) or next((v for k, v in logos.items() if k.startswith(pname.lower())), "")
@@ -1841,6 +1887,10 @@ def _build_tiles():
                     t["image"] = _img(p["profile_path"], "w342")
             except Exception:
                 pass
+        elif t["box"] in ("kids", "acclaim"):
+            t["logo"] = _wikidata_logo(WIKI_LOGO.get(t["title"].lower(), t["title"]))
+        elif t["box"] == "franchises" and tmdb_ok:
+            t["logo"] = _franchise_logo(t["title"], tops.get(t["id"], []))
         elif t["box"] in ("studios", "animation") and tmdb_ok:
             try:
                 res = _tmdb("/search/company", query=t["title"]).get("results", [])
@@ -1850,6 +1900,11 @@ def _build_tiles():
                     t["logo"] = _img(co["logo_path"], "w300")
             except Exception:
                 pass
+        if t["box"] in ("studios", "animation") and not t.get("logo"):
+            t["logo"] = _wikidata_logo(t["title"])
+
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        list(ex.map(art, tl))
     groups = []
     for key, title, style in TILE_ORDER:
         its = [{k: v for k, v in t.items() if k != "cats"} | {"types": [x for x in ("movie", "series") if x in t["cats"]]}

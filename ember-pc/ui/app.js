@@ -338,8 +338,10 @@ async function tileRows(hidden = new Set(), typ = "") {
       let inner;
       if (g.style === "logo") inner = `<div class="tile logo" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
-      else inner = `<div class="tile art" style="background-image:url('${esc(tile.image || "")}')">${g.style === "studio" && tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      else inner = `<div class="tile art ${tile.logo ? "haslogo" : ""}" style="background-image:url('${esc(tile.image || "")}')">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       const el = h(inner);
+      // A logo that doesn't load: show the name instead.
+      el.querySelectorAll("img").forEach(img => img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); });
       const first = typ || (tile.types || ["movie"])[0];
       el.onclick = () => go("tile", tile.kind, tile.id, tile.title, (g.style === "person" ? "" : tile.image) || "", first);
       $(".strip", r).appendChild(el);
