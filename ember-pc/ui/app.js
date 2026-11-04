@@ -446,7 +446,8 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   const page = h(`<div class="tp"><div class="tp-bd"></div><div class="tp-scrim"></div>
     <button class="back">‹ Back</button>
     <header class="tp-head fade-in"></header>
-    <div class="tp-body"><section class="tp-eps"></section><aside class="tp-streams"></aside></div></div>`);
+    <div class="tp-body"><section class="tp-eps"></section></div>
+    <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
   v.appendChild(page);
   $(".back", page).onclick = back;
   const [m] = await Promise.all([meta(type, id), loadProgress()]);
@@ -477,7 +478,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button>
+    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button>
       ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // Resume: the streams for that episode, best first; one more click plays.
@@ -490,7 +491,23 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   $("#resumeBtn", head).onclick = startBest;
   if (opts.autoplay) setTimeout(startBest, 300);
 
+  // Streams stay out of the way: "Choose stream" slides them in from the right for the selected episode.
+  const drawer = $(".tp-drawer", page);
+  const isOpen = () => drawer.classList.contains("open");
+  const close = () => drawer.classList.remove("open");
   const pick = (season, episode, title) => streamsPanel(right, mm, season, episode, title, saved);
+  const openStreams = () => {
+    if (type === "series" && !cur) return toast("Pick an episode first.");
+    const e = epOf(cur);
+    pick(cur ? cur.season : null, cur ? cur.episode : null, e ? e.name || e.title || "" : "");
+    drawer.classList.add("open");
+  };
+  $("#chooseBtn", head).onclick = openStreams;
+  $(".tp-dr-x", page).onclick = close;
+  $(".tp-dr-shade", page).onclick = close;
+  const onKey = (ev) => { if (!document.body.contains(page)) return document.removeEventListener("keydown", onKey, true);
+    if (ev.key === "Escape" && isOpen()) { ev.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey, true);
 
   if (type === "series") {
     const seasons = [...new Set(eps.map(e => e.season))];
@@ -513,18 +530,14 @@ async function showTitle(type, id, hint = {}, opts = {}) {
             <div class="d">${esc((e.released || "").slice(0, 10))}${sp && !sp.finished ? ` · <span class="acc">${fmt(sp.position)} in</span>` : ""}</div></div>`);
         el.onclick = () => { grid.querySelectorAll(".epc").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
           cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
-          pick(e.season, e.episode, e.name || e.title || ""); };
+          if (isOpen()) pick(e.season, e.episode, e.name || e.title || ""); };
         grid.appendChild(el);
       });
     };
     drawEps();
-    const e = epOf(cur);
-    if (cur) pick(cur.season, cur.episode, e ? e.name || e.title || "" : "");
-    else right.innerHTML = `<div class="panel muted">Pick an episode.</div>`;
   } else {
     epsBox.remove();
     page.querySelector(".tp-body").classList.add("film");
-    pick(null, null, "");
   }
 }
 
@@ -570,7 +583,7 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
     ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
       <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}
-    <div class="muted small">▶ Play picks the best one for you, or choose one here.</div></div>
+    <div class="muted small">Pick one to play it. ▶ Play on the page picks the best for you.</div></div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
