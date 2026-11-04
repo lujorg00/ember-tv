@@ -450,7 +450,7 @@ async function tileRows(hidden = new Set(), typ = "") {
       if (tile.logo && tile.logo.startsWith("/")) tile = { ...tile, logo: feed() + tile.logo }; // kept on the Pi
       let inner;
       const key = (tile.title || "").toLowerCase().trim(), br = BRAND[key], aw = AWARD[key];
-      if (aw) inner = `<div class="tile brand award ${aw[3].length > 9 ? "long" : ""} ${aw[5] || ""}" style="--a:${aw[0]};--b:${aw[1]}"><img class="aw-art aw-${aw[4]}" src="awards/${aw[4]}.svg" alt=""><small>${esc(aw[2])}</small><b>${esc(aw[3])}</b></div>`;
+      if (aw) inner = `<div class="tile brand award ${aw[3].length > 9 ? "long" : ""} ${aw[5] || ""}" style="--a:${aw[0]};--b:${aw[1]}"><img class="aw-art aw-${aw[4]}" src="awards/${aw[4]}.svg" alt="">${aw[4] === "tomato" ? `<em class="aw-pct">100%</em>` : ""}<small>${esc(aw[2])}</small><b>${esc(aw[3])}</b></div>`;
       else if (br) {
         const logo = br[3] || tile.logo, icon = !br[3] && tile.logo_kind === "icon";
         const ink = br[2] === "W" ? "w" : icon ? "o" : !br[3] && ["duo", "box"].includes(tile.logo_mode) && br[2] === "w" ? "o" : br[2];

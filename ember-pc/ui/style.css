@@ -427,3 +427,5 @@ input { font: inherit; color: var(--text); }
 
 .tile.art img.lg-orig, .tiles.studio .tile.art img.lg-orig { opacity: 1; filter: drop-shadow(0 2px 8px #000) drop-shadow(0 0 20px rgba(0,0,0,.65)); }
 .tile.art img.lg-orig { max-height: 52%; }
+.tile.brand.award .aw-pct { position: absolute; left: 50%; top: 53%; transform: translate(-50%, -50%); z-index: 1; font: 800 22px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-style: normal; color: #fff; letter-spacing: -.5px; text-shadow: 0 2px 6px rgba(80,0,0,.7); pointer-events: none; }
