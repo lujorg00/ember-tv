@@ -58,13 +58,13 @@ input { font: inherit; color: var(--text); }
 .row h2 small { color: var(--faint); font-weight: 400; font-size: 14px; }
 .strip { display: flex; gap: 14px; overflow-x: auto; overflow-y: hidden; padding: 8px 48px 14px; scroll-behavior: smooth; }
 .strip::-webkit-scrollbar { height: 0; }
-.poster { flex: none; width: 138px; aspect-ratio: 2/3; border-radius: 10px; background: var(--card) center/cover; position: relative; cursor: pointer;
+.poster { flex: none; width: 180px; aspect-ratio: 2/3; border-radius: 10px; background: var(--card) center/cover; position: relative; cursor: pointer;
   transition: transform .18s ease, box-shadow .18s; box-shadow: 0 6px 18px #0006; }
 .poster:hover { transform: translateY(-4px) scale(1.04); box-shadow: 0 0 0 2px var(--accent), 0 12px 30px #000a; }
 .poster .name { position: absolute; inset: auto 0 0; padding: 30px 8px 8px; font-size: 14px; border-radius: 0 0 10px 10px; background: linear-gradient(transparent, #000c); }
 .bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 4px; border-radius: 3px; background: rgba(255, 255, 255, .22); overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: 18px 14px; padding: 8px 48px 60px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px 14px; padding: 8px 48px 60px; }
 .grid .poster { width: auto; }
 
 /* page header */
@@ -98,7 +98,7 @@ input { font: inherit; color: var(--text); }
   border-radius: 10px; padding: 9px 38px 9px 14px; cursor: pointer; outline: 0; }
 .select::after { content: "▾"; position: absolute; right: 13px; top: 50%; transform: translateY(-50%); color: var(--accent); pointer-events: none; }
 .select select option { background: #1C1612; }
-.ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px 16px; }
+.ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px 16px; }
 .epc { cursor: pointer; border-radius: 12px; padding: 6px; margin: -6px; transition: background .15s; }
 .epc:hover { background: rgba(255,230,200,.05); }
 .epc.sel { background: rgba(240,160,75,.12); box-shadow: inset 0 0 0 1px rgba(240,160,75,.5); }
@@ -204,7 +204,7 @@ input { font: inherit; color: var(--text); }
 .ld-badges { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
 
 /* continue watching */
-.cw { flex: none; width: 300px; cursor: pointer; }
+.cw { flex: none; width: 380px; cursor: pointer; }
 .cw-art { position: relative; aspect-ratio: 16/9; border-radius: 12px; background: var(--card) center/cover; box-shadow: 0 6px 18px #0006; transition: transform .18s, box-shadow .18s; overflow: hidden; }
 .cw-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 45%, rgba(0,0,0,.75)); }
 .cw:hover .cw-art { transform: translateY(-3px) scale(1.03); box-shadow: 0 0 0 2px var(--accent), 0 12px 30px #000a; }
@@ -215,9 +215,9 @@ input { font: inherit; color: var(--text); }
 /* top 10 */
 .strip.top10 { gap: 4px; }
 .t10 { flex: none; display: flex; align-items: flex-end; cursor: pointer; }
-.t10 b { font: 800 128px/0.78 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: -8px; color: transparent;
+.t10 b { font: 800 162px/0.78 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: -8px; color: transparent;
   -webkit-text-stroke: 2px rgba(240,160,75,.55); margin-right: -4px; position: relative; z-index: 0; }
-.t10-art { position: relative; z-index: 1; width: 280px; aspect-ratio: 16/9; border-radius: 12px; background: var(--card) center/cover; overflow: hidden;
+.t10-art { position: relative; z-index: 1; width: 360px; aspect-ratio: 16/9; border-radius: 12px; background: var(--card) center/cover; overflow: hidden;
   box-shadow: 0 6px 18px #0006; transition: transform .18s, box-shadow .18s; }
 .t10-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 55%, rgba(0,0,0,.8)); }
 .t10-art span { position: absolute; z-index: 1; left: 12px; bottom: 10px; right: 12px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -227,7 +227,7 @@ input { font: inherit; color: var(--text); }
 /* tiles */
 .tile { flex: none; position: relative; cursor: pointer; transition: transform .18s, box-shadow .18s; }
 .tile:hover { transform: translateY(-3px) scale(1.03); }
-.tile.logo, .tile.art { width: 260px; height: 140px; border-radius: 14px; overflow: hidden; display: grid; place-items: center; box-shadow: 0 6px 18px #0006; }
+.tile.logo, .tile.art { width: 330px; height: 178px; border-radius: 14px; overflow: hidden; display: grid; place-items: center; box-shadow: 0 6px 18px #0006; }
 .tile.logo:hover, .tile.art:hover { box-shadow: 0 0 0 2px var(--accent), 0 12px 30px #000a; }
 .tile.logo img { max-width: 64px; max-height: 64px; border-radius: 14px; }
 .tile.logo span { position: absolute; left: 14px; bottom: 10px; font-size: 15px; font-weight: 600; color: rgba(255,255,255,.85); }
@@ -236,8 +236,8 @@ input { font: inherit; color: var(--text); }
 .tile.art span { position: relative; z-index: 1; font: 700 24px "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: .5px; text-transform: uppercase; text-shadow: 0 2px 14px #000; padding: 0 12px; text-align: center; }
 .tiles.studio .tile.art img { position: relative; z-index: 1; max-width: 70%; max-height: 52%; filter: brightness(0) invert(1) drop-shadow(0 2px 10px #000); }
 .tiles.studio .tile.art img + span { display: none; }
-.tile.person { width: 150px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.tile.person .face { width: 132px; height: 132px; border-radius: 50%; background: var(--card) center 20%/cover; box-shadow: 0 6px 18px #0006; transition: filter .2s, box-shadow .2s; }
+.tile.person { width: 190px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tile.person .face { width: 170px; height: 170px; border-radius: 50%; background: var(--card) center 20%/cover; box-shadow: 0 6px 18px #0006; transition: filter .2s, box-shadow .2s; }
 .tile.person:hover .face { box-shadow: 0 0 0 2px var(--accent), 0 10px 26px #000a; }
 .tile.person span { font-size: 15px; text-align: center; }
 
