@@ -1930,56 +1930,72 @@ def _franchise_logo(title, metas):
 LOGO_DIR = HERE / "logo-cache"
 
 
+def _logo_look(data):
+    """How a logo should be shown in black and white, and its border colour:
+    "mono" - one colour on transparent (Nickelodeon, Harry Potter): shown solid white
+    "duo"  - two-tone, e.g. white lettering inside a coloured shape (Marvel, DC): shown in greyscale
+    "box"  - its own solid background (IMDb, Cartoon Network): shown in greyscale"""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGBA")
+    sm = im.copy()
+    sm.thumbnail((96, 96))
+    px = list(sm.getdata())
+    solid = [p for p in px if p[3] > 40]
+    clear = 1 - len(solid) / max(1, len(px))
+    lum = lambda p: (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255
+    sat = lambda p: (max(p[:3]) - min(p[:3])) / 255
+    n = max(1, len(solid))
+    light = sum(1 for p in solid if lum(p) > 0.75 and sat(p) < 0.2) / n
+    dark = sum(1 for p in solid if lum(p) < 0.25) / n
+    colour = sum(1 for p in solid if sat(p) > 0.3 and 0.12 < lum(p) <= 0.75) / n
+    if clear < 0.04:
+        mode = "box"
+    elif light > 0.04 and (colour > 0.2 or dark > 0.2):
+        mode = "duo"
+    else:
+        mode = "mono"
+    w, h = sm.size
+    corners = [sm.getpixel((x, y)) for x, y in ((1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2))]
+    edge = ""
+    if all(c[3] > 200 for c in corners):
+        edge = "#%02x%02x%02x" % tuple(sum(c[i] for c in corners) // 4 for i in range(3))
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return mode, edge, out.getvalue()
+
+
+LOGO_VERSION = 2
+
+
 def _logo(url):
-    """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), and works out how to show it:
-    "box"  - it has its own solid background (Marvel, IMDb): show as it is
-    "ok"   - coloured, or light, or has light parts: show as it is
-    "dark" - a dark, one-colour logo: show it in white so it reads on dark artwork
-    plus "edge": the colour around its border (streaming services fill their tile with it)."""
+    """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), with how to show it (see _logo_look)."""
     if not url:
         return None
     key = hashlib.sha1(url.encode()).hexdigest()[:20]
-    info_path = LOGO_DIR / f"{key}.json"
+    info_path, img_path = LOGO_DIR / f"{key}.json", LOGO_DIR / key
     if info_path.exists():
         try:
-            return json.loads(info_path.read_text())
+            info = json.loads(info_path.read_text())
+            if info.get("v") == LOGO_VERSION:
+                return info
+            if img_path.exists():  # kept from before: just look at it again
+                mode, edge, _ = _logo_look(img_path.read_bytes())
+                info.update(mode=mode, edge=edge, v=LOGO_VERSION)
+                info_path.write_text(json.dumps(info))
+                return info
         except Exception:
             pass
     LOGO_DIR.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = r.read()
-    info = {"src": f"/logo/{key}", "mode": "ok", "edge": ""}
+    info = {"src": f"/logo/{key}", "mode": "mono", "edge": "", "v": LOGO_VERSION}
     try:
-        import io
-        from PIL import Image
-        im = Image.open(io.BytesIO(data)).convert("RGBA")
-        out = io.BytesIO()
-        im.save(out, "PNG")
-        data = out.getvalue()
-        sm = im.copy()
-        sm.thumbnail((96, 96))
-        px = list(sm.getdata())
-        solid = [p for p in px if p[3] > 40]
-        clear = 1 - len(solid) / max(1, len(px))
-        lum = lambda p: (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]) / 255
-        sat = lambda p: (max(p[:3]) - min(p[:3])) / 255
-        n = max(1, len(solid))
-        light = sum(1 for p in solid if lum(p) > 0.7) / n
-        colourful = sum(1 for p in solid if sat(p) > 0.35 and lum(p) > 0.12) / n
-        if clear < 0.04:
-            info["mode"] = "box"
-        elif colourful > 0.25 or light >= 0.15:
-            info["mode"] = "ok"
-        else:
-            info["mode"] = "dark"
-        w, h = sm.size
-        corners = [sm.getpixel((x, y)) for x, y in ((1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2))]
-        if all(c[3] > 200 for c in corners):
-            info["edge"] = "#%02x%02x%02x" % tuple(sum(c[i] for c in corners) // 4 for i in range(3))
+        info["mode"], info["edge"], data = _logo_look(data)
     except Exception as e:
         print(f"[ember-feed] logo {url[:60]}: kept as it is ({e})", flush=True)
-    (LOGO_DIR / key).write_bytes(data)
+    img_path.write_bytes(data)
     info_path.write_text(json.dumps(info))
     return info
 

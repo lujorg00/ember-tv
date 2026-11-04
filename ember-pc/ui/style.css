@@ -315,15 +315,18 @@ input { font: inherit; color: var(--text); }
 .tile-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .tile-bar .sorts .chip { font-size: 14.5px; }
 
-/* Logos on tiles. Each is checked first: dark logos turn white, coloured ones keep their colours, solid badges stay as they are. */
+/* Logos on tiles, in black and white so they stand out from the artwork:
+   one-colour logos solid white; two-tone or badge logos (Marvel, DC, IMDb) in greyscale. */
 .tile.art img { position: relative; z-index: 1; max-width: 68%; max-height: 50%; object-fit: contain; opacity: 0; transition: opacity .3s; }
-.tile.art img.lg-ok, .tile.art img.lg-dark, .tile.art img.lg-box { opacity: 1; filter: drop-shadow(0 2px 12px #000c); }
-.tile.art img.lg-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 12px #000c); }
+.tile.art img.lg-white, .tile.art img.lg-ok, .tile.art img.lg-dark,
+.tiles.studio .tile.art img.lg-white, .tiles.studio .tile.art img.lg-ok, .tiles.studio .tile.art img.lg-dark {
+  opacity: 1; filter: brightness(0) invert(1) drop-shadow(0 2px 10px #000) drop-shadow(0 0 22px rgba(0,0,0,.6)); }
+.tile.art img.lg-gray, .tile.art img.lg-box,
+.tiles.studio .tile.art img.lg-gray, .tiles.studio .tile.art img.lg-box {
+  opacity: 1; filter: grayscale(1) contrast(1.2) brightness(1.08) drop-shadow(0 2px 10px #000); }
 .tile.art img.lg-box { max-height: 44%; border-radius: 8px; }
-.tiles.studio .tile.art img.lg-ok, .tiles.studio .tile.art img.lg-box { filter: drop-shadow(0 2px 10px #000c); }
-.tiles.studio .tile.art img.lg-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 10px #000); }
 .tile.art.haslogo span { display: none; }
-.tile.art.haslogo::after { background: linear-gradient(rgba(14,11,9,.45), rgba(14,11,9,.75)); }
+.tile.art.haslogo::after { background: linear-gradient(rgba(14,11,9,.55), rgba(14,11,9,.82)); }
 /* Streaming services: logo full frame */
 .tile.logo.haslogo { place-items: center; }
 .tile.logo img.lg-full { max-width: none; max-height: none; width: auto; height: 100%; border-radius: 0; }

@@ -386,7 +386,7 @@ async function tileRows(hidden = new Set(), typ = "") {
       // A logo that doesn't load: show the name instead.
       el.querySelectorAll("img").forEach(img => {
         img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); };
-        const mode = { box: "lg-box", dark: "lg-dark", ok: "lg-ok" }[tile.logo_mode];
+        const mode = { mono: "lg-white", duo: "lg-gray", box: "lg-gray", ok: "lg-white", dark: "lg-white" }[tile.logo_mode];
         if (g.style === "logo") { img.classList.add("lg-full"); if (!tile.logo_mode) serviceTile(img, el); }
         else if (mode) img.classList.add(mode);
         else smartLogo(img); // an older lucapi: work it out here
