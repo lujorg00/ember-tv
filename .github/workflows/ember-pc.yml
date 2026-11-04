@@ -50,9 +50,10 @@ jobs:
           $cfg = "ember-pc/src-tauri/resources/mpv-config"
           New-Item -ItemType Directory -Force "$cfg/scripts", "$cfg/fonts" | Out-Null
           foreach ($f in @("modernz.lua")) { Get-ChildItem modernz-src -Recurse -Filter $f | Select-Object -First 1 | Copy-Item -Destination "$cfg/scripts/" }
-          foreach ($f in @("fluent-system-icons.ttf", "material-design-icons.ttf")) { Get-ChildItem modernz-src -Recurse -Filter $f | Select-Object -First 1 | Copy-Item -Destination "$cfg/fonts/" }
+          Get-ChildItem modernz-src -Recurse -Include *.ttf, *.otf | Copy-Item -Destination "$cfg/fonts/"
           Get-ChildItem -Recurse $cfg | Select-Object FullName
-          foreach ($f in @("scripts/modernz.lua", "fonts/fluent-system-icons.ttf", "fonts/material-design-icons.ttf")) { if (-not (Test-Path "$cfg/$f")) { throw "$f not found in ModernZ" } }
+          if (-not (Test-Path "$cfg/scripts/modernz.lua")) { throw "modernz.lua not found in ModernZ" }
+          if (-not (Get-ChildItem "$cfg/fonts" -Include *.ttf, *.otf -Recurse)) { throw "no icon fonts found in ModernZ" }
 
       - name: Build
         working-directory: ember-pc

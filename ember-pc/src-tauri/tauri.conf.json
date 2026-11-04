@@ -39,8 +39,7 @@
       "resources/mpv-config/mpv.conf": "mpv-config/mpv.conf",
       "resources/mpv-config/script-opts/modernz.conf": "mpv-config/script-opts/modernz.conf",
       "resources/mpv-config/scripts/modernz.lua": "mpv-config/scripts/modernz.lua",
-      "resources/mpv-config/fonts/fluent-system-icons.ttf": "mpv-config/fonts/fluent-system-icons.ttf",
-      "resources/mpv-config/fonts/material-design-icons.ttf": "mpv-config/fonts/material-design-icons.ttf"
+      "resources/mpv-config/fonts/*": "mpv-config/fonts/"
     },
     "windows": {
       "nsis": {
