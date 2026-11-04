@@ -31,8 +31,11 @@ const backdrop = (m) => m.background || (m.id && m.id.startsWith("tt") ? `https:
 
 async function meta(type, id) {
   const k = type + ":" + id;
-  if (!metaCache.has(k)) metaCache.set(k, getJson(`${CINEMETA}/meta/${type}/${id}.json`).then(j => j.meta || {}).catch(() => ({})));
-  return metaCache.get(k);
+  const hit = metaCache.get(k);
+  if (hit && Date.now() - hit.t < 6 * 3600e3) return hit.p; // details (and episode lists) refresh every 6 hours
+  const p = getJson(`${CINEMETA}/meta/${type}/${id}.json`).then(j => j.meta || {}).catch(() => ({}));
+  metaCache.set(k, { t: Date.now(), p });
+  return p;
 }
 async function loadProgress() {
   try { progress = (await getJson(`${feed()}/progress`, 6000)).items || {}; } catch (e) { progress = progress || {}; }
@@ -130,9 +133,12 @@ function row(title, metas, type, onPick) {
 
 // ---------------------------------------------------------------- home
 
+// Kept while Ember is open, but fetched again after an hour so new or renamed lists show up without a restart.
+const loadedAt = {};
+const stale = (k, ms = 3600e3) => { if (!loadedAt[k] || Date.now() - loadedAt[k] > ms) { loadedAt[k] = Date.now(); return true; } return false; };
 let addonCatalogs = null;
 async function catalogs() {
-  if (!addonCatalogs) {
+  if (stale("cats") || !addonCatalogs) {
     addonCatalogs = getJson(`${feed()}/addon/manifest.json`).then(man => (man.catalogs || [])
       .filter(c => !(c.extra || []).some(x => x.isRequired)))
       .catch(e => { toast("Couldn't reach your addon through lucapi: " + e.message); return []; });
@@ -143,7 +149,7 @@ async function catalogs() {
 let layoutP = null;
 const tileInfo = {};
 function layout() {
-  if (!layoutP) layoutP = getJson(`${feed()}/browse/tiles`, 90000).catch(() => ({ groups: [] }));
+  if (stale("layout") || !layoutP) layoutP = getJson(`${feed()}/browse/tiles`, 90000).catch(() => ({ groups: [] }));
   return layoutP;
 }
 /** Home rows: your personal lists when lucapi has sorted them, otherwise every catalogue. */
@@ -472,7 +478,7 @@ async function showSearch(q = "") {
 let aioCatalogsP = null;
 function aioCatalogs() {
   if (!aioBase()) return Promise.resolve([]);
-  if (!aioCatalogsP) aioCatalogsP = getJson(`${aioBase()}/manifest.json`, 20000)
+  if (stale("aio") || !aioCatalogsP) aioCatalogsP = getJson(`${aioBase()}/manifest.json`, 20000)
     .then(m => (m.catalogs || []).filter(c => !(c.extra || []).some(x => x.isRequired)).map(c => ({ ...c, aio: true }))).catch(() => []);
   return aioCatalogsP;
 }
