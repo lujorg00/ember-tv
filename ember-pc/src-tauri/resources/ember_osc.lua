@@ -216,14 +216,16 @@ local function tracks(kind)
 end
 
 -- Subtitle size: chosen in the panel, remembered between plays (in Ember's own folder).
-local SUB_SIZES = { { "S", 0.8 }, { "M", 1.0 }, { "L", 1.25 }, { "XL", 1.5 } }
+local SUB_SIZES = { { "S", 0.6 }, { "M", 0.75 }, { "L", 0.9 } }
+local SUB_DEFAULT = 0.75
 local function load_sub_size()
-    if opts.statefile == "" then return end
-    local f = io.open(opts.statefile, "r")
-    if not f then return end
-    local v = tonumber((f:read("*l") or ""))
-    f:close()
-    if v and v > 0.3 and v < 3 then mp.set_property_number("sub-scale", v) end
+    local v
+    local f = opts.statefile ~= "" and io.open(opts.statefile, "r")
+    if f then v = tonumber((f:read("*l") or "")); f:close() end
+    -- not one of the sizes (nothing saved yet, or an old one): use the nearest, Medium if none
+    local best, bd = SUB_DEFAULT, math.huge
+    if v then for _, z in ipairs(SUB_SIZES) do if math.abs(z[2] - v) < bd then best, bd = z[2], math.abs(z[2] - v) end end end
+    mp.set_property_number("sub-scale", best)
 end
 local function save_sub_size(v)
     mp.set_property_number("sub-scale", v)
