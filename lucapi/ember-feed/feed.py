@@ -525,12 +525,12 @@ def trakt_creds():
     return _trakt_files.get("client") or t.get("client_id"), token
 
 
-def _trakt(path, body=None):
+def _trakt(path, body=None, method=None):
     cid, tok = trakt_creds()
     if not cid or not tok:
         raise RuntimeError("no Trakt login found (see trakt in config.json)")
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request("https://api.trakt.tv" + path, data=data, method="POST" if data else "GET", headers={
+    req = urllib.request.Request("https://api.trakt.tv" + path, data=data, method=method or ("POST" if data else "GET"), headers={
         "Content-Type": "application/json", "trakt-api-version": "2", "trakt-api-key": cid,
         "Authorization": "Bearer " + tok, "User-Agent": "ember-feed/1.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
@@ -723,15 +723,52 @@ def _snapshot_loop():
         time.sleep(CFG.get("progress", {}).get("trakt_poll_seconds", 180))
 
 
+def _dismissed():
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS dismissed (imdb TEXT PRIMARY KEY, at INTEGER)")
+        return dict(db().execute("SELECT imdb, at FROM dismissed").fetchall())
+
+
+def dismiss(body):
+    """Take a title off Continue watching everywhere: the Pi's resume points, Trakt's (so Omni and Odin too), and the
+    addon's 'pick up' row (hidden until you watch it again)."""
+    imdb = str(body.get("imdb", ""))
+    if not (imdb.startswith("tt") and imdb[2:].isdigit()):
+        raise ValueError("imdb must look like tt1234567")
+    now = int(time.time())
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS dismissed (imdb TEXT PRIMARY KEY, at INTEGER)")
+        db().execute("DELETE FROM positions WHERE imdb=? AND finished=0", (imdb,))
+        db().execute("INSERT OR REPLACE INTO dismissed VALUES (?, ?)", (imdb, now))
+        db().commit()
+    with _cache_lock:
+        _cache.pop("progress", None)
+
+    def clear_trakt():
+        try:
+            for it in _trakt("/sync/playback?limit=200"):
+                ids = ((it.get("show") or it.get("movie") or {}).get("ids") or {})
+                if ids.get("imdb") == imdb and it.get("id"):
+                    _trakt(f"/sync/playback/{it['id']}", method="DELETE")
+        except Exception as e:
+            print(f"[ember-feed] couldn't clear Trakt resume point for {imdb}: {e}", flush=True)
+    threading.Thread(target=clear_trakt, daemon=True).start()
+    print(f"[ember-feed] removed {imdb} from continue watching", flush=True)
+    return {"ok": True}
+
+
 def _progress():
     """Where you are in each title, newest first, keyed by IMDb id: the most recent unfinished position on any device."""
     with _db_lock:
         rows = [_row(r) for r in db().execute(
             "SELECT * FROM positions ORDER BY updated DESC").fetchall()]
+    gone = _dismissed()
     out, done = {}, set()
     for r in rows:
         if r["imdb"] in out or r["imdb"] in done:
             continue
+        if gone.get(r["imdb"], 0) >= r["updated"]:
+            continue  # you removed it; it comes back if you watch it again
         if r["finished"]:
             # the latest thing for this title is finished: nothing to resume (the continue row shows the next episode)
             done.add(r["imdb"])
@@ -1738,6 +1775,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(min(n, 65536)) or b"{}")
             if path == "/progress/report":
                 self._json(report(body))
+            elif path == "/progress/dismiss":
+                self._json(dismiss(body))
             elif path == "/pick/failed":
                 self._json(stream_failed(body))
             elif path == "/match/new":
@@ -1789,6 +1828,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
             elif path == "/jellyfin/summary":
                 self._json(jellyfin_summary())
+            elif path == "/progress/dismissed":
+                self._json({"dismissed": _dismissed()})
             elif path == "/browse/tiles":
                 self._json(browse_tiles())
             elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):

@@ -144,7 +144,7 @@ async fn play(
         .arg(format!("--script={}", script.display()))
         .arg(format!("--script-opts={}", opts))
         .arg(format!("--log-file={}", logfile.display()))
-        .arg("--msg-level=all=warn,ember=v")
+        .arg("--msg-level=all=warn,ember=v,modernz=v")
         .arg("--force-window=immediate")
         .arg("--title=Ember")
         .arg("--hwdec=auto-safe")
@@ -237,7 +237,7 @@ fn stop(app: tauri::AppHandle, player: tauri::State<Player>) {
 fn player_log(app: tauri::AppHandle) -> String {
     let Ok(dir) = app.path().app_local_data_dir() else { return String::new() };
     let text = std::fs::read_to_string(dir.join("mpv-log.txt")).unwrap_or_else(|_| "No player log yet: play something first.".into());
-    let lines: Vec<&str> = text.lines().filter(|l| l.contains("[ember]") || l.contains("error") || l.contains("Lua")).collect();
+    let lines: Vec<&str> = text.lines().filter(|l| l.contains("[ember]") || l.contains("modernz") || l.contains("[osc]") || l.contains("error") || l.contains("Lua") || l.contains("script")).collect();
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
 

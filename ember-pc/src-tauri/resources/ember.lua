@@ -79,3 +79,17 @@ mp.register_event("end-file", function(e)
     post("stopped", true, e.reason == "eof")
 end)
 
+
+-- Safety net: if the ModernZ controls didn't load, switch on mpv's own controls so you're never left without any.
+mp.add_timeout(3, function()
+    local ok = false
+    for _, b in ipairs(mp.get_property_native("input-bindings") or {}) do
+        if b.owner and tostring(b.owner):lower():find("modernz") then ok = true; break end
+    end
+    if not ok then
+        msg.warn("ModernZ controls not found: falling back to mpv's standard controls")
+        mp.set_property_bool("osc", true)
+    else
+        msg.info("ModernZ controls loaded")
+    end
+end)

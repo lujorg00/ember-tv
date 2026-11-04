@@ -221,17 +221,17 @@ async function showHome() {
   const isTop = (c) => /\btop\b/i.test(c.name || "");
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
+  const slotOut = document.createElement("div"); rows.appendChild(slotOut);
   const hidden = hiddenRows();
   const shown = cats.filter(c => !hidden.has(catKey(c)));
   const tops = shown.filter(isTop), others = shown.filter(c => !isTop(c) && !isContinue(c));
   const topSlots = tops.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
-  const slotOut = document.createElement("div"); rows.appendChild(slotOut);
   const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
 
   const cwCat = shown.find(isContinue);
   if (!hidden.has("cw")) continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
-  if (!hidden.has("out")) outThisWeek().then(r => { if (r) slotOut.replaceWith(r); });
+  if (!hidden.has("out")) weekCalendar().then(r => { if (r) slotOut.replaceWith(r); });
   tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
   const [topLists, otherLists] = await Promise.all([
     Promise.all(tops.map(async (c, i) => {
@@ -254,15 +254,27 @@ async function continueRow(cwCat) {
   const seen = new Set();
   for (const [id, p] of Object.entries(progress)) { items.push({ id, type: p.type, p }); seen.add(id); }
   items.sort((a, b) => (b.p.pausedAt || "").localeCompare(a.p.pausedAt || ""));
+  let gone = {};
+  try { gone = (await getJson(`${feed()}/progress/dismissed`, 5000)).dismissed || {}; } catch (e) {}
   if (cwCat) {
-    try { for (const m of await catalogRow(cwCat)) if (!seen.has(m.id)) { items.push({ id: m.id, type: m.type || cwCat.type, m }); seen.add(m.id); } } catch (e) {}
+    try { for (const m of await catalogRow(cwCat)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || cwCat.type, m }); seen.add(m.id); } } catch (e) {}
   }
   if (!items.length) return null;
   const r = h(`<section class="row fade-in"><h2>Continue watching <small>${items.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   for (const it of items.slice(0, 20)) {
-    const el = h(`<div class="cw"><div class="cw-art"><div class="cw-label"></div></div><div class="cw-name"></div></div>`);
+    const el = h(`<div class="cw"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
     strip.appendChild(el);
+    $(".cw-x", el).onclick = async (e) => {
+      e.stopPropagation();
+      el.classList.add("going");
+      try {
+        await fetch(`${feed()}/progress/dismiss`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imdb: it.id }) });
+        delete progress[it.id];
+        setTimeout(() => el.remove(), 250);
+        toast(`Removed ${$(".cw-name", el).textContent || "it"} from Continue watching.`);
+      } catch (err) { el.classList.remove("going"); toast("Couldn't reach lucapi: " + err.message); }
+    };
     (async () => {
       const full = { ...(it.m || {}), ...(await meta(it.type, it.id)) };
       $(".cw-name", el).textContent = full.name || "";
@@ -278,7 +290,7 @@ async function continueRow(cwCat) {
       const ep = season && (full.videos || []).find(x => x.season === season && x.episode === episode);
       const art = (ep && ep.thumbnail) || backdrop(full);
       if (art) $(".cw-art", el).style.backgroundImage = `url('${art}')`;
-      el.onclick = () => go("title", it.type, it.id, full, { autoplay: true });
+      el.onclick = () => go("title", it.type, it.id, full); // details first; Play starts it
     })();
   }
   return r;
@@ -627,6 +639,38 @@ async function outThisWeek() {
     c.appendChild(h(`<div class="airs ${e.out ? "out" : ""}">${e.out ? "New" : esc(e.day)} · S${e.season} E${e.episode}</div>`));
     c.onclick = () => go("title", "series", e.imdb, m);
     $(".strip", r).appendChild(c);
+  }
+  return r;
+}
+
+/** This week, as a calendar: seven days from yesterday, each with the new episodes of your shows that day. */
+async function weekCalendar() {
+  let eps = [];
+  try { eps = (await getJson(`${feed()}/upcoming?days=6`, 8000)).episodes || []; } catch (e) { return null; }
+  if (!eps.length) return null;
+  const day0 = new Date(); day0.setHours(0, 0, 0, 0); day0.setDate(day0.getDate() - 1);
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(day0); d.setDate(d.getDate() + i); return d; });
+  const key = (d) => d.toDateString();
+  const today = key(new Date());
+  const r = h(`<section class="row fade-in"><h2>This week</h2><div class="week"></div></section>`);
+  for (const d of days) {
+    const list = eps.filter(e => key(new Date(e.airs)) === key(d));
+    const col = h(`<div class="wday ${key(d) === today ? "today" : ""} ${list.length ? "" : "empty"}">
+      <div class="wd-h"><b>${key(d) === today ? "Today" : d.toLocaleDateString("en-GB", { weekday: "short" })}</b><span>${d.getDate()}</span></div></div>`);
+    for (const e of list) {
+      const t = new Date(e.airs);
+      const card = h(`<div class="wep"><div class="wep-art"></div><div class="wep-t">${esc(e.show)}</div>
+        <div class="wep-d">S${e.season} E${e.episode} · ${e.out ? "<span class='acc'>Out now</span>" : t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</div></div>`);
+      card.onclick = () => go("title", "series", e.imdb, { name: e.show });
+      col.appendChild(card);
+      meta("series", e.imdb).then(m => {
+        const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
+        const art = (ep && ep.thumbnail) || backdrop({ ...m, id: e.imdb });
+        if (art) $(".wep-art", card).style.backgroundImage = `url('${art}')`;
+      });
+    }
+    if (!list.length) col.appendChild(h(`<div class="wnone">Nothing new</div>`));
+    $(".week", r).appendChild(col);
   }
   return r;
 }
