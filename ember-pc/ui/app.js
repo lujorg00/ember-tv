@@ -407,7 +407,7 @@ function top10Row(title, metas, onPick) {
 }
 
 // Designed tiles (Omni-style): a brand-colour gradient with the logo big in the middle, no film artwork.
-// [gradient from, gradient to, logo ink, (logo kept in Ember)]: w = white, k = black, o = its own colours, W = always white
+// [gradient from, gradient to, logo ink, (logo kept in Ember), (caption under it)]: w = white, k = black, o = its own colours, W = always white
 const BRAND = {
   "netflix": ["#3a0606", "#0c0202", "o", "brands/netflix.svg"], "prime video": ["#79bdf7", "#2f86e0", "k"], "apple tv+": ["#3a3a3a", "#050505", "w", "brands/apple-tv-plus.svg"],
   "disney+": ["#1d3a9c", "#070f33", "w"], "hbo max": ["#262626", "#000000", "w"], "hulu": ["#1ed27a", "#0a6b3b", "w"],
@@ -418,11 +418,11 @@ const BRAND = {
   "dreamworks animation": ["#2a62c9", "#0a1f4f", "w"], "illumination studios": ["#ffd23a", "#d39a00", "k"],
   "sony pictures animation": ["#4b7fe0", "#13306e", "w"], "sony pictures": ["#2a2a2a", "#000000", "W"],
   "studio ghibli": ["#72b6e3", "#1f5f8f", "w"], "universal pictures": ["#14284f", "#02060f", "w"],
-  "warner brothers": ["#2357b0", "#0a2350", "o"], "warner brothers animation": ["#2357b0", "#0a2350", "W"],
+  "warner brothers": ["#2357b0", "#0a2350", "o"], "warner brothers animation": ["#2357b0", "#0a2350", "o", "", "ANIMATION"],
   "lionsgate": ["#4a4a4a", "#111111", "w"], "miramax": ["#2a2a2a", "#000000", "w"], "mgm": ["#8a6a24", "#2b1d06", "w"],
   "searchlight pictures": ["#24384e", "#070d14", "w"],
   "cbeebies": ["#22307a", "#0b1238", "o"], "cartoon network": ["#9a9a9a", "#4a4a4a", "o"], "nickelodeon": ["#ff7a1a", "#c94a00", "w"],
-  "disney kids": ["#4b33b5", "#1a1150", "w"], "imdb top 250": ["#2a2a2a", "#000000", "o"],
+  "disney kids": ["#4b33b5", "#1a1150", "w"], "imdb top 250": ["#2a2a2a", "#000000", "o", "brands/imdb.svg", "TOP 250"],
 };
 // Awards: [gradient from, to, small line, big title]
 const AWARD = {
@@ -452,9 +452,10 @@ async function tileRows(hidden = new Set(), typ = "") {
       const key = (tile.title || "").toLowerCase().trim(), br = BRAND[key], aw = AWARD[key];
       if (aw) inner = `<div class="tile brand award ${aw[3].length > 9 ? "long" : ""} ${aw[5] || ""}" style="--a:${aw[0]};--b:${aw[1]}"><img class="aw-art aw-${aw[4]}" src="awards/${aw[4]}.svg" alt="">${aw[4] === "tomato" ? `<em class="aw-pct">100%</em>` : ""}<small>${esc(aw[2])}</small><b>${esc(aw[3])}</b></div>`;
       else if (br) {
-        const logo = br[3] || tile.logo, icon = !br[3] && tile.logo_kind === "icon";
-        const ink = br[2] === "W" ? "w" : icon ? "o" : !br[3] && ["duo", "box"].includes(tile.logo_mode) && br[2] === "w" ? "o" : br[2];
-        inner = `<div class="tile brand ink-${ink} ${icon ? "icon" : ""}" style="--a:${br[0]};--b:${br[1]}">${logo ? `<img src="${esc(logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+        // an app icon has had its square cut away on the Pi, so it's shown in its own colours
+        const logo = br[3] || tile.logo, cut = !br[3] && tile.logo_kind === "icon";
+        const ink = br[2] === "W" ? "w" : cut ? "o" : !br[3] && ["duo", "box"].includes(tile.logo_mode) && br[2] === "w" ? "o" : br[2];
+        inner = `<div class="tile brand ink-${ink} ${br[4] ? "withsub" : ""}" style="--a:${br[0]};--b:${br[1]}">${logo ? `<img src="${esc(logo)}" alt="">` : ""}${br[4] ? `<em class="br-sub">${esc(br[4])}</em>` : ""}<span>${esc(tile.title)}</span></div>`;
       }
       else if (g.style === "person") {
         const parts = (tile.title || "").split(" "), last = parts.length > 1 ? parts.pop() : "";

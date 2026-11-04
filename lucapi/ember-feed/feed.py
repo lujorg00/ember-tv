@@ -1861,8 +1861,20 @@ SERVICE_WIKI = {"netflix": "Netflix", "prime video": "Amazon Prime Video|Prime V
                 "paramount +": "Paramount+", "paramount+": "Paramount+", "peacock": "Peacock (streaming service)",
                 "discovery +": "Discovery+", "discovery+": "Discovery+", "crunchyroll": "Crunchyroll", "now": "Now (Sky)",
                 "bbc iplayer": "BBC iPlayer", "itvx": "ITVX", "channel 4": "Channel 4", "mubi": "Mubi"}
-STUDIO_QUERY = {"walt disney": "Walt Disney Pictures", "warner brothers": "Warner Bros. Pictures",
-                "warner brothers animation": "Warner Bros. Animation", "universal pictures": "Universal Pictures"}
+# The franchise's own Wikipedia article (its logo there is the franchise's, not one film's).
+FRANCHISE_WIKI = {"007": "James Bond", "fast and furious": "Fast & Furious", "harry potter": "Harry Potter",
+                  "indiana jones": "Indiana Jones", "mission impossible": "Mission: Impossible", "star trek": "Star Trek",
+                  "star wars": "Star Wars", "x-men": "X-Men (film series)", "mad max": "Mad Max", "john wick": "John Wick (franchise)",
+                  "bourne": "Bourne (franchise)|Jason Bourne", "die hard": "Die Hard (franchise)|Die Hard",
+                  "terminator": "Terminator (franchise)", "rocky & creed": "Rocky (franchise)", "alien": "Alien (franchise)",
+                  "predator": "Predator (franchise)", "jurassic park": "Jurassic Park", "planet of the apes": "Planet of the Apes",
+                  "middle-earth": "The Lord of the Rings (film series)|The Lord of the Rings",
+                  "pirates of the caribbean": "Pirates of the Caribbean (franchise)", "halloween": "Halloween (franchise)",
+                  "scream": "Scream (franchise)", "the conjuring universe": "The Conjuring Universe", "saw": "Saw (franchise)",
+                  "final destination": "Final Destination", "toy story": "Toy Story", "shrek": "Shrek (franchise)",
+                  "despicable me & minions": "Despicable Me"}
+STUDIO_QUERY = {"walt disney": "Walt Disney Pictures", "illumination studios": "Illumination", "illumination": "Illumination", "warner brothers": "Warner Bros. Pictures",
+                "warner brothers animation": "Warner Bros. Pictures", "universal pictures": "Universal Pictures"}
 PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
 # Wikipedia article for a tile whose logo comes from Wikidata (the "logo image" on its entry).
 WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards|Academy of Motion Picture Arts and Sciences",
@@ -1975,6 +1987,72 @@ def _franchise_logo(title, metas):
 LOGO_DIR = HERE / "logo-cache"
 
 
+def _knockout(data):
+    """An app icon (a logo on a coloured square) -> just the logo: the square's colours become transparent
+    (soft-edged, so it stays smooth), then it's cropped to what's left."""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGBA")
+    im.thumbnail((360, 360))  # plenty for a tile, and quick on the Pi
+    w, h = im.size
+    px = im.load()
+    ring = []
+    for k in range(0, w, max(1, w // 24)):
+        ring += [px[k, 1], px[k, h - 2]]
+    for k in range(0, h, max(1, h // 24)):
+        ring += [px[1, k], px[w - 2, k]]
+    ring = list({(c[0] // 8 * 8, c[1] // 8 * 8, c[2] // 8 * 8, 255) for c in ring if c[3] > 200}) or [(0, 0, 0, 255)]
+    near, far = 40.0, 90.0
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                continue
+            d = min(((r - c[0]) ** 2 + (g - c[1]) ** 2 + (b - c[2]) ** 2) ** 0.5 for c in ring)
+            if d < far:
+                px[x, y] = (r, g, b, int(a * max(0.0, (d - near) / (far - near))))
+    box = im.getbbox()
+    if box:
+        pad = 4
+        im = im.crop((max(0, box[0] - pad), max(0, box[1] - pad), min(w, box[2] + pad), min(h, box[3] + pad)))
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return out.getvalue()
+
+
+def _whiten_right(data):
+    """Logo with a badge on the left and a word on the right (MARVEL | STUDIOS, DC | STUDIOS):
+    everything after the first clear gap turns white, so the word matches the other tiles."""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGBA")
+    w, h = im.size
+    px = im.load()
+    filled = [any(px[x, y][3] > 40 for y in range(h)) for x in range(w)]
+    start = next((x for x in range(w) if filled[x]), 0)
+    gap, x = None, start
+    while x < w:
+        if not filled[x]:
+            run = x
+            while run < w and not filled[run]:
+                run += 1
+            if run - x >= max(2, w // 80) and run < w:
+                gap = run
+                break
+            x = run
+        x += 1
+    if gap is None:
+        return data
+    for yy in range(h):
+        for xx in range(gap, w):
+            r, g, b, a = px[xx, yy]
+            if a:
+                px[xx, yy] = (255, 255, 255, a)
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return out.getvalue()
+
+
 def _logo_look(data):
     """How a logo should be shown in black and white, and its border colour:
     "mono" - one colour on transparent (Nickelodeon, Harry Potter): shown solid white
@@ -2017,11 +2095,12 @@ def _logo_look(data):
 LOGO_VERSION = 3
 
 
-def _logo(url):
-    """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), with how to show it (see _logo_look)."""
+def _logo(url, knockout=False, whiten_right=False):
+    """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), with how to show it (see _logo_look).
+    knockout: it's an app icon; cut away its square background first."""
     if not url:
         return None
-    key = hashlib.sha1(url.encode()).hexdigest()[:20]
+    key = hashlib.sha1((url + ("#knockout" if knockout else "") + ("#whiten" if whiten_right else "")).encode()).hexdigest()[:20]
     info_path, img_path = LOGO_DIR / f"{key}.json", LOGO_DIR / key
     if info_path.exists():
         try:
@@ -2041,6 +2120,10 @@ def _logo(url):
         data = r.read()
     info = {"src": f"/logo/{key}", "mode": "light", "edge": "", "v": LOGO_VERSION}
     try:
+        if knockout:
+            data = _knockout(data)
+        if whiten_right:
+            data = _whiten_right(data)
         info["mode"], info["edge"], data = _logo_look(data)
     except Exception as e:
         print(f"[ember-feed] logo {url[:60]}: kept as it is ({e})", flush=True)
@@ -2125,8 +2208,13 @@ def _build_tiles():
                 t["logo"] = _wikidata_logo(article)
                 if t["logo"]:
                     break
-        elif t["box"] == "franchises" and tmdb_ok:
-            t["logo"] = _franchise_logo(t["title"], tops.get(t["id"], []))
+        elif t["box"] == "franchises":
+            for article in FRANCHISE_WIKI.get(t["title"].lower(), t["title"]).split("|"):
+                t["logo"] = _wikidata_logo(article)
+                if t["logo"]:
+                    break
+            if not t.get("logo") and tmdb_ok:
+                t["logo"] = _franchise_logo(t["title"], tops.get(t["id"], []))
         elif t["box"] in ("studios", "animation") and tmdb_ok:
             try:
                 q = STUDIO_QUERY.get(t["title"].lower(), t["title"])
@@ -2141,7 +2229,8 @@ def _build_tiles():
             t["logo"] = _wikidata_logo(t["title"])
         if t.get("logo"):
             try:
-                info = _logo(t["logo"])
+                info = _logo(t["logo"], knockout=t.get("logo_kind") == "icon",
+                             whiten_right=t["title"].lower() in ("marvel studios", "dc studios"))
                 t["logo"], t["logo_mode"] = info["src"], info["mode"]
                 if t["box"] == "services" and info.get("edge") and t.get("logo_kind") == "icon":
                     t["colour"] = info["edge"]

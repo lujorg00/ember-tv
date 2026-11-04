@@ -431,3 +431,10 @@ input { font: inherit; color: var(--text); }
   font: 800 21px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif; font-style: normal; letter-spacing: -.3px;
   color: #a51806; /* cut into the tomato: darker than its skin, lit from above */
   text-shadow: 0 1px 0 rgba(255,170,140,.55), 0 -1px 1px rgba(60,0,0,.75), 0 0 1px rgba(60,0,0,.4); pointer-events: none; }
+
+/* A caption under a tile's logo (WB ... ANIMATION, IMDb ... TOP 250) */
+.tile.brand.withsub { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
+.tile.brand.withsub img { max-height: 44%; }
+.tile.brand .br-sub { position: relative; font: 600 17px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif; font-style: normal;
+  letter-spacing: 6px; padding-left: 6px; color: #fff; text-shadow: 0 2px 10px rgba(0,0,0,.6); }
+.tile.brand img[src$="imdb.svg"] { max-height: 40%; }
