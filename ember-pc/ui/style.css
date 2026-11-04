@@ -249,3 +249,9 @@ input { font: inherit; color: var(--text); }
 .tile-head h1 { font: 800 56px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif; margin: 0 0 10px; letter-spacing: -1px; text-shadow: 0 4px 30px #000a; }
 #loader[hidden] { display: none; }
 #loader:not(.show) { pointer-events: none; }
+
+/* settings: row toggles */
+.toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 6px; }
+.toggle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); cursor: pointer; color: var(--text) !important; margin: 0 !important; font-size: 13px; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+.toggle:has(input:not(:checked)) span { color: var(--faint); text-decoration: line-through; }

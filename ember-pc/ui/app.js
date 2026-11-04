@@ -81,6 +81,9 @@ const loader = (() => {
 
 const pages = { home: showHome, search: showSearch, films: () => showBrowse("movie"), series: () => showBrowse("series"),
   settings: showSettings, match: showMatch, year: showYear };
+const hiddenRows = () => { try { return new Set(JSON.parse(store.get("hiddenRows", "[]"))); } catch (e) { return new Set(); } };
+const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]));
+const catKey = (c) => `cat:${c.type}:${c.id}`;
 const deviceName = () => store.get("deviceName", "Ember PC") || "Ember PC";
 let navStack = [];
 function go(page, ...args) {
@@ -218,16 +221,18 @@ async function showHome() {
   const isTop = (c) => /\btop\b/i.test(c.name || "");
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
-  const tops = cats.filter(isTop), others = cats.filter(c => !isTop(c) && !isContinue(c));
+  const hidden = hiddenRows();
+  const shown = cats.filter(c => !hidden.has(catKey(c)));
+  const tops = shown.filter(isTop), others = shown.filter(c => !isTop(c) && !isContinue(c));
   const topSlots = tops.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const slotOut = document.createElement("div"); rows.appendChild(slotOut);
   const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
 
-  const cwCat = cats.find(isContinue);
-  continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
-  outThisWeek().then(r => { if (r) slotOut.replaceWith(r); });
-  tileRows().then(r => { if (r) slotTiles.replaceWith(r); });
+  const cwCat = shown.find(isContinue);
+  if (!hidden.has("cw")) continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
+  if (!hidden.has("out")) outThisWeek().then(r => { if (r) slotOut.replaceWith(r); });
+  tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
   const [topLists, otherLists] = await Promise.all([
     Promise.all(tops.map(async (c, i) => {
       const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
@@ -293,12 +298,13 @@ function top10Row(title, metas, onPick) {
 }
 
 /** Streaming services, genres, directors, studios, collections, decades (from TMDB, via the Pi). */
-async function tileRows() {
+async function tileRows(hidden = new Set()) {
   let t;
   try { t = await getJson(`${feed()}/browse/tiles`, 60000); } catch (e) { return null; }
   if (!t.groups || !t.groups.length) return null;
   const box = h(`<div></div>`);
   for (const g of t.groups) {
+    if (hidden.has("tiles:" + g.title)) continue;
     const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
     for (const tile of g.tiles) {
       let inner;
@@ -724,6 +730,9 @@ function showSettings() {
       <label>Your AIOStreams manifest link</label><input type="text" id="aio" placeholder="https://…/manifest.json">
       <label>lucapi (ember-feed)</label><input type="text" id="feed" placeholder="http://192.168.4.141:8090">
       <label>This computer's name (shown in resume points)</label><input type="text" id="dev" placeholder="Ember PC">
+      <label>Home rows</label>
+      <div class="muted" style="font-size:13px">Untick anything you don't want on the home screen.</div>
+      <div id="rowToggles" class="toggles"><span class="muted">Loading your rows…</span></div>
       <label>Playing</label>
       <label class="check"><input type="radio" name="pm" value="window"> In the Ember window</label>
       <label class="check"><input type="radio" name="pm" value="full"> Full screen</label>
@@ -739,10 +748,24 @@ function showSettings() {
       <div class="muted" style="font-size:13px">Add this as an addon in Omni: it gives the same streams as AIOStreams, tested and sorted best first by lucapi. It works at home, where the Apple TV can reach the Pi. It contains your AIOStreams link, so keep it to yourself.</div>
       <div class="btns"><input type="text" id="picksUrl" readonly style="flex:1;min-width:380px"><button class="btn" id="copyPicks">Copy</button></div>
     </div>`;
+  (async () => {
+    const list = [{ key: "cw", name: "Continue watching" }];
+    for (const c of await catalogs()) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${c.name || c.id} (${c.type === "movie" ? "films" : "series"})` });
+    list.push({ key: "out", name: "Out this week" });
+    try { for (const g of (await getJson(`${feed()}/browse/tiles`, 60000)).groups || []) list.push({ key: "tiles:" + g.title, name: g.title }); } catch (e) {}
+    const hid = hiddenRows();
+    const box = $("#rowToggles"); if (!box) return;
+    box.innerHTML = "";
+    for (const it of list) {
+      const el = h(`<label class="toggle"><input type="checkbox" ${hid.has(it.key) ? "" : "checked"}><span>${esc(it.name)}</span></label>`);
+      $("input", el).onchange = (e) => { const s = hiddenRows(); e.target.checked ? s.delete(it.key) : s.add(it.key); setHiddenRows(s); toast("Saved. It shows next time you open Home."); };
+      box.appendChild(el);
+    }
+  })();
   $("#aio").value = store.get("aio"); $("#feed").value = feed(); $("#dev").value = deviceName();
-  document.querySelector(`input[name=pm][value=${store.get("playMode", "window")}]`).checked = true;
+  document.querySelector(`input[name=pm][value="${store.get("playMode", "window")}"]`).checked = true;
   $("#pt").checked = store.get("passthrough", "0") === "1";
-  document.querySelector(`input[name=q][value=${store.get("quality", "4k")}]`).checked = true;
+  document.querySelector(`input[name=q][value="${store.get("quality", "4k")}"]`).checked = true;
   $("#motion").checked = store.get("motion", "1") === "1";
   const picksUrl = () => {
     const aio = store.get("aio"); if (!aio) return "Add your AIOStreams link above first";
