@@ -367,3 +367,10 @@ input { font: inherit; color: var(--text); }
 .hn { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; line-height: 1; color: #fff;
   background: rgba(20,15,11,.55); border: 1px solid rgba(255,255,255,.12); transition: background .15s, color .15s; }
 .hn:hover { background: rgba(240,160,75,.9); color: var(--accent-ink); }
+
+/* Watched / started badge, top right of posters */
+.wbadge { position: absolute; z-index: 2; top: 7px; right: 7px; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center;
+  background: rgba(14,11,9,.55); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.22); box-shadow: 0 2px 8px #0006; }
+.wbadge.done { color: var(--accent); font-size: 14px; font-weight: 800; line-height: 1; }
+.wbadge.part i { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--accent);
+  background: conic-gradient(var(--accent) 0 50%, transparent 50% 100%); }

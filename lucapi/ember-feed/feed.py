@@ -11,6 +11,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
   GET /progress/<imdb> -> every saved position for one title (episode lists)
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
+  GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
@@ -662,6 +663,8 @@ def report(body):
             verb = {"playing": "start", "paused": "pause", "stopped": "stop"}[state]
             if finished:
                 verb = "stop"
+                with _cache_lock:
+                    _cache.pop("watched", None)  # the poster badges catch up
             threading.Thread(target=_scrobble, args=(verb, d, max(pct, 80.0) if finished else pct), daemon=True).start()
     return {"ok": True, "finished": finished, "percent": d["percent"]}
 
@@ -761,6 +764,47 @@ def dismiss(body):
     return {"ok": True}
 
 
+def _watched_status():
+    """What you've watched, for the badges on posters: {imdb: "done" | "partial"}.
+    Films: done once finished. Shows: done when you've seen every aired episode, partial if you've started.
+    From your Trakt history (Omni, Odin, everything) plus the Pi's own record."""
+    out = {}
+    with _db_lock:
+        rows = db().execute("SELECT imdb, type, finished, percent FROM positions").fetchall()
+    for imdb, typ, fin, pct in rows:
+        if typ == "movie":
+            if fin:
+                out[imdb] = "done"
+            elif pct >= 1:
+                out.setdefault(imdb, "partial")
+        else:
+            out.setdefault(imdb, "partial")
+    if all(trakt_creds()):
+        try:
+            for it in _trakt("/sync/watched/movies"):
+                i = ((it.get("movie") or {}).get("ids") or {}).get("imdb")
+                if i:
+                    out[i] = "done"
+            for it in _trakt("/sync/watched/shows?extended=full"):
+                show = it.get("show") or {}
+                i = (show.get("ids") or {}).get("imdb")
+                if not i:
+                    continue
+                seen = sum(len(se.get("episodes") or []) for se in (it.get("seasons") or []) if (se.get("number") or 0) > 0)
+                aired = show.get("aired_episodes") or 0
+                out[i] = "done" if aired and seen >= aired else "partial"
+        except Exception as e:
+            print(f"[ember-feed] watched list from Trakt failed: {e}", flush=True)
+    return out
+
+
+def watched_status():
+    try:
+        return {"items": cached("watched", 900, _watched_status)}
+    except Exception as e:
+        return {"items": {}, "error": str(e)}
+
+
 def mark_watched(body):
     """Mark a film, or any episodes of a show (one, a season, the lot), as watched or not - for things you saw
     before Ember. Saved on the Pi (so Ember skips them) and in your Trakt history (so Omni, Odin and Up Next agree).
@@ -794,6 +838,7 @@ def mark_watched(body):
     with _cache_lock:
         _cache.pop("progress", None)
         _cache.pop("next:" + imdb, None)
+        _cache.pop("watched", None)
 
     def to_trakt():
         try:
@@ -2286,6 +2331,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             elif path == "/jellyfin/summary":
                 self._json(jellyfin_summary())
+            elif path == "/watched":
+                self._json(watched_status())
             elif path == "/progress/dismissed":
                 self._json({"dismissed": _dismissed()})
             elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):

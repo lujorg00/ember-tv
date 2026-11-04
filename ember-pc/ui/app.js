@@ -37,8 +37,18 @@ async function meta(type, id) {
   metaCache.set(k, { t: Date.now(), p });
   return p;
 }
+// What you've watched (all of it: ✓) or started (◐), for the badge in the corner of every poster.
+let watchedMap = {}, watchedAt = 0;
+async function loadWatched() {
+  if (Date.now() - watchedAt < 120e3) return;
+  try { watchedMap = (await getJson(`${feed()}/watched`, 8000)).items || {}; watchedAt = Date.now(); } catch (e) {}
+}
+const badge = (id) => watchedMap[id] === "done" ? `<span class="wbadge done" title="Watched">✓</span>`
+  : watchedMap[id] === "partial" ? `<span class="wbadge part" title="Started"><i></i></span>` : "";
 async function loadProgress() {
+  const w = loadWatched();
   try { progress = (await getJson(`${feed()}/progress`, 6000)).items || {}; } catch (e) { progress = progress || {}; }
+  await w;
 }
 function progressLine(p) {
   if (!p) return "";
@@ -113,7 +123,7 @@ document.addEventListener("keydown", e => {
 function card(m, type) {
   const p = progress[m.id];
   const el = h(`<div class="poster" title="${esc(m.name)}" style="background-image:url('${esc(poster(m))}')">
-    ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}
+    ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}
     ${p ? `<div class="bar"><i style="width:${Math.max(3, Math.min(100, p.progress))}%"></i></div>` : ""}</div>`);
   el.onclick = () => go("title", m.type || type, m.id, m);
   return el;
@@ -347,7 +357,7 @@ function top10Row(title, metas, onPick) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 10).forEach((m, i) => {
-    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span></div></div>`);
+    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
     el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });
@@ -633,6 +643,12 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     } catch (err) { toast("Couldn't update lucapi: " + err.message); return false; }
     const keys = type === "series" ? list.map(e => e.season + ":" + e.episode) : [":"];
     for (const k of keys) { if (watched) saved[k] = { ...(saved[k] || {}), finished: true, percent: 100 }; else delete saved[k]; }
+    // the badge on this title's posters
+    if (type === "movie") { if (watched) watchedMap[id] = "done"; else delete watchedMap[id]; }
+    else {
+      const airedEps = eps.filter(aired), seen = airedEps.filter(e => isDone(e.season + ":" + e.episode)).length;
+      if (seen && seen >= airedEps.length) watchedMap[id] = "done"; else if (seen) watchedMap[id] = "partial"; else delete watchedMap[id];
+    }
     const pk = p ? (type === "series" ? p.season + ":" + p.episode : ":") : null;
     if (pk && keys.includes(pk)) delete progress[id];
     if (type === "series" && (!cur || isDone(cur.season + ":" + cur.episode))) {
