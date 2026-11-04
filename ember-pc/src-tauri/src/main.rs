@@ -80,6 +80,18 @@ mod layer {
         }
     }
 
+    /// Puts the video back over Ember's page if it has moved or changed size (mpv resizes itself to the video).
+    pub fn refit(video: isize, parent: isize) {
+        unsafe {
+            let (x, y, w, h) = page_rect(parent as HWND);
+            let mut r: RECT = std::mem::zeroed();
+            GetWindowRect(video as HWND, &mut r);
+            if r.left != x || r.top != y || r.right - r.left != w || r.bottom - r.top != h {
+                fit(video, parent);
+            }
+        }
+    }
+
     pub fn fit(video: isize, parent: isize) {
         unsafe {
             let (x, y, w, h) = page_rect(parent as HWND);
@@ -169,6 +181,8 @@ async fn play(
         #[cfg(windows)]
         cmd.arg(format!("--geometry={}", layer::geometry(parent)));
         cmd.arg("--no-border").arg("--title=Ember video");
+        // Don't let mpv size its window to the video: Ember decides where it goes.
+        cmd.arg("--auto-window-resize=no").arg("--keepaspect-window=no");
     } else {
         cmd.arg("--fs");
     }
@@ -217,6 +231,13 @@ async fn play(
             #[cfg(windows)]
             // Check for the whole of playback, not just at the start: mpv can rebuild its window (when the video
             // starts, or the stream changes), and a new one that isn't attached would sit behind Ember.
+            if embed && attached {
+                let cur = p2.0.lock().unwrap().layer;
+                if cur != 0 {
+                    let _ = app2.run_on_main_thread(move || layer::refit(cur, parent));
+                }
+            }
+            #[cfg(windows)]
             if embed {
                 let v = layer::find(pid);
                 if v != 0 {

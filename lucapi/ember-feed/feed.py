@@ -1719,8 +1719,10 @@ KNOWN_PEOPLE = {"alfred hitchcock", "christopher nolan", "denis villeneuve", "da
                 "coen brothers", "wes anderson", "yorgos lanthimos", "david attenborough", "greta gerwig", "edgar wright"}
 PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
 # Wikipedia article for a tile whose logo comes from Wikidata (the "logo image" on its entry).
-WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards", "academy award winners": "Academy Awards",
-             "bafta": "British Academy Film Awards", "golden globes": "Golden Globe Awards", "cannes": "Cannes Film Festival",
+WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards|Academy of Motion Picture Arts and Sciences",
+             "academy award winners": "Academy Awards|Academy of Motion Picture Arts and Sciences",
+             "bafta": "British Academy Film Awards|British Academy of Film and Television Arts",
+             "golden globes": "Golden Globe Awards|Golden Globes|Hollywood Foreign Press Association", "cannes": "Cannes Film Festival",
              "certified fresh": "Rotten Tomatoes", "cbeebies": "CBeebies", "cartoon network": "Cartoon Network",
              "nickelodeon": "Nickelodeon", "disney kids": "Disney Channel", "cbbc": "CBBC", "disney junior": "Disney Junior"}
 # Catalogues that should share one tile: tile title -> the catalogue names that go in it.
@@ -1888,7 +1890,10 @@ def _build_tiles():
             except Exception:
                 pass
         elif t["box"] in ("kids", "acclaim"):
-            t["logo"] = _wikidata_logo(WIKI_LOGO.get(t["title"].lower(), t["title"]))
+            for article in WIKI_LOGO.get(t["title"].lower(), t["title"]).split("|"):  # first article that has a logo
+                t["logo"] = _wikidata_logo(article)
+                if t["logo"]:
+                    break
         elif t["box"] == "franchises" and tmdb_ok:
             t["logo"] = _franchise_logo(t["title"], tops.get(t["id"], []))
         elif t["box"] in ("studios", "animation") and tmdb_ok:

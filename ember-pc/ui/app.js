@@ -330,18 +330,22 @@ async function tileRows(hidden = new Set(), typ = "") {
   const box = h(`<div></div>`);
   for (const g of t.groups) {
     if (hidden.has("tiles:" + g.title)) continue;
+    if (typ === "series" && g.style === "person") continue; // directors are for films
     const list = g.tiles.filter(x => !typ || !x.types || x.types.includes(typ));
     if (!list.length) continue;
     const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
     for (const tile of list) {
       if (tile.kind === "cat") tileInfo[tile.id] = tile;
       let inner;
-      if (g.style === "logo") inner = `<div class="tile logo" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
       else inner = `<div class="tile art ${tile.logo ? "haslogo" : ""}" style="background-image:url('${esc(tile.image || "")}')">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       const el = h(inner);
       // A logo that doesn't load: show the name instead.
-      el.querySelectorAll("img").forEach(img => img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); });
+      el.querySelectorAll("img").forEach(img => {
+        img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); };
+        if (g.style === "logo") serviceTile(img, el); else smartLogo(img);
+      });
       const first = typ || (tile.types || ["movie"])[0];
       el.onclick = () => go("tile", tile.kind, tile.id, tile.title, (g.style === "person" ? "" : tile.image) || "", first);
       $(".strip", r).appendChild(el);
@@ -349,6 +353,45 @@ async function tileRows(hidden = new Set(), typ = "") {
     box.appendChild(r);
   }
   return box;
+}
+
+/** Looks at a logo's pixels: a solid badge stays as it is, a dark logo turns white, a light or coloured one keeps its colours. */
+function logoPixels(src) {
+  return new Promise((ok) => {
+    const im = new Image(); im.crossOrigin = "anonymous";
+    im.onload = () => {
+      try {
+        const w = 64, hh = Math.max(1, Math.round(64 * im.naturalHeight / Math.max(1, im.naturalWidth)));
+        const c = document.createElement("canvas"); c.width = w; c.height = hh;
+        const x = c.getContext("2d"); x.drawImage(im, 0, 0, w, hh);
+        ok({ data: x.getImageData(0, 0, w, hh).data, w, h: hh });
+      } catch (e) { ok(null); }
+    };
+    im.onerror = () => ok(null);
+    im.src = src;
+  });
+}
+async function smartLogo(img) {
+  const px = await logoPixels(img.src);
+  if (!px) { img.classList.add("lg-dark"); return; } // can't look: white is safest on dark artwork
+  const d = px.data; let clear = 0, n = 0, lum = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 40) { clear++; continue; }
+    n++; lum += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+  }
+  lum = n ? lum / n : 1;
+  img.classList.add(clear / (d.length / 4) < 0.04 ? "lg-box" : lum < 0.4 ? "lg-dark" : "lg-ok");
+}
+/** Streaming services: the logo fills the tile, on its own background colour. */
+async function serviceTile(img, tile) {
+  const px = await logoPixels(img.src);
+  if (px) {
+    const d = px.data, at = (x, y) => (y * px.w + x) * 4;
+    const pts = [at(1, 1), at(px.w - 2, 1), at(1, px.h - 2), at(px.w - 2, px.h - 2)];
+    const avg = (k) => Math.round(pts.reduce((s, p) => s + d[p + k], 0) / pts.length);
+    tile.style.background = `rgb(${avg(0)},${avg(1)},${avg(2)})`;
+  }
+  img.classList.add("lg-full");
 }
 
 /** The page behind a tile: its titles, Films or Series where both exist. */
@@ -421,24 +464,45 @@ async function showSearch(q = "") {
 
 // ---------------------------------------------------------------- films / series
 
+/** AIOStreams' own catalogues (for the Disney+, Apple TV+ and Amazon charts, when it has them). */
+let aioCatalogsP = null;
+function aioCatalogs() {
+  if (!aioBase()) return Promise.resolve([]);
+  if (!aioCatalogsP) aioCatalogsP = getJson(`${aioBase()}/manifest.json`, 20000)
+    .then(m => (m.catalogs || []).filter(c => !(c.extra || []).some(x => x.isRequired)).map(c => ({ ...c, aio: true }))).catch(() => []);
+  return aioCatalogsP;
+}
+async function anyCatalogRow(c) {
+  if (!c.aio) return catalogRow(c);
+  try { return (await getJson(`${aioBase()}/catalog/${c.type}/${c.id}.json`, 20000)).metas || []; } catch (e) { return []; }
+}
+
+/** Films and Series: Trending Now, New for you, then the Top 10s of each service, then the boxes. */
 async function showBrowse(type) {
   const v = $("#view");
   v.innerHTML = "";
-  const hero = createHero(type === "movie" ? "Films" : "Series");
+  const kind = type === "movie" ? "Films" : "Series";
+  const hero = createHero(kind);
   const rows = h(`<div class="rows"></div>`);
   v.append(hero.el, rows);
   await loadProgress();
-  const { rows: homeRows, hero: heroCats } = await homeCats();
-  const mine = homeRows.filter(c => c.type === type && !/pick up|left off|continue/i.test(c.name || ""));
-  const lists = [...mine.map(c => ({ name: c.name || c.id, load: () => catalogRow(c) })),
-    { name: "Popular", load: () => getJson(`${CINEMETA}/catalog/${type}/top.json`).then(j => j.metas || []).catch(() => []) },
-    { name: "Featured", load: () => getJson(`${CINEMETA}/catalog/${type}/imdbRating.json`).then(j => j.metas || []).catch(() => []) }];
-  const slots = lists.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
+  const [lists, aio, { hero: heroCats }] = await Promise.all([catalogs(), aioCatalogs(), homeCats()]);
+  const mine = lists.filter(c => c.type === type), theirs = aio.filter(c => c.type === type);
+  const find = (re, ...pools) => { for (const p of pools) { const c = p.find(x => re.test((x.name || "").trim())); if (c) return c; } return null; };
+  const plan = [
+    { name: "Trending Now", cat: find(/trending/i, mine, theirs) },
+    { name: `New ${kind} For You`, cat: find(/^new .*for you/i, mine) },
+    { name: `Netflix Top ${kind}`, cat: find(/netflix top/i, mine, theirs), top: true },
+    { name: `Disney+ Top ${kind}`, cat: find(/disney\s*\+/i, theirs, mine), top: true },
+    { name: `Apple TV+ Top ${kind}`, cat: find(/apple tv\s*\+/i, theirs, mine), top: true },
+    { name: `Amazon Top ${kind}`, cat: find(/prime video|amazon/i, theirs, mine), top: true },
+  ].filter(p => p.cat);
+  const slots = plan.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
   tileRows(hiddenRows(), type).then(r => { if (r) slotTiles.replaceWith(r); });
-  const results = await Promise.all(lists.map(async (l, i) => {
-    const metas = (await l.load()).map(m => ({ ...m, type }));
-    if (metas.length) slots[i].replaceWith(/\btop\b/i.test(l.name) ? top10Row(l.name, metas, hero.pick) : row(l.name, metas, type, hero.pick));
+  const results = await Promise.all(plan.map(async (p, i) => {
+    const metas = (await anyCatalogRow(p.cat)).map(m => ({ ...m, type }));
+    if (metas.length) slots[i].replaceWith(p.top ? top10Row(p.name, metas) : row(p.name, metas, type));
     return metas;
   }));
   const own = (await Promise.all(heroCats.filter(c => c.type === type).map(c => catalogRow(c)))).flat().map(m => ({ ...m, type }));
