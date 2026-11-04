@@ -140,6 +140,21 @@ async function catalogs() {
   }
   return addonCatalogs;
 }
+/** How lucapi sorted your lists: which are Home rows, which feed the hero, and the boxes (tiles). */
+let layoutP = null;
+const tileInfo = {};
+function layout() {
+  if (!layoutP) layoutP = getJson(`${feed()}/browse/tiles`, 90000).catch(() => ({ groups: [] }));
+  return layoutP;
+}
+/** Home rows: your personal lists when lucapi has sorted them, otherwise every catalogue. */
+async function homeCats() {
+  const [cats, lay] = await Promise.all([catalogs(), layout()]);
+  if (!lay.home || !lay.home.length) return { rows: cats, hero: [] };
+  const byKey = new Map(cats.map(c => [c.type + ":" + c.id, c]));
+  const pick = (x) => byKey.get(x.type + ":" + x.id) || { type: x.type, id: x.id, name: x.name };
+  return { rows: lay.home.map(pick), hero: (lay.hero || []).map(pick) };
+}
 async function catalogRow(c) {
   try { return (await getJson(`${feed()}/addon/catalog/${c.type}/${c.id}.json`)).metas || []; } catch (e) { return []; }
 }
@@ -215,8 +230,9 @@ async function showHome() {
   const rows = h(`<div class="rows"></div>`);
   v.append(hero.el, rows);
   await loadProgress();
-  const cats = await catalogs();
+  const { rows: cats, hero: heroCats } = await homeCats();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
+  const heroList = Promise.all(heroCats.map(c => catalogRow(c).then(ms => ms.map(m => ({ ...m, type: m.type || c.type })))));
   const isContinue = (c) => /pick up|left off|continue/i.test(c.name || "");
   const isTop = (c) => /\btop\b/i.test(c.name || "");
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
@@ -229,7 +245,7 @@ async function showHome() {
   const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
 
-  const cwCat = shown.find(isContinue);
+  const cwCat = cats.filter(isContinue);
   if (!hidden.has("cw")) continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
   if (!hidden.has("out")) weekCalendar().then(r => { if (r) slotOut.replaceWith(r); });
   tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
@@ -245,7 +261,8 @@ async function showHome() {
       return metas;
     })),
   ]);
-  hero.start(slideshowFrom([...topLists, ...otherLists]));
+  const own = (await heroList).flat();
+  hero.start(own.length ? own : slideshowFrom([...topLists, ...otherLists]));
 }
 
 /** Continue watching: what you're part-way through (any device), then what's next, as wide cards with episode stills. */
@@ -256,8 +273,8 @@ async function continueRow(cwCat) {
   items.sort((a, b) => (b.p.pausedAt || "").localeCompare(a.p.pausedAt || ""));
   let gone = {};
   try { gone = (await getJson(`${feed()}/progress/dismissed`, 5000)).dismissed || {}; } catch (e) {}
-  if (cwCat) {
-    try { for (const m of await catalogRow(cwCat)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || cwCat.type, m }); seen.add(m.id); } } catch (e) {}
+  for (const c of [].concat(cwCat || [])) {
+    try { for (const m of await catalogRow(c)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || c.type, m }); seen.add(m.id); } } catch (e) {}
   }
   if (!items.length) return null;
   const r = h(`<section class="row fade-in"><h2>Continue watching <small>${items.length}</small></h2><div class="strip"></div></section>`);
@@ -310,21 +327,24 @@ function top10Row(title, metas, onPick) {
 }
 
 /** Streaming services, genres, directors, studios, collections, decades (from TMDB, via the Pi). */
-async function tileRows(hidden = new Set()) {
-  let t;
-  try { t = await getJson(`${feed()}/browse/tiles`, 60000); } catch (e) { return null; }
+async function tileRows(hidden = new Set(), typ = "") {
+  const t = await layout();
   if (!t.groups || !t.groups.length) return null;
   const box = h(`<div></div>`);
   for (const g of t.groups) {
     if (hidden.has("tiles:" + g.title)) continue;
+    const list = g.tiles.filter(x => !typ || !x.types || x.types.includes(typ));
+    if (!list.length) continue;
     const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
-    for (const tile of g.tiles) {
+    for (const tile of list) {
+      if (tile.kind === "cat") tileInfo[tile.id] = tile;
       let inner;
       if (g.style === "logo") inner = `<div class="tile logo" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
       else inner = `<div class="tile art" style="background-image:url('${esc(tile.image || "")}')">${g.style === "studio" && tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       const el = h(inner);
-      el.onclick = () => go("tile", tile.kind, tile.id, tile.title, tile.image || "");
+      const first = typ || (tile.types || ["movie"])[0];
+      el.onclick = () => go("tile", tile.kind, tile.id, tile.title, (g.style === "person" ? "" : tile.image) || "", first);
       $(".strip", r).appendChild(el);
     }
     box.appendChild(r);
@@ -334,8 +354,10 @@ async function tileRows(hidden = new Set()) {
 
 /** The page behind a tile: its titles, Films or Series where both exist. */
 async function showTile(kind, id, title, image, typ) {
-  const both = ["service", "genre", "company"].includes(kind);
-  typ = typ || "movie";
+  const own = kind === "cat";
+  const info = tileInfo[id] || {};
+  const both = own ? (info.types || []).length > 1 : ["service", "genre", "company"].includes(kind);
+  typ = typ || (own && info.types ? info.types[0] : "movie");
   const v = $("#view");
   v.innerHTML = "";
   const head = h(`<header class="tile-head" style="background-image:url('${esc(image)}')"><div class="shade"></div>
@@ -346,14 +368,19 @@ async function showTile(kind, id, title, image, typ) {
   v.append(head, grid, more);
   $(".back", head).onclick = back;
   head.querySelectorAll("[data-t]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][4] = c.dataset.t; showTile(kind, id, title, image, c.dataset.t); });
-  let page = 1, pages = 1;
+  let page = 1, pages = 1, shown = 0;
+  const ids = new Set();
   const load = async () => {
     more.querySelector("button").textContent = "Loading…";
     let r;
-    try { r = await getJson(`${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
+    const url = own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
+    try { r = await getJson(url, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
     pages = r.pages || 1;
-    (r.metas || []).forEach(m => grid.appendChild(card(m, m.type)));
-    more.hidden = page >= pages;
+    const fresh = (r.metas || []).filter(m => !ids.has(m.id));
+    fresh.forEach(m => { ids.add(m.id); grid.appendChild(card(m, m.type || typ)); });
+    shown += (r.metas || []).length;
+    if (own && !grid.children.length) grid.appendChild(h(`<div class="empty">Nothing in this list yet.</div>`));
+    more.hidden = own ? !(r.more && fresh.length) : page >= pages;
     more.querySelector("button").textContent = "More";
   };
   more.querySelector("button").onclick = () => { page++; load(); };
@@ -397,17 +424,21 @@ async function showBrowse(type) {
   const rows = h(`<div class="rows"></div>`);
   v.append(hero.el, rows);
   await loadProgress();
-  const mine = (await catalogs()).filter(c => c.type === type);
+  const { rows: homeRows, hero: heroCats } = await homeCats();
+  const mine = homeRows.filter(c => c.type === type && !/pick up|left off|continue/i.test(c.name || ""));
   const lists = [...mine.map(c => ({ name: c.name || c.id, load: () => catalogRow(c) })),
     { name: "Popular", load: () => getJson(`${CINEMETA}/catalog/${type}/top.json`).then(j => j.metas || []).catch(() => []) },
     { name: "Featured", load: () => getJson(`${CINEMETA}/catalog/${type}/imdbRating.json`).then(j => j.metas || []).catch(() => []) }];
   const slots = lists.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
+  const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
+  tileRows(hiddenRows(), type).then(r => { if (r) slotTiles.replaceWith(r); });
   const results = await Promise.all(lists.map(async (l, i) => {
     const metas = (await l.load()).map(m => ({ ...m, type }));
-    if (metas.length) slots[i].replaceWith(row(l.name, metas, type, hero.pick));
+    if (metas.length) slots[i].replaceWith(/\btop\b/i.test(l.name) ? top10Row(l.name, metas, hero.pick) : row(l.name, metas, type, hero.pick));
     return metas;
   }));
-  hero.start(slideshowFrom(results));
+  const own = (await Promise.all(heroCats.filter(c => c.type === type).map(c => catalogRow(c)))).flat().map(m => ({ ...m, type }));
+  hero.start(own.length ? own : slideshowFrom(results));
 }
 
 // ---------------------------------------------------------------- title page
@@ -794,9 +825,9 @@ function showSettings() {
     </div>`;
   (async () => {
     const list = [{ key: "cw", name: "Continue watching" }];
-    for (const c of await catalogs()) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${c.name || c.id} (${c.type === "movie" ? "films" : "series"})` });
+    for (const c of (await homeCats()).rows) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${c.name || c.id} (${c.type === "movie" ? "films" : "series"})` });
     list.push({ key: "out", name: "Out this week" });
-    try { for (const g of (await getJson(`${feed()}/browse/tiles`, 60000)).groups || []) list.push({ key: "tiles:" + g.title, name: g.title }); } catch (e) {}
+    try { for (const g of (await layout()).groups || []) list.push({ key: "tiles:" + g.title, name: g.title }); } catch (e) {}
     const hid = hiddenRows();
     const box = $("#rowToggles"); if (!box) return;
     box.innerHTML = "";

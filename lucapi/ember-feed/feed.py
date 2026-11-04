@@ -19,7 +19,8 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /wrapped?year= -> your year in watching (Trakt history)
   POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
   GET /picks/<code>/manifest.json -> "Ember picks", the picker as a Stremio addon for Omni and friends
-  GET /browse/tiles, /browse/<kind>/<id>?type=&page= -> TMDB tiles and their titles (the Omni-style home)
+  GET /browse/tiles -> your lists sorted into boxes (tiles), Home rows and the hero list
+  GET /browse/cat/<tile>?type=&skip= -> a tile's titles; /browse/<kind>/<id> -> the old TMDB tiles
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -1633,7 +1634,8 @@ def _top_backdrop(**discover):
         return ""
 
 
-def _build_tiles():
+def _build_tmdb_tiles():
+    """The old TMDB-only tiles: used only if your lists addon can't be reached."""
     groups = []
     # streaming services available in the UK
     try:
@@ -1685,6 +1687,203 @@ def _build_tiles():
                                                                                 "primary_release_date.lte": f"{d + 9}-12-31",
                                                                                 "vote_count.gte": 3000})} for d in DECADES]})
     return {"groups": [g for g in groups if g["tiles"]]}
+
+
+# ------------------------------------------------------------------ your own lists, sorted into boxes
+# Every catalogue in your lists addon is classified by its name. Films and Series catalogues with the same
+# name become one tile (with Films / Series chips); several catalogues can share a tile through MERGE.
+# Whatever isn't a category (For you, Watchlist, Top 20, ...) stays a row on Home.
+
+TILE_ORDER = [("services", "Streaming services", "logo"), ("genres", "Genres", "art"), ("decades", "Decades", "art"),
+              ("people", "Filmmakers", "person"), ("franchises", "Franchises", "art"), ("studios", "Studios", "studio"),
+              ("animation", "Animation studios", "studio"), ("kids", "Kids", "art"), ("acclaim", "Awards & acclaim", "art")]
+HOME_WORDS = re.compile(r"\b(for you|recommend\w*|watchlist|trending|top|popular|pick up|left off|continue|new|releases|hero)\b", re.I)
+SERVICE_NAMES = {"netflix": "Netflix", "prime video": "Amazon Prime Video", "amazon prime": "Amazon Prime Video",
+                 "apple tv+": "Apple TV", "apple tv": "Apple TV", "disney+": "Disney Plus", "hbo max": "HBO Max", "max": "Max",
+                 "hulu": "Hulu", "paramount +": "Paramount Plus", "paramount+": "Paramount Plus", "peacock": "Peacock",
+                 "discovery +": "discovery+", "discovery+": "discovery+", "crunchyroll": "Crunchyroll", "now": "NOW",
+                 "bbc iplayer": "BBC iPlayer", "itvx": "ITVX", "channel 4": "Channel 4", "mubi": "MUBI", "shudder": "Shudder"}
+SERVICE_COLOURS = {"Netflix": "#3A0E0B", "Amazon Prime Video": "#0E2A33", "Apple TV": "#1E1E1E", "Disney Plus": "#0F1A3D",
+                   "HBO Max": "#1A1238", "Max": "#1A1238", "Hulu": "#0E2B1A", "Paramount Plus": "#0B1E3F", "Peacock": "#1B1B1B",
+                   "discovery+": "#0B2238", "Crunchyroll": "#3A1E0B"}
+GENRE_WORDS = {"action", "adventure", "animation", "comedy", "crime", "documentary", "drama", "family", "fantasy", "history",
+               "horror", "music", "musical", "mystery", "romance", "sci-fi", "science fiction", "thriller", "war", "western",
+               "reality", "kids", "talk", "news", "biography", "sport", "superhero", "anime"}
+KIDS_WORDS = re.compile(r"cbeebies|cbbc|cartoon network|nickelodeon|disney kids|disney junior|nick jr|boomerang", re.I)
+ACCLAIM_WORDS = re.compile(r"academy award|oscar|bafta|golden globe|cannes|venice|sundance|berlin|emmy|certified fresh|criterion|imdb top|palme", re.I)
+ANIMATION_STUDIOS = re.compile(r"animation|pixar|ghibli|illumination|aardman|laika|cartoon saloon", re.I)
+STUDIO_WORDS = re.compile(r"studios?\b|pictures|brothers|\bbros\b|lionsgate|miramax|\bmgm\b|^walt disney$|a24|blumhouse|lucasfilm|"
+                          r"paramount pictures|legendary|neon|focus features|amblin|dreamworks|new line|20th century", re.I)
+KNOWN_PEOPLE = {"alfred hitchcock", "christopher nolan", "denis villeneuve", "david fincher", "james cameron", "john carpenter",
+                "martin scorsese", "paul thomas anderson", "quentin tarantino", "ridley scott", "stanley kubrick", "steven spielberg",
+                "coen brothers", "wes anderson", "yorgos lanthimos", "david attenborough", "greta gerwig", "edgar wright"}
+PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
+# Catalogues that should share one tile: tile title -> the catalogue names that go in it.
+MERGE = {"IMDb Top 250": ["IMDb Top Movies", "IMDb Top Shows"], "Certified Fresh": ["100% Certified Fresh Movies"],
+         "Oscar winners": ["Academy Award Winners"]}
+
+
+def _classify(name, tmdb_ok=True):
+    n = name.strip().lower()
+    if n in KNOWN_PEOPLE:
+        return "people"
+    if ACCLAIM_WORDS.search(n):
+        return "acclaim"
+    if HOME_WORDS.search(n):
+        return "home"
+    if n in SERVICE_NAMES:
+        return "services"
+    if re.fullmatch(r"(19|20)\d0s", n):
+        return "decades"
+    if n in GENRE_WORDS:
+        return "genres"
+    if ACCLAIM_WORDS.search(n):
+        return "acclaim"
+    if KIDS_WORDS.search(n):
+        return "kids"
+    if ANIMATION_STUDIOS.search(n):
+        return "animation"
+    if STUDIO_WORDS.search(n):
+        return "studios"
+    if n in KNOWN_PEOPLE:
+        return "people"
+    if tmdb_ok:  # a name we haven't seen: is it a person? (exact match, and well known)
+        try:
+            p = (_tmdb("/search/person", query=name).get("results") or [None])[0]
+            if p and p.get("name", "").lower() == n and p.get("popularity", 0) > 2 and \
+                    p.get("known_for_department") in ("Directing", "Writing", "Production", "Acting"):
+                return "people"
+        except Exception:
+            pass
+    return "franchises"  # what's left is a series of films: 007, Alien, Toy Story...
+
+
+def _slug(s):
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def _addon_json(rest, timeout=15):
+    return json.loads(http_get(CFG["addon_upstream"].rstrip("/") + rest, timeout=timeout))
+
+
+def _cat_metas(c, skip=0):
+    extra = f"/skip={skip}" if skip else ""
+    try:
+        return _addon_json(f"/catalog/{c['type']}/{urllib.parse.quote(c['id'])}{extra}.json").get("metas", [])
+    except Exception:
+        return []
+
+
+def _bg(m):
+    if m.get("background"):
+        return m["background"]
+    return f"https://images.metahub.space/background/medium/{m['id']}/img" if str(m.get("id", "")).startswith("tt") else ""
+
+
+def _service_logos():
+    out = {}
+    for region in ("US", "GB"):
+        try:
+            for x in _tmdb("/watch/providers/movie", watch_region=region).get("results", []):
+                out.setdefault(x.get("provider_name", "").lower(), _img(x.get("logo_path"), "w154"))
+        except Exception:
+            pass
+    return out
+
+
+def _build_tiles():
+    try:
+        man = _addon_json("/manifest.json")
+    except Exception as e:
+        print(f"[ember-feed] tiles: lists addon unreachable ({e}); using TMDB tiles", flush=True)
+        return _build_tmdb_tiles()
+    cats = [c for c in man.get("catalogs", []) if c.get("type") in ("movie", "series")
+            and not any(x.get("isRequired") for x in c.get("extra", []))]
+    merged_into = {src.lower(): title for title, srcs in MERGE.items() for src in srcs}
+    tmdb_ok = bool(CFG.get("tmdb"))
+    home, hero, tiles = [], [], {}
+    for c in cats:
+        name = (c.get("name") or c["id"]).strip()
+        box = _classify(name, tmdb_ok)
+        if name.lower() == "hero":
+            hero.append({"type": c["type"], "id": c["id"]})
+            continue
+        if box == "home":
+            home.append({"type": c["type"], "id": c["id"], "name": name,
+                         "style": "continue" if re.search(r"pick up|left off|continue", name, re.I)
+                         else "top10" if re.search(r"\btop\b", name, re.I) else "row"})
+            continue
+        title = merged_into.get(name.lower(), name)
+        t = tiles.setdefault((box, title), {"kind": "cat", "id": _slug(title), "title": title, "box": box, "cats": {}})
+        t["cats"].setdefault(c["type"], []).append({"type": c["type"], "id": c["id"],
+                                                     "skip": any(x.get("name") == "skip" for x in c.get("extra", []))})
+    # Artwork: the top title of each list (a different one per tile where possible), logos and faces from TMDB.
+    tl = list(tiles.values())
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        firsts = list(ex.map(lambda t: _cat_metas((t["cats"].get("movie") or t["cats"].get("series"))[0])[:12], tl))
+    used = set()
+    for t, metas in zip(tl, firsts):
+        m = next((x for x in metas if x.get("id") not in used and _bg(x)), metas[0] if metas else None)
+        if m:
+            used.add(m.get("id"))
+            t["image"] = _bg(m)
+    logos = _service_logos() if tmdb_ok else {}
+    for t in tl:
+        if t["box"] == "services":
+            pname = SERVICE_NAMES.get(t["title"].lower(), t["title"])
+            t["logo"] = logos.get(pname.lower()) or next((v for k, v in logos.items() if k.startswith(pname.lower())), "")
+            t["colour"] = SERVICE_COLOURS.get(pname, "#1E1A17")
+        elif t["box"] == "people" and tmdb_ok:
+            try:
+                q = PERSON_PHOTO.get(t["title"].lower(), t["title"])
+                p = (_tmdb("/search/person", query=q).get("results") or [None])[0]
+                if p and p.get("profile_path"):
+                    t["image"] = _img(p["profile_path"], "w342")
+            except Exception:
+                pass
+        elif t["box"] in ("studios", "animation") and tmdb_ok:
+            try:
+                res = _tmdb("/search/company", query=t["title"]).get("results", [])
+                co = next((x for x in res if x["name"].lower() == t["title"].lower() and x.get("logo_path")), None) \
+                    or next((x for x in res if x.get("logo_path")), None)
+                if co:
+                    t["logo"] = _img(co["logo_path"], "w300")
+            except Exception:
+                pass
+    groups = []
+    for key, title, style in TILE_ORDER:
+        its = [{k: v for k, v in t.items() if k != "cats"} | {"types": [x for x in ("movie", "series") if x in t["cats"]]}
+               for t in tl if t["box"] == key]
+        if its:
+            groups.append({"title": title, "style": style, "tiles": its})
+    _TILE_CATS.clear()
+    _TILE_CATS.update({t["id"]: t["cats"] for t in tl})
+    return {"groups": groups, "home": home, "hero": hero, "source": "lists"}
+
+
+_TILE_CATS = {}
+
+
+def browse_cat(tid, typ="movie", skip=0):
+    """The titles behind one of your own tiles: its catalogues for that type, merged, without repeats."""
+    if not _TILE_CATS:
+        browse_tiles()
+    cats = _TILE_CATS.get(tid, {}).get("movie" if typ == "movie" else "series", [])
+    if not cats:
+        return {"metas": [], "more": False}
+
+    def build():
+        out, seen, more = [], set(), False
+        for c in cats:
+            if skip and not c["skip"]:
+                continue
+            for m in _cat_metas(c, skip):
+                if m.get("id") not in seen:
+                    seen.add(m.get("id"))
+                    out.append({**m, "type": m.get("type") or c["type"]})
+            more = more or (c["skip"] and len(out) > 0)
+        return {"metas": out, "more": more}
+    return cached(f"browse:cat:{tid}:{typ}:{skip}", 3600, build)
 
 
 def browse_tiles():
@@ -1832,6 +2031,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"dismissed": _dismissed()})
             elif path == "/browse/tiles":
                 self._json(browse_tiles())
+            elif re.fullmatch(r"/browse/cat/[a-z0-9-]+", path):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(browse_cat(path.split("/")[3], (q.get("type") or ["movie"])[0], int((q.get("skip") or [0])[0])))
             elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 _, _, kind, tid = path.split("/")
