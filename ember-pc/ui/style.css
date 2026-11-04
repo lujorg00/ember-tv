@@ -410,3 +410,20 @@ input { font: inherit; color: var(--text); }
 .wbadge:hover i { border-color: var(--accent-ink); background: conic-gradient(var(--accent-ink) 0 50%, transparent 50% 100%); }
 .wbadge.ask { background: #c0392b; color: #fff; }
 .wbadge.busy { opacity: .5; pointer-events: none; }
+
+/* Award tiles: a gold trophy behind the title */
+.tile.brand.award .aw-art { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -44%); height: 80%; width: auto; max-width: 80%; max-height: none;
+  filter: drop-shadow(0 8px 22px rgba(0,0,0,.55)); opacity: .95; pointer-events: none; }
+.tile.brand.award .aw-palme { height: 60%; transform: translate(-50%, -50%); }
+.tile.brand.award .aw-tomato { height: 58%; transform: translate(-50%, -46%); }
+.tile.brand.award .aw-bafta { height: 62%; transform: translate(-50%, -46%); }
+.tile.brand.award .aw-globe { height: 76%; transform: translate(-50%, -44%); }
+.tile.brand.award.long b { font-size: 27px; letter-spacing: 3px; white-space: nowrap; }
+.tile.brand.award.dark small { color: rgba(60,20,0,.8); text-shadow: none; }
+.tile.brand.award.dark b { background: none; color: #a8150a; font-weight: 600; filter: drop-shadow(0 2px 6px rgba(255,255,255,.45)); }
+.tile.brand.award small, .tile.brand.award b { z-index: 1; text-shadow: 0 2px 10px rgba(0,0,0,.6); }
+.tile.brand.award b { filter: drop-shadow(0 3px 10px rgba(0,0,0,.85)); }
+.tile.brand img[src$="apple-tv-plus.svg"] { max-height: 36%; }
+
+.tile.art img.lg-orig, .tiles.studio .tile.art img.lg-orig { opacity: 1; filter: drop-shadow(0 2px 8px #000) drop-shadow(0 0 20px rgba(0,0,0,.65)); }
+.tile.art img.lg-orig { max-height: 52%; }

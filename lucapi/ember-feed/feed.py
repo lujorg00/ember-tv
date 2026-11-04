@@ -1861,6 +1861,8 @@ SERVICE_WIKI = {"netflix": "Netflix", "prime video": "Amazon Prime Video|Prime V
                 "paramount +": "Paramount+", "paramount+": "Paramount+", "peacock": "Peacock (streaming service)",
                 "discovery +": "Discovery+", "discovery+": "Discovery+", "crunchyroll": "Crunchyroll", "now": "Now (Sky)",
                 "bbc iplayer": "BBC iPlayer", "itvx": "ITVX", "channel 4": "Channel 4", "mubi": "Mubi"}
+STUDIO_QUERY = {"walt disney": "Walt Disney Pictures", "warner brothers": "Warner Bros. Pictures",
+                "warner brothers animation": "Warner Bros. Animation", "universal pictures": "Universal Pictures"}
 PERSON_PHOTO = {"coen brothers": "Joel Coen"}  # a pair: show one of them
 # Wikipedia article for a tile whose logo comes from Wikidata (the "logo image" on its entry).
 WIKI_LOGO = {"imdb top 250": "IMDb", "oscar winners": "Academy Awards|Academy of Motion Picture Arts and Sciences",
@@ -1996,8 +1998,12 @@ def _logo_look(data):
         mode = "box"
     elif light > 0.04 and (colour > 0.2 or dark > 0.2):
         mode = "duo"
+    elif colour > 0.25:
+        mode = "colour"   # a coloured logo (Jurassic Park, Toy Story): keep its colours
+    elif sum(lum(p) for p in solid) / n > 0.55:
+        mode = "light"    # already white or pale
     else:
-        mode = "mono"
+        mode = "dark"     # dark and one colour: shown white
     w, h = sm.size
     corners = [sm.getpixel((x, y)) for x, y in ((1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2))]
     edge = ""
@@ -2008,7 +2014,7 @@ def _logo_look(data):
     return mode, edge, out.getvalue()
 
 
-LOGO_VERSION = 2
+LOGO_VERSION = 3
 
 
 def _logo(url):
@@ -2033,7 +2039,7 @@ def _logo(url):
     req = urllib.request.Request(url, headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = r.read()
-    info = {"src": f"/logo/{key}", "mode": "mono", "edge": "", "v": LOGO_VERSION}
+    info = {"src": f"/logo/{key}", "mode": "light", "edge": "", "v": LOGO_VERSION}
     try:
         info["mode"], info["edge"], data = _logo_look(data)
     except Exception as e:
@@ -2123,8 +2129,9 @@ def _build_tiles():
             t["logo"] = _franchise_logo(t["title"], tops.get(t["id"], []))
         elif t["box"] in ("studios", "animation") and tmdb_ok:
             try:
-                res = _tmdb("/search/company", query=t["title"]).get("results", [])
-                co = next((x for x in res if x["name"].lower() == t["title"].lower() and x.get("logo_path")), None) \
+                q = STUDIO_QUERY.get(t["title"].lower(), t["title"])
+                res = _tmdb("/search/company", query=q).get("results", [])
+                co = next((x for x in res if x["name"].lower() == q.lower() and x.get("logo_path")), None) \
                     or next((x for x in res if x.get("logo_path")), None)
                 if co:
                     t["logo"] = _img(co["logo_path"], "w300")
