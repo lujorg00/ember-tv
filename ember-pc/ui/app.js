@@ -59,7 +59,7 @@ async function markTitle(type, id, watched) {
   }
   try {
     const r = await fetch(`${feed()}/progress/watched`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imdb: id, type, watched, episodes }) });
+      body: JSON.stringify({ imdb: id, type, watched, episodes, all: type === "series" }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
   } catch (e) { toast("Couldn't update lucapi: " + e.message); return false; }
   if (watched) watchedMap[id] = "done"; else delete watchedMap[id];
@@ -737,10 +737,10 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   // Marking what you watched before Ember: saved on the Pi and in your Trakt history.
   const isDone = (k) => !!(saved[k] || {}).finished;
   const aired = (e) => !e.released || new Date(e.released) <= new Date();
-  const mark = async (list, watched) => {
+  const mark = async (list, watched, all = false) => {
     try {
       const r = await fetch(`${feed()}/progress/watched`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imdb: id, type, watched, episodes: list.map(e => [e.season, e.episode]) }) });
+        body: JSON.stringify({ imdb: id, type, watched, all, episodes: list.map(e => [e.season, e.episode]) }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
     } catch (err) { toast("Couldn't update lucapi: " + err.message); return false; }
     const keys = type === "series" ? list.map(e => e.season + ":" + e.episode) : [":"];
@@ -793,7 +793,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
         if (await mark(inSeason, !seasonDone)) { toast(seasonDone ? `Season ${season} is unwatched again.` : `Marked season ${season} as watched.`); drawEps(); }
       };
       $("#markShow", epsBox).onclick = (ev) => twice(ev.currentTarget, showDone ? "Click again: unwatch all" : `Click again: mark all ${allAired.length}`, async () => {
-        if (await mark(allAired, !showDone)) { toast(showDone ? `${mm.name} is unwatched again.` : `Marked all of ${mm.name} as watched.`); drawEps(); }
+        if (await mark(allAired, !showDone, true)) { toast(showDone ? `${mm.name} is unwatched again.` : `Marked all of ${mm.name} as watched.`); drawEps(); }
       });
       const grid = $(".ep-grid", epsBox);
       eps.filter(e => e.season === season).forEach(e => {

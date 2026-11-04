@@ -817,6 +817,11 @@ def _watched_status():
                 out.setdefault(imdb, "partial")
         else:
             out.setdefault(imdb, "partial")
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS watched_all (imdb TEXT PRIMARY KEY, at INTEGER)")
+        marked_all = dict(db().execute("SELECT imdb, at FROM watched_all").fetchall())
+    for i in marked_all:
+        out[i] = "done"
     if all(trakt_creds()):
         try:
             for it in _trakt("/sync/watched/movies"):
@@ -830,7 +835,12 @@ def _watched_status():
                     continue
                 seen = sum(len(se.get("episodes") or []) for se in (it.get("seasons") or []) if (se.get("number") or 0) > 0)
                 aired = show.get("aired_episodes") or 0
-                out[i] = "done" if aired and seen >= aired else "partial"
+                if aired and seen >= aired:
+                    out[i] = "done"
+                elif i in marked_all and time.time() - marked_all[i] < 6 * 3600:
+                    out[i] = "done"  # just marked: Trakt may still be catching up
+                else:
+                    out[i] = "partial"
         except Exception as e:
             print(f"[ember-feed] watched list from Trakt failed: {e}", flush=True)
     return out
@@ -846,12 +856,14 @@ def watched_status():
 def mark_watched(body):
     """Mark a film, or any episodes of a show (one, a season, the lot), as watched or not - for things you saw
     before Ember. Saved on the Pi (so Ember skips them) and in your Trakt history (so Omni, Odin and Up Next agree).
-    body: {"imdb": "tt..", "type": "movie"|"series", "episodes": [[season, episode], ...], "watched": true|false}"""
+    body: {"imdb": "tt..", "type": "movie"|"series", "episodes": [[season, episode], ...], "watched": true|false,
+           "all": true when it's the whole show (Trakt then marks every episode on its own list)}"""
     imdb = str(body.get("imdb", ""))
     if not (imdb.startswith("tt") and imdb[2:].isdigit()):
         raise ValueError("imdb must look like tt1234567")
     typ = "series" if body.get("type") == "series" else "movie"
     watched = body.get("watched", True) is not False
+    whole = bool(body.get("all"))
     eps = []
     if typ == "series":
         for pair in (body.get("episodes") or [])[:3000]:
@@ -873,6 +885,13 @@ def mark_watched(body):
         with _db_lock:
             db().executemany("DELETE FROM positions WHERE key=?", [(k,) for k in keys])
             db().commit()
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS watched_all (imdb TEXT PRIMARY KEY, at INTEGER)")
+        if typ == "series" and whole and watched:
+            db().execute("INSERT OR REPLACE INTO watched_all VALUES (?, ?)", (imdb, now))
+        elif typ == "series" and (not watched or not whole):
+            db().execute("DELETE FROM watched_all WHERE imdb=?", (imdb,))
+        db().commit()
     with _cache_lock:
         _cache.pop("progress", None)
         _cache.pop("next:" + imdb, None)
@@ -880,7 +899,9 @@ def mark_watched(body):
 
     def to_trakt():
         try:
-            if typ == "series":
+            if typ == "series" and whole:
+                payload = {"shows": [{"ids": {"imdb": imdb}}]}  # the whole show, by Trakt's own episode list
+            elif typ == "series":
                 seasons = {}
                 for s, e in eps:
                     seasons.setdefault(s, []).append({"number": e})
@@ -889,7 +910,9 @@ def mark_watched(body):
             else:
                 payload = {"movies": [{"ids": {"imdb": imdb}}]}
             _trakt("/sync/history" if watched else "/sync/history/remove", payload)
-            print(f"[ember-feed] Trakt: {imdb} {len(keys)} item(s) marked {'watched' if watched else 'unwatched'}", flush=True)
+            with _cache_lock:
+                _cache.pop("watched", None)  # look again now Trakt has it
+            print(f"[ember-feed] Trakt: {imdb} {'whole show' if whole else str(len(keys)) + ' item(s)'} marked {'watched' if watched else 'unwatched'}", flush=True)
         except Exception as e:
             print(f"[ember-feed] Trakt mark {'watched' if watched else 'unwatched'} failed: {e}", flush=True)
     if all(trakt_creds()):
