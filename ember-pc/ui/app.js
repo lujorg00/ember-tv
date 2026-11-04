@@ -43,8 +43,50 @@ async function loadWatched() {
   if (Date.now() - watchedAt < 120e3) return;
   try { watchedMap = (await getJson(`${feed()}/watched`, 8000)).items || {}; watchedAt = Date.now(); } catch (e) {}
 }
-const badge = (id) => watchedMap[id] === "done" ? `<span class="wbadge done" title="Watched">✓</span>`
-  : watchedMap[id] === "partial" ? `<span class="wbadge part" title="Started"><i></i></span>` : "";
+const badgeHtml = (id) => watchedMap[id] === "done" ? `✓` : watchedMap[id] === "partial" ? `<i></i>` : `✓`;
+const badgeClass = (id) => watchedMap[id] === "done" ? "done" : watchedMap[id] === "partial" ? "part" : "add";
+const badgeTitle = (id) => watchedMap[id] === "done" ? "Watched (click to undo)" : watchedMap[id] === "partial" ? "Started (click to mark it all watched)" : "Mark as watched";
+const badge = (id) => `<button class="wbadge ${badgeClass(id)}" title="${badgeTitle(id)}">${badgeHtml(id)}</button>`;
+
+/** Marks a whole film or show watched (or not) from its poster: on the Pi and in Trakt. */
+async function markTitle(type, id, watched) {
+  let episodes = [];
+  if (type === "series") {
+    const m = await meta("series", id);
+    const now = new Date();
+    episodes = (m.videos || []).filter(v => v.season > 0 && (!v.released || new Date(v.released) <= now)).map(v => [v.season, v.episode]);
+    if (!episodes.length) { toast("Couldn't find its episodes to mark."); return false; }
+  }
+  try {
+    const r = await fetch(`${feed()}/progress/watched`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imdb: id, type, watched, episodes }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
+  } catch (e) { toast("Couldn't update lucapi: " + e.message); return false; }
+  if (watched) watchedMap[id] = "done"; else delete watchedMap[id];
+  if (watched) delete progress[id];
+  return true;
+}
+// One click handler for every badge on every page.
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest(".wbadge");
+  if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  const holder = b.closest("[data-wid]");
+  if (!holder) return;
+  const id = holder.dataset.wid, type = holder.dataset.wtype, name = holder.dataset.wname || "it";
+  const undo = watchedMap[id] === "done";
+  if (undo && type === "series" && !b.dataset.armed) { // a whole show: ask with a second click
+    b.dataset.armed = "1"; b.classList.add("ask"); b.title = "Click again to mark it unwatched";
+    setTimeout(() => { delete b.dataset.armed; b.classList.remove("ask"); }, 4000);
+    return;
+  }
+  b.classList.add("busy");
+  if (await markTitle(type, id, !undo)) {
+    document.querySelectorAll(`[data-wid="${id}"] .wbadge`).forEach(x => { x.className = "wbadge " + badgeClass(id); x.innerHTML = badgeHtml(id); x.title = badgeTitle(id); });
+    toast(undo ? `${name} is unwatched again.` : `Marked ${name} as watched.`);
+  }
+  b.classList.remove("busy");
+}, true);
 async function loadProgress() {
   const w = loadWatched();
   try { progress = (await getJson(`${feed()}/progress`, 6000)).items || {}; } catch (e) { progress = progress || {}; }
@@ -122,7 +164,7 @@ document.addEventListener("keydown", e => {
 
 function card(m, type) {
   const p = progress[m.id];
-  const el = h(`<div class="poster" title="${esc(m.name)}" style="background-image:url('${esc(poster(m))}')">
+  const el = h(`<div class="poster" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(poster(m))}')">
     ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}
     ${p ? `<div class="bar"><i style="width:${Math.max(3, Math.min(100, p.progress))}%"></i></div>` : ""}</div>`);
   el.onclick = () => go("title", m.type || type, m.id, m);
@@ -357,7 +399,7 @@ function top10Row(title, metas, onPick) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 10).forEach((m, i) => {
-    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
+    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
     el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });

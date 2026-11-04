@@ -401,3 +401,12 @@ input { font: inherit; color: var(--text); }
 .tile.director .ph { position: absolute; left: 0; top: 0; bottom: 0; width: 52%; background: center 18%/cover; filter: grayscale(1) contrast(1.05);
   -webkit-mask-image: linear-gradient(90deg, #000 60%, transparent); mask-image: linear-gradient(90deg, #000 60%, transparent); }
 .tile.director b { position: relative; margin-left: 50%; padding-right: 12px; font: 700 22px/1.15 "Segoe UI Variable Display", "Segoe UI", sans-serif; color: #EDEDED; }
+
+/* The badge as a button: empty box on hover for things you haven't watched; click to mark */
+.wbadge { cursor: pointer; padding: 0; color: inherit; font: inherit; transition: opacity .15s, background .15s, transform .12s; }
+.wbadge.add { opacity: 0; color: rgba(255,255,255,.85); font-size: 14px; font-weight: 800; line-height: 1; }
+.poster:hover .wbadge.add, .t10-art:hover .wbadge.add { opacity: 1; }
+.wbadge:hover { background: rgba(240,160,75,.9); color: var(--accent-ink); transform: scale(1.1); border-color: transparent; }
+.wbadge:hover i { border-color: var(--accent-ink); background: conic-gradient(var(--accent-ink) 0 50%, transparent 50% 100%); }
+.wbadge.ask { background: #c0392b; color: #fff; }
+.wbadge.busy { opacity: .5; pointer-events: none; }
