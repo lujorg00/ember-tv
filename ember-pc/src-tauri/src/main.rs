@@ -75,6 +75,7 @@ mod layer {
             let ex = GetWindowLongPtrW(v, GWL_EXSTYLE);
             SetWindowLongPtrW(v, GWL_EXSTYLE, (ex & !(WS_EX_APPWINDOW as isize)) | WS_EX_TOOLWINDOW as isize);
             fit(video, parent);
+            BringWindowToTop(v);
             SetForegroundWindow(v);
         }
     }
@@ -214,7 +215,9 @@ async fn play(
                 break;
             }
             #[cfg(windows)]
-            if embed && !attached && tries < 80 {
+            // Check for the whole of playback, not just at the start: mpv can rebuild its window (when the video
+            // starts, or the stream changes), and a new one that isn't attached would sit behind Ember.
+            if embed {
                 let v = layer::find(pid);
                 if v != 0 {
                     p2.0.lock().unwrap().layer = v;
