@@ -19,6 +19,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /wrapped?year= -> your year in watching (Trakt history)
   POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
   GET /picks/<code>/manifest.json -> "Ember picks", the picker as a Stremio addon for Omni and friends
+  GET /browse/tiles, /browse/<kind>/<id>?type=&page= -> TMDB tiles and their titles (the Omni-style home)
   GET /health       -> "ok"
 
 Config lives in config.json next to this file (see config.example.json).
@@ -1486,6 +1487,211 @@ def start_jellyfin_proxy():
     print(f"[ember-feed] Jellyfin pass-through on :{port} -> {urllib.parse.urlparse(JF['upstream']).netloc}", flush=True)
 
 
+# ------------------------------------------------------------------ browse: TMDB tiles and lists (services, genres,
+# directors, studios, collections, decades) for the Omni-style home. Uses your addon's TMDB key unless config.json has
+# "tmdb": {"api_key": ...} (a v3 key) or {"token": ...} (a v4 read token).
+
+TMDB = "https://api.themoviedb.org/3"
+TMDB_IMG = "https://image.tmdb.org/t/p/"
+_tmdb_cred = {}
+
+
+def _tmdb_creds():
+    if _tmdb_cred:
+        return _tmdb_cred
+    t = CFG.get("tmdb", {})
+    if t.get("api_key") or t.get("token"):
+        _tmdb_cred.update(t)
+        return _tmdb_cred
+    root = Path(CFG.get("trakt", {}).get("addon_dir", str(Path.home() / "lucaddon")))
+    for env in [root / ".env"] + list(root.glob("*/.env")):
+        if not env.exists():
+            continue
+        for line in env.read_text(errors="ignore").splitlines():
+            k, _, v = line.partition("=")
+            k, v = k.strip().upper(), v.strip().strip("'\"")
+            if "TMDB" in k and v:
+                if v.startswith("eyJ"):
+                    _tmdb_cred.setdefault("token", v)  # v4 read access token
+                elif re.fullmatch(r"[0-9a-f]{32}", v):
+                    _tmdb_cred.setdefault("api_key", v)
+    return _tmdb_cred
+
+
+def _tmdb(path, **params):
+    c = _tmdb_creds()
+    if not c:
+        raise RuntimeError("no TMDB key found (add \"tmdb\": {\"api_key\": ...} to config.json)")
+    params.setdefault("language", "en-GB")
+    if c.get("api_key"):
+        params["api_key"] = c["api_key"]
+    url = f"{TMDB}{path}?{urllib.parse.urlencode(params)}"
+    headers = {"User-Agent": "ember-feed/1.0", "Accept": "application/json"}
+    if not c.get("api_key"):
+        headers["Authorization"] = "Bearer " + c["token"]
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+
+def _img(path, size="w780"):
+    return f"{TMDB_IMG}{size}{path}" if path else ""
+
+
+def _imdb_for(kind, tmdb_id):
+    """TMDB id -> IMDb id (what Ember, Stremio and AIOStreams use). Remembered forever."""
+    key = f"{kind}:{tmdb_id}"
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS tmdb_imdb (k TEXT PRIMARY KEY, imdb TEXT)")
+        r = db().execute("SELECT imdb FROM tmdb_imdb WHERE k=?", (key,)).fetchone()
+    if r:
+        return r[0]
+    try:
+        imdb = (_tmdb(f"/{kind}/{tmdb_id}/external_ids") or {}).get("imdb_id") or ""
+    except Exception:
+        return None  # try again another time
+    with _db_lock:
+        db().execute("INSERT OR REPLACE INTO tmdb_imdb VALUES (?, ?)", (key, imdb))
+        db().commit()
+    return imdb
+
+
+def _to_metas(results, kind):
+    """TMDB results -> Ember metas with IMDb ids (anything without one is left out)."""
+    items = [r for r in results if r.get("id")][:40]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        ids = list(ex.map(lambda r: _imdb_for(kind, r["id"]), items))
+    out = []
+    for r, imdb in zip(items, ids):
+        if not imdb or not imdb.startswith("tt"):
+            continue
+        date = r.get("release_date") or r.get("first_air_date") or ""
+        out.append({"id": imdb, "type": "movie" if kind == "movie" else "series", "name": r.get("title") or r.get("name") or "",
+                    "poster": _img(r.get("poster_path"), "w342"), "background": _img(r.get("backdrop_path"), "w1280"),
+                    "releaseInfo": date[:4], "imdbRating": f"{r['vote_average']:.1f}" if r.get("vote_average") else "",
+                    "description": r.get("overview") or ""})
+    return out
+
+
+GENRES = {"movie": [("Action", 28), ("Comedy", 35), ("Drama", 18), ("Sci-Fi", 878), ("Thriller", 53), ("Horror", 27),
+                    ("Crime", 80), ("Romance", 10749), ("Animation", 16), ("Documentary", 99), ("Fantasy", 14), ("War", 10752)],
+          "tv": [("Action", 10759), ("Comedy", 35), ("Drama", 18), ("Sci-Fi", 10765), ("Crime", 80), ("Mystery", 9648),
+                 ("Animation", 16), ("Documentary", 99), ("Reality", 10764)]}
+SERVICES = [("Netflix", "#3A0E0B"), ("Disney Plus", "#0F1A3D"), ("Amazon Prime Video", "#0E2A33"), ("Apple TV", "#1E1E1E"),
+            ("BBC iPlayer", "#1E1030"), ("ITVX", "#0F2A2A"), ("Channel 4", "#1B1B2E"), ("NOW", "#0D2B22"), ("Paramount Plus", "#0B1E3F")]
+DIRECTORS = ["Denis Villeneuve", "Christopher Nolan", "Quentin Tarantino", "Greta Gerwig", "David Fincher", "Martin Scorsese",
+             "Steven Spielberg", "Edgar Wright", "Ridley Scott", "Wes Anderson"]
+STUDIOS = ["Marvel Studios", "DC Studios", "Pixar", "Walt Disney Animation Studios", "Studio Ghibli", "A24", "Lucasfilm", "Blumhouse Productions"]
+COLLECTIONS = ["Star Wars Collection", "Harry Potter Collection", "The Lord of the Rings Collection", "James Bond Collection",
+               "Mission: Impossible Collection", "The Dark Knight Collection", "Jurassic Park Collection", "Toy Story Collection",
+               "Indiana Jones Collection", "Fast & Furious Collection"]
+DECADES = [2020, 2010, 2000, 1990, 1980, 1970]
+
+
+def _top_backdrop(**discover):
+    try:
+        r = _tmdb("/discover/movie", sort_by="popularity.desc", **discover).get("results", [])
+        return _img(next((x["backdrop_path"] for x in r if x.get("backdrop_path")), None))
+    except Exception:
+        return ""
+
+
+def _build_tiles():
+    groups = []
+    # streaming services available in the UK
+    try:
+        provs = _tmdb("/watch/providers/movie", watch_region="GB").get("results", [])
+        tiles = []
+        for name, colour in SERVICES:
+            p = next((x for x in provs if x.get("provider_name", "").lower() == name.lower()), None) \
+                or next((x for x in provs if x.get("provider_name", "").lower().startswith(name.lower())), None)
+            if p:
+                tiles.append({"kind": "service", "id": p["provider_id"], "title": name.replace(" Plus", "+").replace("Amazon ", ""),
+                              "logo": _img(p.get("logo_path"), "w154"), "colour": colour})
+        groups.append({"title": "Streaming services", "style": "logo", "tiles": tiles})
+    except Exception as e:
+        print(f"[ember-feed] tiles: services failed: {e}", flush=True)
+    groups.append({"title": "Genres", "style": "art", "tiles": [
+        {"kind": "genre", "id": gid, "title": name, "image": _top_backdrop(with_genres=gid)} for name, gid in GENRES["movie"][:10]]})
+    people = []
+    for name in DIRECTORS:
+        try:
+            p = (_tmdb("/search/person", query=name).get("results") or [None])[0]
+            if p:
+                people.append({"kind": "person", "id": p["id"], "title": p["name"], "image": _img(p.get("profile_path"), "w342")})
+        except Exception:
+            pass
+    groups.append({"title": "Directors", "style": "person", "tiles": people})
+    studios = []
+    for name in STUDIOS:
+        try:
+            c = next((x for x in _tmdb("/search/company", query=name).get("results", []) if x["name"].lower() == name.lower()),
+                     None) or (_tmdb("/search/company", query=name).get("results") or [None])[0]
+            if c:
+                studios.append({"kind": "company", "id": c["id"], "title": name.replace(" Productions", ""),
+                                "logo": _img(c.get("logo_path"), "w300"), "image": _top_backdrop(with_companies=c["id"])})
+        except Exception:
+            pass
+    groups.append({"title": "Studios", "style": "studio", "tiles": studios})
+    cols = []
+    for name in COLLECTIONS:
+        try:
+            c = (_tmdb("/search/collection", query=name).get("results") or [None])[0]
+            if c:
+                cols.append({"kind": "collection", "id": c["id"], "title": c["name"].replace(" Collection", ""),
+                             "image": _img(c.get("backdrop_path"))})
+        except Exception:
+            pass
+    groups.append({"title": "Collections", "style": "art", "tiles": cols})
+    groups.append({"title": "By decade", "style": "art", "tiles": [
+        {"kind": "decade", "id": d, "title": f"{d}s", "image": _top_backdrop(**{"primary_release_date.gte": f"{d}-01-01",
+                                                                                "primary_release_date.lte": f"{d + 9}-12-31",
+                                                                                "vote_count.gte": 3000})} for d in DECADES]})
+    return {"groups": [g for g in groups if g["tiles"]]}
+
+
+def browse_tiles():
+    try:
+        return cached("browse:tiles", 24 * 3600, _build_tiles)
+    except Exception as e:
+        return {"groups": [], "error": str(e)}
+
+
+def browse_list(kind, tid, typ="movie", page=1):
+    """The titles behind a tile. typ: movie or series."""
+    k = "movie" if typ == "movie" else "tv"
+
+    def build():
+        if kind == "service":
+            r = _tmdb(f"/discover/{k}", with_watch_providers=tid, watch_region="GB", sort_by="popularity.desc", page=page)
+            return {"title": "", "metas": _to_metas(r.get("results", []), k), "pages": r.get("total_pages", 1)}
+        if kind == "genre":
+            gid = int(tid)
+            if k == "tv":  # film genre -> the closest TV genre
+                gid = {28: 10759, 878: 10765, 14: 10765, 53: 9648, 27: 9648, 10752: 10768}.get(gid, gid)
+            r = _tmdb(f"/discover/{k}", with_genres=gid, sort_by="popularity.desc", page=page, **{"vote_count.gte": 50})
+            return {"title": "", "metas": _to_metas(r.get("results", []), k), "pages": r.get("total_pages", 1)}
+        if kind == "company":
+            r = _tmdb(f"/discover/{k}", with_companies=tid, sort_by="popularity.desc", page=page)
+            return {"title": "", "metas": _to_metas(r.get("results", []), k), "pages": r.get("total_pages", 1)}
+        if kind == "decade":
+            d = int(tid)
+            r = _tmdb("/discover/movie", sort_by="vote_count.desc", page=page, **{"primary_release_date.gte": f"{d}-01-01",
+                                                                               "primary_release_date.lte": f"{d + 9}-12-31"})
+            return {"title": f"{d}s", "metas": _to_metas(r.get("results", []), "movie"), "pages": r.get("total_pages", 1)}
+        if kind == "person":
+            cr = _tmdb(f"/person/{tid}/movie_credits")
+            films = [c for c in cr.get("crew", []) if c.get("job") == "Director"]
+            films.sort(key=lambda c: c.get("release_date") or "", reverse=True)
+            return {"title": "", "metas": _to_metas(films, "movie"), "pages": 1}
+        if kind == "collection":
+            c = _tmdb(f"/collection/{tid}")
+            parts = sorted(c.get("parts", []), key=lambda x: x.get("release_date") or "9999")
+            return {"title": c.get("name", ""), "metas": _to_metas(parts, "movie"), "pages": 1, "overview": c.get("overview", "")}
+        raise ValueError("unknown tile kind")
+    return cached(f"browse:{kind}:{tid}:{k}:{page}", 6 * 3600, build)
+
+
 # ------------------------------------------------------------------ HTTP
 
 
@@ -1583,6 +1789,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
             elif path == "/jellyfin/summary":
                 self._json(jellyfin_summary())
+            elif path == "/browse/tiles":
+                self._json(browse_tiles())
+            elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                _, _, kind, tid = path.split("/")
+                self._json(browse_list(kind, tid, (q.get("type") or ["movie"])[0], int((q.get("page") or [1])[0])))
             elif path == "/upcoming":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(upcoming(days=int((q.get("days") or [7])[0])))

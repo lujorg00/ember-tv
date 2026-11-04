@@ -87,7 +87,7 @@ function go(page, ...args) {
   document.querySelectorAll(".nav").forEach(b => b.classList.toggle("on", b.dataset.page === page));
   navStack.push([page, args]);
   if (navStack.length > 30) navStack.shift();
-  const fn = page === "title" ? showTitle : pages[page];
+  const fn = page === "title" ? showTitle : page === "tile" ? showTile : pages[page];
   $("#view").scrollTop = 0;
   fn(...args);
 }
@@ -214,14 +214,133 @@ async function showHome() {
   await loadProgress();
   const cats = await catalogs();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
-  const slots = cats.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
-  outThisWeek().then(r => { if (r) (slots[1] || slots[0]).before(r); });
-  const results = await Promise.all(cats.map(async (c, i) => {
-    const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
-    if (metas.length) slots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
-    return metas;
-  }));
-  hero.start(slideshowFrom(results));
+  const isContinue = (c) => /pick up|left off|continue/i.test(c.name || "");
+  const isTop = (c) => /\btop\b/i.test(c.name || "");
+  // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
+  const slotCW = document.createElement("div"); rows.appendChild(slotCW);
+  const tops = cats.filter(isTop), others = cats.filter(c => !isTop(c) && !isContinue(c));
+  const topSlots = tops.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
+  const slotOut = document.createElement("div"); rows.appendChild(slotOut);
+  const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
+  const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
+
+  const cwCat = cats.find(isContinue);
+  continueRow(cwCat).then(r => { if (r) slotCW.replaceWith(r); });
+  outThisWeek().then(r => { if (r) slotOut.replaceWith(r); });
+  tileRows().then(r => { if (r) slotTiles.replaceWith(r); });
+  const [topLists, otherLists] = await Promise.all([
+    Promise.all(tops.map(async (c, i) => {
+      const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
+      if (metas.length) topSlots[i].replaceWith(top10Row(homeRowName(c.name || c.id, c.type), metas, hero.pick));
+      return metas;
+    })),
+    Promise.all(others.map(async (c, i) => {
+      const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
+      if (metas.length) otherSlots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
+      return metas;
+    })),
+  ]);
+  hero.start(slideshowFrom([...topLists, ...otherLists]));
+}
+
+/** Continue watching: what you're part-way through (any device), then what's next, as wide cards with episode stills. */
+async function continueRow(cwCat) {
+  const items = [];
+  const seen = new Set();
+  for (const [id, p] of Object.entries(progress)) { items.push({ id, type: p.type, p }); seen.add(id); }
+  items.sort((a, b) => (b.p.pausedAt || "").localeCompare(a.p.pausedAt || ""));
+  if (cwCat) {
+    try { for (const m of await catalogRow(cwCat)) if (!seen.has(m.id)) { items.push({ id: m.id, type: m.type || cwCat.type, m }); seen.add(m.id); } } catch (e) {}
+  }
+  if (!items.length) return null;
+  const r = h(`<section class="row fade-in"><h2>Continue watching <small>${items.length}</small></h2><div class="strip"></div></section>`);
+  const strip = $(".strip", r);
+  for (const it of items.slice(0, 20)) {
+    const el = h(`<div class="cw"><div class="cw-art"><div class="cw-label"></div></div><div class="cw-name"></div></div>`);
+    strip.appendChild(el);
+    (async () => {
+      const full = { ...(it.m || {}), ...(await meta(it.type, it.id)) };
+      $(".cw-name", el).textContent = full.name || "";
+      let season = it.p && it.p.season, episode = it.p && it.p.episode, label = "";
+      if (it.p) {
+        const left = it.p.duration ? Math.max(1, Math.round((it.p.duration - it.p.position) / 60)) : 0;
+        label = `▶ ${it.type === "series" && season ? `S${season} · E${episode}` : "Resume"}${left && left <= 10 ? ` · ${left}m left` : ""}`;
+        el.querySelector(".cw-art").insertAdjacentHTML("beforeend", `<div class="bar"><i style="width:${Math.max(3, Math.min(100, it.p.progress))}%"></i></div>`);
+      } else if (it.type === "series") {
+        try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
+      }
+      $(".cw-label", el).textContent = label;
+      const ep = season && (full.videos || []).find(x => x.season === season && x.episode === episode);
+      const art = (ep && ep.thumbnail) || backdrop(full);
+      if (art) $(".cw-art", el).style.backgroundImage = `url('${art}')`;
+      el.onclick = () => go("title", it.type, it.id, full, { autoplay: true });
+    })();
+  }
+  return r;
+}
+
+/** Top 10: big rank numbers beside wide artwork. */
+function top10Row(title, metas, onPick) {
+  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
+  metas.slice(0, 10).forEach((m, i) => {
+    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span></div></div>`);
+    el.onclick = () => onPick ? onPick(m) : go("title", m.type, m.id, m);
+    el.ondblclick = () => go("title", m.type, m.id, m);
+    $(".strip", r).appendChild(el);
+  });
+  return r;
+}
+
+/** Streaming services, genres, directors, studios, collections, decades (from TMDB, via the Pi). */
+async function tileRows() {
+  let t;
+  try { t = await getJson(`${feed()}/browse/tiles`, 60000); } catch (e) { return null; }
+  if (!t.groups || !t.groups.length) return null;
+  const box = h(`<div></div>`);
+  for (const g of t.groups) {
+    const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
+    for (const tile of g.tiles) {
+      let inner;
+      if (g.style === "logo") inner = `<div class="tile logo" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
+      else inner = `<div class="tile art" style="background-image:url('${esc(tile.image || "")}')">${g.style === "studio" && tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
+      const el = h(inner);
+      el.onclick = () => go("tile", tile.kind, tile.id, tile.title, tile.image || "");
+      $(".strip", r).appendChild(el);
+    }
+    box.appendChild(r);
+  }
+  return box;
+}
+
+/** The page behind a tile: its titles, Films or Series where both exist. */
+async function showTile(kind, id, title, image, typ) {
+  const both = ["service", "genre", "company"].includes(kind);
+  typ = typ || "movie";
+  const v = $("#view");
+  v.innerHTML = "";
+  const head = h(`<header class="tile-head" style="background-image:url('${esc(image)}')"><div class="shade"></div>
+    <button class="back">‹ Back</button><h1>${esc(title)}</h1>
+    ${both ? `<div class="chips"><span class="chip btn-chip ${typ === "movie" ? "on" : ""}" data-t="movie">Films</span><span class="chip btn-chip ${typ === "series" ? "on" : ""}" data-t="series">Series</span></div>` : ""}</header>`);
+  const grid = h(`<div class="grid fade-in"></div>`);
+  const more = h(`<div class="btns" style="padding:0 48px 60px"><button class="btn">More</button></div>`);
+  v.append(head, grid, more);
+  $(".back", head).onclick = back;
+  head.querySelectorAll("[data-t]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][4] = c.dataset.t; showTile(kind, id, title, image, c.dataset.t); });
+  let page = 1, pages = 1;
+  const load = async () => {
+    more.querySelector("button").textContent = "Loading…";
+    let r;
+    try { r = await getJson(`${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
+    pages = r.pages || 1;
+    (r.metas || []).forEach(m => grid.appendChild(card(m, m.type)));
+    more.hidden = page >= pages;
+    more.querySelector("button").textContent = "More";
+  };
+  more.querySelector("button").onclick = () => { page++; load(); };
+  await loadProgress();
+  load();
 }
 
 // ---------------------------------------------------------------- search
