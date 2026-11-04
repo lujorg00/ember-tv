@@ -8,7 +8,7 @@ local mp = require "mp"
 local msg = require "mp.msg"
 local options = require "mp.options"
 
-local opts = { next = false, accent = "F0A04B" }
+local opts = { next = false, accent = "F0A04B", statefile = "" }
 options.read_options(opts, "ember_osc")
 
 local ICON, FONT = "modernz-icons", "Segoe UI"
@@ -215,10 +215,28 @@ local function tracks(kind)
     return list
 end
 
+-- Subtitle size: chosen in the panel, remembered between plays (in Ember's own folder).
+local SUB_SIZES = { { "S", 0.8 }, { "M", 1.0 }, { "L", 1.25 }, { "XL", 1.5 } }
+local function load_sub_size()
+    if opts.statefile == "" then return end
+    local f = io.open(opts.statefile, "r")
+    if not f then return end
+    local v = tonumber((f:read("*l") or ""))
+    f:close()
+    if v and v > 0.3 and v < 3 then mp.set_property_number("sub-scale", v) end
+end
+local function save_sub_size(v)
+    mp.set_property_number("sub-scale", v)
+    if opts.statefile == "" then return end
+    local f = io.open(opts.statefile, "w")
+    if f then f:write(tostring(v)); f:close() end
+end
+load_sub_size()
+
 -- The Audio & Subtitles panel: opens above the controls, bottom right.
 local function panel_box()
     local n = math.max(#tracks("audio"), #tracks("sub") + 1)
-    local pw, ph = 540 * S, math.min(H - 300 * S, 430 * S, (58 + 38 * n + 36) * S)
+    local pw, ph = 540 * S, math.min(H - 300 * S, 500 * S, (58 + 38 * n + 36 + 70) * S)
     return W - 40 * S - pw, H - 128 * S - ph, pw, ph
 end
 local function draw_panel()
@@ -233,7 +251,7 @@ local function draw_panel()
         if kind == "sub" then items[1] = { id = "no", label = "Off", selected = not mp.get_property_native("sid") } end
         for _, t in ipairs(tracks(kind)) do items[#items + 1] = { id = t.id, label = label(t), selected = t.selected } end
         local top = py + 58 * S
-        local fit = math.floor((py + ph - 30 * S - top) / row)
+        local fit = math.floor((py + ph - 100 * S - top) / row)
         scroll[kind] = math.max(0, math.min(scroll[kind], #items - fit))
         for k = 1, math.min(fit, #items - scroll[kind]) do
             local it = items[k + scroll[kind]]
@@ -248,8 +266,24 @@ local function draw_panel()
             end)
         end
         if #items > fit then
-            text(x, py + ph - 12 * S, 1, 14 * S, string.format("Scroll for more  ·  %d", #items), { c = "8A8A8A", shadow = false })
+            text(x, py + ph - 82 * S, 1, 14 * S, string.format("Scroll for more  ·  %d", #items), { c = "8A8A8A", shadow = false })
         end
+    end
+    -- Text size, along the bottom of the Subtitles side
+    local sx = px + colw + 22 * S
+    local sy = py + ph - 44 * S
+    rrect(px + 18 * S, sy - 30 * S, pw - 36 * S, 1 * S, 0, "FFFFFF", "D0")
+    text(sx, sy, 4, 15 * S, "Text size", { c = "B0B0B0", shadow = false })
+    local cur = mp.get_property_number("sub-scale", 1)
+    local bx = sx + 78 * S
+    for _, z in ipairs(SUB_SIZES) do
+        local w = 36 * S
+        local on = math.abs(cur - z[2]) < 0.01
+        local hov = over(bx, sy - 15 * S, bx + w, sy + 15 * S)
+        rrect(bx, sy - 15 * S, w, 30 * S, 8 * S, on and ACCENT or "FFFFFF", on and "00" or (hov and "C8" or "E4"))
+        text(bx + w / 2, sy, 5, 14 * S, z[1], { bold = true, c = on and "1A0F08" or "FFFFFF", shadow = false })
+        hit(bx, sy - 15 * S, bx + w, sy + 15 * S, function() save_sub_size(z[2]) end)
+        bx = bx + w + 6 * S
     end
 end
 

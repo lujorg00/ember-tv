@@ -165,7 +165,7 @@ async fn play(
         .arg(format!("--script={}", plain(&script)))
         .arg(format!("--script={}", plain(&controls)))
         .arg("--load-scripts=no") // only Ember's own scripts (its controls replace ModernZ)
-        .arg(format!("--script-opts={}", opts))
+        .arg(format!("--script-opts={},ember_osc-statefile={}", opts, plain(&logdir.join("subtitle-size.txt"))))
         .arg(format!("--log-file={}", logfile.display()))
         .arg("--msg-level=all=warn,ember=v,ember_osc=v")
         .arg("--force-window=immediate")
