@@ -11,6 +11,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
   GET /progress/<imdb> -> every saved position for one title (episode lists)
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
+  GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
@@ -2104,6 +2105,29 @@ def browse_cat(tid, typ="movie", skip=0, sort=""):
     return cached(f"browse:cat:{tid}:{typ}:{skip}", 3600, build)
 
 
+def similar(typ, imdb):
+    """'You may also like' for a film or show: TMDB's recommendations (people who liked this also liked),
+    topped up with its 'similar' list if that's short. Cached for a day."""
+    kind = "movie" if typ == "movie" else "tv"
+
+    def build():
+        found = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+        hits = found.get("movie_results" if kind == "movie" else "tv_results") or []
+        if not hits:
+            return {"metas": []}
+        tid = hits[0]["id"]
+        res = _tmdb(f"/{kind}/{tid}/recommendations").get("results", [])
+        if len(res) < 12:
+            seen = {r["id"] for r in res}
+            res += [r for r in _tmdb(f"/{kind}/{tid}/similar").get("results", []) if r["id"] not in seen]
+        res = [r for r in res if r.get("poster_path") and (r.get("vote_count") or 0) >= 20][:20]
+        return {"metas": [m for m in _to_metas(res, kind) if m["id"] != imdb]}
+    try:
+        return cached(f"similar:{kind}:{imdb}", 24 * 3600, build)
+    except Exception as e:
+        return {"metas": [], "error": str(e)}
+
+
 def browse_tiles():
     try:
         return cached("browse:tiles", 24 * 3600, _build_tiles)
@@ -2264,6 +2288,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(jellyfin_summary())
             elif path == "/progress/dismissed":
                 self._json({"dismissed": _dismissed()})
+            elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):
+                _, _, typ, imdb = path.split("/")
+                self._json(similar(typ, imdb))
             elif path == "/browse/tiles":
                 self._json(browse_tiles())
             elif re.fullmatch(r"/browse/cat/[a-z0-9-]+", path):

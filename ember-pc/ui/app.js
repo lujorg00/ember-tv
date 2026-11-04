@@ -522,6 +522,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <button class="back">‹ Back</button>
     <header class="tp-head fade-in"></header>
     <div class="tp-body"><section class="tp-eps"></section></div>
+    <section class="tp-more"></section>
     <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
   v.appendChild(page);
   $(".back", page).onclick = back;
@@ -583,6 +584,12 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   const onKey = (ev) => { if (!document.body.contains(page)) return document.removeEventListener("keydown", onKey, true);
     if (ev.key === "Escape" && isOpen()) { ev.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
+
+  // You may also like: under the episodes (or the buttons, for a film); scroll down to it on long series.
+  getJson(`${feed()}/similar/${type}/${id}`, 30000).then(r => {
+    const metas = (r.metas || []).filter(m => m.id !== id);
+    if (metas.length && document.body.contains(page)) $(".tp-more", page).appendChild(row("You may also like", metas, type));
+  }).catch(() => {});
 
   // Marking what you watched before Ember: saved on the Pi and in your Trakt history.
   const isDone = (k) => !!(saved[k] || {}).finished;
