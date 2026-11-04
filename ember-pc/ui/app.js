@@ -833,6 +833,19 @@ const sky = (() => {
   return { start, pause: (p) => { paused = p; } };
 })();
 
+// ---------------------------------------------------------------- full screen (button top right, or F11)
+
+async function toggleFullscreen() {
+  const w = window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.getCurrentWindow();
+  if (w) {
+    try { const on = !(await w.isFullscreen()); await w.setFullscreen(on); $("#fullscreen").classList.toggle("on", on); return; }
+    catch (e) { /* fall back to the page's own full screen */ }
+  }
+  if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {});
+}
+$("#fullscreen").onclick = toggleFullscreen;
+document.addEventListener("keydown", e => { if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); } });
+
 // ---------------------------------------------------------------- start
 
 sky.start();

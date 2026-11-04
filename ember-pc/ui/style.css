@@ -255,3 +255,9 @@ input { font: inherit; color: var(--text); }
 .toggle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); cursor: pointer; color: var(--text) !important; margin: 0 !important; font-size: 13px; }
 .toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
 .toggle:has(input:not(:checked)) span { color: var(--faint); text-decoration: line-through; }
+
+/* full screen button, top right */
+#fullscreen { position: fixed; z-index: 5; top: 14px; right: 18px; width: 40px; height: 40px; border-radius: 12px; font-size: 20px; line-height: 1;
+  color: var(--text); background: rgba(20,14,10,.55); backdrop-filter: blur(12px); border: 1px solid var(--line); opacity: .75; transition: opacity .2s, background .2s; }
+#fullscreen:hover { opacity: 1; background: rgba(36,25,18,.9); }
+#fullscreen.on { color: var(--accent); }
