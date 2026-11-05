@@ -1078,11 +1078,21 @@ async function weekCalendar() {
   };
   const box = h(`<aside class="wk fade-in"><div class="wk-h">New This Week</div><div class="wk-list"></div></aside>`);
   const list = $(".wk-list", box);
-  // Compact: one line each, the show on the left, when on the right
+  // Compact: a small picture, the show, and when
   for (const e of eps.slice(0, 4)) {
-    const it = h(`<div class="wk-ep"><div class="wk-t">${esc(e.show)}</div><div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div>`);
+    const it = h(`<div class="wk-ep"><div class="wk-art"></div><div class="wk-tx"><div class="wk-t">${esc(e.show)}</div>
+      <div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div></div>`);
+    const art = $(".wk-art", it);
+    // The show's artwork straight away; the episode still on top once there is one.
+    const show = `url('https://images.metahub.space/background/small/${e.imdb}/img'), url('https://images.metahub.space/poster/small/${e.imdb}/img')`;
+    art.style.backgroundImage = show;
     it.onclick = () => go("title", "series", e.imdb, { name: e.show });
     list.appendChild(it);
+    meta("series", e.imdb).then(m => {
+      const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
+      const better = (ep && ep.thumbnail) || m.background || "";
+      if (better) art.style.backgroundImage = `url('${better}'), ${show}`;
+    }).catch(() => {});
   }
   if (eps.length > 4) list.appendChild(h(`<div class="wk-none">and ${eps.length - 4} more</div>`));
   // Names too long for the panel scroll slowly back and forth so you can read them.

@@ -288,15 +288,17 @@ input { font: inherit; color: var(--text); }
 .wday.empty { opacity: .6; }
 
 /* New This Week: a small panel, bottom right of the hero, clear of the picture */
-.wk { position: absolute; bottom: 14px; right: 40px; z-index: 2; width: 400px; padding: 10px 12px 8px; border-radius: 14px;
+.wk { position: absolute; bottom: 14px; right: 40px; z-index: 2; width: 300px; padding: 8px 9px 7px; border-radius: 12px;
   background: rgba(20,15,11,.55); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.07); box-shadow: 0 8px 24px #0006; }
-.wk-h { font-size: 12.5px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase; color: var(--muted); margin: 0 6px 4px; }
+.wk-h { font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); margin: 0 5px 3px; }
 .wk-list { display: flex; flex-direction: column; gap: 1px; }
-.wk-ep { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; padding: 4px 6px; border-radius: 8px; cursor: pointer; transition: background .15s; min-width: 0; }
+.wk-ep { display: flex; gap: 9px; align-items: center; padding: 3px 5px; border-radius: 7px; cursor: pointer; transition: background .15s; min-width: 0; }
 .wk-ep:hover { background: rgba(255,255,255,.07); }
-.wk-t { font-size: 15.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
-.wk-s { font-size: 13.5px; color: var(--muted); white-space: nowrap; flex: none; }
-.wk-none { font-size: 13px; color: var(--muted); padding: 2px 6px; }
+.wk-art { flex: none; width: 52px; aspect-ratio: 16/9; border-radius: 4px; background: var(--card) center/cover; background-size: cover; }
+.wk-tx { min-width: 0; flex: 1; overflow: hidden; }
+.wk-t { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+.wk-s { font-size: 11px; color: var(--muted); white-space: nowrap; line-height: 1.25; }
+.wk-none { font-size: 10.5px; color: var(--muted); padding: 2px 5px; }
 @media (max-width: 1100px) { .wk { display: none; } }
 
 /* Details page: streams hidden until "Choose stream" */
