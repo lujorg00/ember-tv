@@ -523,3 +523,12 @@ input { font: inherit; color: var(--text); }
 
 /* TV: an episode's tick shows while it's selected (hold OK to use it) */
 .tv .epc.tvf .ep-mark { opacity: 1; }
+
+/* TV menu (held OK on Continue watching) */
+.tvm { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(8,6,4,.6); }
+.tvm-box { min-width: 380px; padding: 22px; border-radius: 18px; background: rgba(24,18,13,.98); border: 1px solid var(--line); box-shadow: 0 20px 60px #000c;
+  display: flex; flex-direction: column; gap: 10px; }
+.tvm-t { font-size: 20px; font-weight: 600; margin: 0 4px 6px; }
+.tvm-b { padding: 12px 16px; border-radius: 10px; text-align: left; font-size: 17px; background: rgba(255,255,255,.06); color: var(--text); }
+.tvm-b.tvf { background: #fff; color: #1A0F08; box-shadow: none !important; }
+.tvm-b.danger.tvf { background: #E2553F; color: #fff; }

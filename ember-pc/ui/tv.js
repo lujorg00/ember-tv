@@ -7,7 +7,7 @@
 
   const SEL = [".nav", ".btn", ".btn-chip", ".poster", ".t10", ".cw", ".tile", ".epc", ".wk-ep", ".hn", ".stream",
     ".apptile", ".tp-dr-x", ".back", "input[type=text]", "input:not([type])", "select", "label.check", "label.toggle",
-    ".ep-mark", ".match button"].join(",");
+    ".ep-mark", ".match button", ".tvm-b"].join(",");
   let cur = null;
 
   const visible = (el) => {
@@ -22,7 +22,7 @@
     return true;
   };
   const all = () => {
-    const open = document.querySelector(".tp-drawer.open");
+    const open = document.querySelector(".tvm") || document.querySelector(".tp-drawer.open");
     const scope = open || document;
     return [...scope.querySelectorAll(SEL)].filter(visible);
   };
@@ -52,14 +52,23 @@
   }
 
   // The nearest thing in that direction: straight ahead counts far more than off to the side.
-  function move(dir) {
+  // Left/right stays on the same row: at the end of a row it stops (it never wraps onto another row).
+  function move(dir, held) {
     const items = all();
     if (!cur || !visible(cur) || !items.includes(cur)) { setFocus(first(items)); return; }
     const a = cur.getBoundingClientRect();
     const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
-    let best = null, bestScore = Infinity;
     const sameStrip = cur.closest(".strip");
-    for (const el of items) {
+    const sideways = dir === "left" || dir === "right";
+    const level = (el) => { const b = el.getBoundingClientRect(); return b.top < a.bottom - 4 && b.bottom > a.top + 4; };
+    let pool = items;
+    if (sideways && sameStrip) pool = items.filter(el => el.closest(".strip") === sameStrip);
+    else if (sideways && !cur.closest("#side")) {
+      const row = items.filter(el => !el.closest("#side") && level(el));
+      if (held || row.some(el => el !== cur && (dir === "right" ? el.getBoundingClientRect().left > a.left : el.getBoundingClientRect().left < a.left))) pool = row;
+    }
+    let best = null, bestScore = Infinity;
+    for (const el of pool) {
       if (el === cur) continue;
       const b = el.getBoundingClientRect();
       const bx = b.left + b.width / 2, by = b.top + b.height / 2;
@@ -80,7 +89,8 @@
       if (score < bestScore) { bestScore = score; best = el; }
     }
     if (best) setFocus(best);
-    else if (dir === "left" && !cur.closest("#side")) setFocus(document.querySelector("#side .nav.on") || document.querySelector("#side .nav"));
+    // the start of a row: a fresh press of left goes to the sidebar; holding left just stops there
+    else if (dir === "left" && !held && !cur.closest("#side")) setFocus(document.querySelector("#side .nav.on") || document.querySelector("#side .nav"));
   }
 
   function first(items) {
@@ -96,9 +106,37 @@
   function okDown(e) { if (!e.repeat) okLong = false; }
   window.emberTvLongOk = () => {
     okLong = true;
-    const b = cur && cur.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
+    if (!cur) return;
+    if (cur.matches(".cw")) return cwMenu(cur); // Continue watching: offer to remove it
+    const b = cur.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
     if (b) b.click();
   };
+
+  // A small TV menu (held OK on Continue watching): the remote stays inside it until it closes.
+  let menuFrom = null;
+  function closeMenu() {
+    const m = document.querySelector(".tvm");
+    if (!m) return false;
+    m.remove();
+    if (menuFrom && visible(menuFrom)) setFocus(menuFrom, false); else setFocus(first());
+    menuFrom = null;
+    return true;
+  }
+  function cwMenu(card) {
+    closeMenu();
+    menuFrom = card;
+    const name = (card.querySelector(".cw-name") || {}).textContent || "this";
+    const m = document.createElement("div");
+    m.className = "tvm";
+    m.innerHTML = `<div class="tvm-box"><div class="tvm-t"></div><button class="tvm-b danger">Remove from Continue watching</button><button class="tvm-b">Cancel</button></div>`;
+    m.querySelector(".tvm-t").textContent = name;
+    const [rm, cancel] = m.querySelectorAll(".tvm-b");
+    rm.onclick = () => { const x = card.querySelector(".cw-x"); const next = card.nextElementSibling || card.previousElementSibling;
+      m.remove(); menuFrom = null; if (x) x.click(); setTimeout(() => setFocus(next && visible(next) ? next : first()), 300); };
+    cancel.onclick = closeMenu;
+    document.body.appendChild(m);
+    setFocus(rm, false);
+  }
   window.emberTvOkCancel = () => { okLong = true; };
   function okUp() {
     if (okLong || !cur) { okLong = false; return; }
@@ -109,20 +147,23 @@
     el.click();
   }
 
-  let lastMove = 0;
+  let lastMove = 0, lastKey = "", lastKeyAt = 0;
   document.addEventListener("keydown", (e) => {
     const typing = document.activeElement && document.activeElement.matches("input[type=text], input:not([type])") && document.activeElement === cur;
     const k = e.key;
     if (k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight") {
       if (typing && (k === "ArrowLeft" || k === "ArrowRight")) return; // moving the cursor in the search box
       e.preventDefault(); e.stopPropagation();
-      // held down: a steady 7 moves a second, scrolling instantly, so it can't run ahead of itself
+      // held down: a steady 7 moves a second, scrolling instantly, so it can't run ahead of itself.
+      // (Judged by time as well as e.repeat: the TV doesn't always mark the repeats.)
       const now = performance.now();
-      if (e.repeat && now - lastMove < 140) return;
+      const held = e.repeat || (k === lastKey && now - lastKeyAt < 250);
+      lastKey = k; lastKeyAt = now;
+      if (held && now - lastMove < 140) return;
       lastMove = now;
-      quick = e.repeat;
+      quick = held;
       if (typing) { document.activeElement.blur(); EmberTV.hideKeyboard(); }
-      move(k.slice(5).toLowerCase());
+      move(k.slice(5).toLowerCase(), held);
     } else if (k === "Enter" || k === "NumpadEnter") {
       if (typing) { e.preventDefault(); EmberTV.hideKeyboard(); return; } // keyboard's "done"
       e.preventDefault(); e.stopPropagation();
@@ -139,6 +180,7 @@
 
   // Back (from Android): close the streams panel, else go back a page, else go Home.
   window.emberTvBack = () => {
+    if (closeMenu()) return true;
     const dr = document.querySelector(".tp-drawer.open");
     if (dr) { dr.classList.remove("open"); setTimeout(() => setFocus(first()), 50); return true; }
     if (typeof navStack !== "undefined" && navStack.length > 1) { back(); return true; }
