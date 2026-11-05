@@ -27,6 +27,7 @@
     return [...scope.querySelectorAll(SEL)].filter(visible);
   };
 
+  let quick = false; // a held arrow: jump straight there, no smooth scrolling to fall behind
   function setFocus(el, scroll = true) {
     if (!el) return;
     if (cur) cur.classList.remove("tvf");
@@ -39,14 +40,14 @@
     const strip = el.closest(".strip");
     if (strip) {
       const r = el.getBoundingClientRect(), s = strip.getBoundingClientRect();
-      if (r.left < s.left + 60) strip.scrollBy({ left: r.left - s.left - 60, behavior: "smooth" });
-      else if (r.right > s.right - 60) strip.scrollBy({ left: r.right - s.right + 60, behavior: "smooth" });
+      if (r.left < s.left + 60) strip.scrollBy({ left: r.left - s.left - 60, behavior: quick ? "instant" : "smooth" });
+      else if (r.right > s.right - 60) strip.scrollBy({ left: r.right - s.right + 60, behavior: quick ? "instant" : "smooth" });
     }
     if (!el.closest("#side")) {
       const view = document.getElementById("view"), r = el.getBoundingClientRect();
       const vh = window.innerHeight;
-      if (el.closest(".hero") || el.closest(".tp-head")) view.scrollTo({ top: 0, behavior: "smooth" });
-      else if (r.top < vh * 0.18 || r.bottom > vh * 0.88) view.scrollBy({ top: r.top + r.height / 2 - vh * 0.55, behavior: "smooth" });
+      if (el.closest(".hero") || el.closest(".tp-head")) view.scrollTo({ top: 0, behavior: quick ? "instant" : "smooth" });
+      else if (r.top < vh * 0.18 || r.bottom > vh * 0.88) view.scrollBy({ top: r.top + r.height / 2 - vh * 0.55, behavior: quick ? "instant" : "smooth" });
     }
   }
 
@@ -108,12 +109,18 @@
     el.click();
   }
 
+  let lastMove = 0;
   document.addEventListener("keydown", (e) => {
     const typing = document.activeElement && document.activeElement.matches("input[type=text], input:not([type])") && document.activeElement === cur;
     const k = e.key;
     if (k === "ArrowUp" || k === "ArrowDown" || k === "ArrowLeft" || k === "ArrowRight") {
       if (typing && (k === "ArrowLeft" || k === "ArrowRight")) return; // moving the cursor in the search box
       e.preventDefault(); e.stopPropagation();
+      // held down: a steady 7 moves a second, scrolling instantly, so it can't run ahead of itself
+      const now = performance.now();
+      if (e.repeat && now - lastMove < 140) return;
+      lastMove = now;
+      quick = e.repeat;
       if (typing) { document.activeElement.blur(); EmberTV.hideKeyboard(); }
       move(k.slice(5).toLowerCase());
     } else if (k === "Enter" || k === "NumpadEnter") {
