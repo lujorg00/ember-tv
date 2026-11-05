@@ -5,6 +5,8 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
+          ZStack {
+            AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
@@ -21,12 +23,10 @@ struct HomeView: View {
                     }
                 }
                 .padding(.bottom, 80)
-                .animation(.easeOut(duration: 0.4), value: store.rows.count)
-                .animation(.easeOut(duration: 0.4), value: store.cw.count)
             }
             .scrollClipDisabled()
             .ignoresSafeArea()
-            .background { AmbientBackground() }
+          }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
             .navigationDestination(for: Tile.self) { t in TilePage(tile: t, type: "") }
         }
@@ -44,6 +44,7 @@ struct HeroView: View {
     @State private var full: [String: Meta] = [:]
     @State private var holdUntil = Date.distantPast
     @FocusState private var focused: Bool
+    @State private var shown = false
 
     private var m: Meta { let base = items[min(idx, items.count - 1)]; return full[base.id] ?? base }
 
@@ -98,6 +99,10 @@ struct HeroView: View {
         }
         .frame(height: 760)
         .clipped()
+        // coming to the tab: the hero fades in where it is, rather than anything sliding about
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(.easeIn(duration: 0.45)) { shown = true } }
+        .onDisappear { shown = false }
         .animation(.easeInOut(duration: 0.6), value: idx)
         .task(id: idx) {
             let base = items[min(idx, items.count - 1)]
@@ -144,7 +149,8 @@ struct Backdrop: View {
             }
             .clipped()
             .onAppear {
-                guard kenBurns else { return }
+                // the drift starts once and carries on: coming back to the tab doesn't jolt it
+                guard kenBurns, !zoom else { return }
                 withAnimation(.easeInOut(duration: 24).repeatForever(autoreverses: true)) { zoom = true }
             }
     }

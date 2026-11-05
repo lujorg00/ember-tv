@@ -12,6 +12,8 @@ struct BrowseView: View {
 
     var body: some View {
         NavigationStack {
+          ZStack {
+            AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !hero.isEmpty { HeroView(items: hero, pageName: name) }
@@ -22,11 +24,10 @@ struct BrowseView: View {
                     if !loaded { ProgressView().frame(maxWidth: .infinity).padding(.top, 300) }
                 }
                 .padding(.bottom, 80)
-                .animation(.easeOut(duration: 0.4), value: rows.count)
             }
             .scrollClipDisabled()
             .ignoresSafeArea()
-            .background { AmbientBackground() }
+          }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
             .navigationDestination(for: Tile.self) { t in TilePage(tile: t, type: type) }
         }

@@ -10,6 +10,8 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
+          ZStack {
+            AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !series.isEmpty { PosterRow(row: RowData(id: "s", title: "Series", kind: nil, metas: series, top: false)) }
@@ -22,7 +24,7 @@ struct SearchView: View {
             }
             .scrollClipDisabled()
             .searchable(text: $q, prompt: "Films and series")
-            .background { AmbientBackground() }
+          }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
         }
         .task(id: q) {

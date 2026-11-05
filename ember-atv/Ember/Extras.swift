@@ -12,6 +12,8 @@ struct MatchView: View {
 
     var body: some View {
         NavigationStack {
+          ZStack {
+            AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 34) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -60,7 +62,7 @@ struct MatchView: View {
                 .padding(.horizontal, 90).padding(.top, 50).padding(.bottom, 80)
             }
             .scrollClipDisabled()
-            .background { AmbientBackground() }
+          }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
         }
         .task(id: round) {
@@ -102,6 +104,8 @@ struct YearView: View {
 
     var body: some View {
         NavigationStack {
+          ZStack {
+            AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 36) {
                     HStack(alignment: .firstTextBaseline, spacing: 30) {
@@ -118,7 +122,7 @@ struct YearView: View {
                 .padding(.horizontal, 90).padding(.top, 50).padding(.bottom, 80)
             }
             .scrollClipDisabled()
-            .background { AmbientBackground() }
+          }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
         }
         .task(id: year) {
