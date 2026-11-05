@@ -12,6 +12,7 @@ struct HomeView: View {
                     ForEach(store.rows) { r in
                         if r.top { TopRow(row: r) } else { PosterRow(row: r) }
                     }
+                    ForEach(store.tileGroups) { g in TileRow(group: g, type: "") }
                     if !store.homeLoaded {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 300)
                     } else if store.rows.isEmpty {
@@ -20,11 +21,14 @@ struct HomeView: View {
                     }
                 }
                 .padding(.bottom, 80)
+                .animation(.easeOut(duration: 0.4), value: store.rows.count)
+                .animation(.easeOut(duration: 0.4), value: store.cw.count)
             }
             .scrollClipDisabled()
             .ignoresSafeArea()
-            .background(Theme.bg)
+            .background { AmbientBackground() }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
+            .navigationDestination(for: Tile.self) { t in TilePage(tile: t, type: "") }
         }
     }
 }
@@ -35,6 +39,7 @@ struct HomeView: View {
 struct HeroView: View {
     @EnvironmentObject var store: Store
     let items: [Meta]
+    var pageName: String? = nil
     @State private var idx = 0
     @State private var full: [String: Meta] = [:]
     @State private var holdUntil = Date.distantPast
@@ -44,9 +49,16 @@ struct HeroView: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Backdrop(url: m.backdropURL, height: 760)
+            Backdrop(url: m.backdropURL, height: 760, kenBurns: true)
                 .id(m.id)
                 .transition(.opacity)
+            if let pageName {
+                // the page's name, big and faint at the top, blending into the picture (as on Ember PC)
+                Text(pageName).font(.system(size: 120, weight: .heavy)).foregroundStyle(.white.opacity(0.10))
+                    .padding(.leading, 80).padding(.top, 40)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
             LinearGradient(colors: [Theme.bg.opacity(0.95), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
             LinearGradient(colors: [Theme.bg, .clear], startPoint: .bottom, endPoint: .center)
             VStack(alignment: .leading, spacing: 20) {
@@ -76,6 +88,11 @@ struct HeroView: View {
             }
             .padding(.leading, 90)
             .padding(.bottom, 40)
+            if pageName == nil && !store.upcoming.isEmpty {
+                WeekPanel(eps: store.upcoming)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 80).padding(.bottom, 40)
+            }
         }
         .frame(height: 760)
         .clipped()
@@ -111,16 +128,59 @@ struct HeroView: View {
 struct Backdrop: View {
     let url: URL?
     var height: CGFloat? = nil
+    var kenBurns = false          // a slow drift in, like the Apple TV app's backdrops
+    @State private var zoom = false
     var body: some View {
         Color.clear
             .frame(maxWidth: .infinity, maxHeight: height == nil ? .infinity : nil)
             .frame(height: height)
             .overlay {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.5))) { ph in
-                    if let img = ph.image { img.resizable().scaledToFill() } else { Theme.bg }
+                AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.8))) { ph in
+                    if let img = ph.image { img.resizable().scaledToFill() } else { Color.clear }
                 }
+                .scaleEffect(zoom ? 1.08 : 1.0, anchor: .topTrailing)
             }
             .clipped()
+            .onAppear {
+                guard kenBurns else { return }
+                withAnimation(.easeInOut(duration: 24).repeatForever(autoreverses: true)) { zoom = true }
+            }
+    }
+}
+
+/// New This Week: a small panel at the bottom right of the hero. Each opens the show.
+struct WeekPanel: View {
+    let eps: [Upcoming]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("NEW THIS WEEK").font(.system(size: 15, weight: .bold)).tracking(1.4).foregroundStyle(Theme.muted).padding(.leading, 8)
+            ForEach(eps.prefix(4)) { e in
+                NavigationLink(value: Meta(["id": e.imdb, "type": "series", "name": e.show])) {
+                    HStack(spacing: 14) {
+                        AsyncImage(url: URL(string: "https://images.metahub.space/background/small/\(e.imdb)/img")) { ph in
+                            if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
+                        }
+                        .frame(width: 84, height: 47)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(e.show).font(.system(size: 20, weight: .semibold)).lineLimit(1)
+                            Text("\(e.when) · S\(e.season) E\(e.episode)").font(.system(size: 17))
+                                .foregroundStyle(e.out ? Theme.accent : Theme.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4).padding(.horizontal, 8)
+                }
+                .buttonStyle(.plain)
+            }
+            if eps.count > 4 {
+                Text("and \(eps.count - 4) more").font(.system(size: 15)).foregroundStyle(Theme.muted).padding(.leading, 8)
+            }
+        }
+        .padding(14)
+        .frame(width: 400, alignment: .leading)
+        .background(.ultraThinMaterial.opacity(0.85), in: RoundedRectangle(cornerRadius: 18))
+        .focusSection()
     }
 }
 
@@ -220,6 +280,14 @@ struct PosterCard: View {
                 .frame(width: width, height: width * 1.5)
                 .clipped()
                 WatchBadge(state: store.watched[meta.id])
+                if let label = store.release[meta.id]?.label {
+                    Text(label).font(.system(size: 15, weight: .bold))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background((store.release[meta.id]?.s == "cinema" ? Theme.accent : Color.black.opacity(0.7)), in: Capsule())
+                        .foregroundStyle(store.release[meta.id]?.s == "cinema" ? Theme.ink : .white)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
                 if let p = store.progress[meta.id] {
                     VStack { Spacer(); ProgressBar(fraction: p.percent / 100).padding(10) }
                 }
@@ -227,6 +295,7 @@ struct PosterCard: View {
             .frame(width: width, height: width * 1.5)
         }
         .buttonStyle(.card)
+        .onAppear { store.wantRelease(meta) }
         .contextMenu {
             if store.watched[meta.id] == "done" {
                 Button("Mark as unwatched") { Task { await store.markTitle(meta, watched: false) } }

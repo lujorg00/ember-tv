@@ -238,3 +238,97 @@ func clock(_ s: Double) -> String {
     let h = t / 3600, m = t / 60 % 60, x = t % 60
     return h > 0 ? String(format: "%d:%02d:%02d", h, m, x) : String(format: "%d:%02d", m, x)
 }
+
+/// "In cinemas" / "Coming 13 Nov" (lucapi's /release, from TMDB release dates).
+struct Release {
+    let s: String          // "cinema", "soon" or ""
+    let d: String?         // yyyy-mm-dd: out to watch at home
+    init(_ j: JSON) { s = j.str("s") ?? ""; d = j.str("d") }
+
+    private static let inF: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_GB"); return f }()
+    private func day(_ withYear: Bool) -> String? {
+        guard let d, let t = Release.inF.date(from: String(d.prefix(10))) else { return nil }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = Calendar.current.component(.year, from: t) == Calendar.current.component(.year, from: Date()) || !withYear ? "d MMM" : "d MMM yyyy"
+        return f.string(from: t)
+    }
+    /// on posters
+    var label: String? {
+        switch s {
+        case "cinema": return "In cinemas"
+        case "soon": return day(true).map { "Coming \($0)" } ?? "Coming soon"
+        default: return nil
+        }
+    }
+    /// on the details page
+    var line: String? {
+        switch s {
+        case "cinema": return "In cinemas now" + (day(true).map { " · to watch at home from \($0)" } ?? " · not yet out to watch at home")
+        case "soon": return "Not out yet" + (day(true).map { " · comes out \($0)" } ?? "")
+        default: return nil
+        }
+    }
+}
+
+/// A box on Films and Series (a streaming service, studio, genre, franchise, director, award...): lucapi's /browse/tiles.
+struct Tile: Identifiable, Hashable {
+    let kind: String
+    let id: String
+    let title: String
+    let image: URL?
+    let colour: String?
+    let logo: URL?
+    let logoKind: String
+    let logoMode: String
+    let types: [String]
+    let style: String
+
+    init(_ j: JSON, style: String) {
+        kind = j.str("kind") ?? "cat"
+        id = j.str("id") ?? ""
+        title = j.str("title") ?? ""
+        image = j.str("image").flatMap(URL.init(string:))
+        colour = j.str("colour")
+        let l = j.str("logo") ?? ""
+        logo = l.isEmpty ? nil : URL(string: l.hasPrefix("/") ? API.feed + l : l)
+        logoKind = j.str("logo_kind") ?? ""
+        logoMode = j.str("logo_mode") ?? ""
+        types = j.strings("types")
+        self.style = style
+    }
+    static func == (a: Tile, b: Tile) -> Bool { a.kind == b.kind && a.id == b.id }
+    func hash(into h: inout Hasher) { h.combine(kind); h.combine(id) }
+}
+
+struct TileGroup: Identifiable {
+    var id: String { title }
+    let title: String
+    let style: String
+    let tiles: [Tile]
+}
+
+/// An episode of one of your shows this week (lucapi's /upcoming, from the Trakt calendar).
+struct Upcoming: Identifiable {
+    var id: String { "\(imdb):\(season):\(episode)" }
+    let imdb: String
+    let show: String
+    let season: Int
+    let episode: Int
+    let airs: Date
+    let out: Bool
+    init?(_ j: JSON) {
+        guard let i = j.str("imdb"), let s = j.int("season"), let e = j.int("episode"), let a = parseDate(j.str("airs")) else { return nil }
+        imdb = i; show = j.str("show") ?? ""; season = s; episode = e; airs = a; out = j.bool("out")
+    }
+    /// "Out now", "Tomorrow 2am", "Mon 1am"
+    var when: String {
+        if out { return "Out now" }
+        let cal = Calendar.current
+        let tf = DateFormatter(); tf.locale = Locale(identifier: "en_GB"); tf.dateFormat = cal.component(.minute, from: airs) == 0 ? "ha" : "h:mma"
+        let t = tf.string(from: airs).lowercased()
+        if cal.isDateInToday(airs) { return "Today \(t)" }
+        if cal.isDateInTomorrow(airs) { return "Tomorrow \(t)" }
+        let df = DateFormatter(); df.locale = Locale(identifier: "en_GB"); df.dateFormat = "EEE"
+        return "\(df.string(from: airs)) \(t)"
+    }
+}

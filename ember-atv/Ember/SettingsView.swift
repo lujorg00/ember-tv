@@ -45,6 +45,7 @@ struct SettingsView: View {
                 .frame(maxWidth: 1000)
             }
             .padding(.horizontal, 90)
+            .background { AmbientBackground() }
         }
     }
 }

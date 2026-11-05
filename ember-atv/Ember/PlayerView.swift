@@ -152,7 +152,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     /// Where you are, to lucapi (the same report Ember PC and Ember TV send); lucapi passes it on to Trakt.
     func report(_ state: String, finished: Bool = false) {
-        guard let s = session, started, pos > 1 else { return }
+        guard let s = session, !s.trailer, started, pos > 1 else { return }
         lastReport = Date()
         var b: JSON = ["imdb": s.meta.id, "type": s.meta.isSeries ? "series" : "movie", "position": pos,
                        "device": API.deviceName, "state": state, "finished": finished]

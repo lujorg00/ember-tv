@@ -18,6 +18,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   GET /trailer/<movie|series>/<imdb> -> {"yt": YouTube id} of its trailer (TMDB), for "Watch trailer"
+  GET /trailer/<movie|series>/<imdb>/play -> {"url": a stream of that trailer Ember's own player can play} (needs yt-dlp)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
@@ -2495,6 +2496,33 @@ def trailer(typ, imdb):
         return {"yt": "", "error": str(e)}
 
 
+def _ytdlp():
+    exe = shutil.which("yt-dlp") or str(Path.home() / ".local/bin/yt-dlp")
+    return [exe] if Path(exe).exists() else ["python3", "-m", "yt_dlp"]
+
+
+def trailer_play(typ, imdb):
+    """A playable stream of the trailer (yt-dlp on the Pi): Ember for Apple TV plays it in its own player.
+    YouTube's links are tied to the address that asked, which is your home's, so the TV can use them. Kept 3 hours."""
+    yt = trailer(typ, imdb).get("yt", "")
+    if not yt:
+        return {"yt": "", "url": ""}
+
+    def build():
+        cmd = _ytdlp() + ["-g", "--no-warnings", "--no-playlist",
+                          "-f", "best[height<=1080][vcodec!=none][acodec!=none]/best",
+                          f"https://www.youtube.com/watch?v={yt}"]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        urls = [u for u in out.stdout.split() if u.startswith("http")]
+        if not urls:
+            raise RuntimeError((out.stderr or "yt-dlp found nothing").strip().splitlines()[-1][:200])
+        return {"yt": yt, "url": urls[0]}
+    try:
+        return cached(f"trailerplay:{yt}", 3 * 3600, build)
+    except Exception as e:
+        return {"yt": yt, "url": "", "error": str(e)}
+
+
 def in_cinemas():
     """Films showing in UK cinemas now (TMDB 'now playing', GB): {"items": [imdb, ...]}. Refreshed every 6 hours."""
     def build():
@@ -2690,6 +2718,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):
                 _, _, typ, imdb = path.split("/")
                 self._json(similar(typ, imdb))
+            elif re.fullmatch(r"/trailer/(movie|series)/tt\d+/play", path):
+                _, _, typ, imdb, _ = path.split("/")
+                self._json(trailer_play(typ, imdb))
             elif re.fullmatch(r"/trailer/(movie|series)/tt\d+", path):
                 _, _, typ, imdb = path.split("/")
                 self._json(trailer(typ, imdb))

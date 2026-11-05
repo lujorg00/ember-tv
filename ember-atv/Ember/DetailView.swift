@@ -8,6 +8,8 @@ struct DetailView: View {
     @State private var saved: [String: Position] = [:]   // "season:episode" ("" for a film)
     @State private var season = 1
     @State private var nextUp: (Int, Int)?
+    @State private var similar: [Meta] = []
+    @State private var hasTrailer = false
 
     private var mm: Meta { m ?? meta }
     private func key(_ s: Int?, _ e: Int?) -> String { "\(s.map(String.init) ?? ""):\(e.map(String.init) ?? "")" }
@@ -35,13 +37,18 @@ struct DetailView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Backdrop(url: mm.backdropURL).ignoresSafeArea()
+            Backdrop(url: mm.backdropURL, kenBurns: true).ignoresSafeArea()
             LinearGradient(colors: [Theme.bg.opacity(0.97), Theme.bg.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing).ignoresSafeArea()
             LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0.3), .clear], startPoint: .bottom, endPoint: .top).ignoresSafeArea()
             ScrollView(.vertical, showsIndicators: false) {
+              VStack(alignment: .leading, spacing: 30) {
                 VStack(alignment: .leading, spacing: 22) {
                     TitleArt(meta: mm, height: 160, width: 640).padding(.top, 60)
                     Text(mm.metaLine).font(.system(size: 24, weight: .medium)).foregroundStyle(.white.opacity(0.85))
+                    if let line = store.release[mm.id]?.line {
+                        Label(line, systemImage: store.release[mm.id]?.s == "cinema" ? "film" : "calendar")
+                            .font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.accent)
+                    }
                     if let p = store.progress[mm.id] {
                         Text(p.line).font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.accent)
                     }
@@ -54,12 +61,23 @@ struct DetailView: View {
                                 Task { await store.markTitle(mm, watched: !done) }
                             } label: { Label(done ? "Watched" : "Mark watched", systemImage: done ? "checkmark.circle.fill" : "checkmark.circle") }
                         }
+                        let onList = store.watchlist.contains(mm.id)
+                        Button {
+                            Task { await store.toggleWatchlist(mm) }
+                        } label: { Label(onList ? "On watchlist" : "Watchlist", systemImage: onList ? "checkmark" : "plus") }
+                        if hasTrailer {
+                            Button { store.playTrailer(mm) } label: { Label("Watch trailer", systemImage: "play.rectangle") }
+                        }
                     }
                     .padding(.top, 10)
                     if mm.isSeries && !mm.videos.isEmpty { episodesSection }
                 }
                 .padding(.horizontal, 90)
-                .padding(.bottom, 80)
+                if !similar.isEmpty {
+                    PosterRow(row: RowData(id: "similar", title: "You may also like", kind: nil, metas: similar, top: false))
+                }
+              }
+              .padding(.bottom, 80)
             }
             .scrollClipDisabled()
         }
@@ -78,6 +96,15 @@ struct DetailView: View {
                                 .foregroundStyle(s == season ? Theme.accent : .primary)
                         }
                     }
+                    Spacer().frame(width: 40)
+                    let inSeason = episodes.filter(\.aired)
+                    let seasonDone = !inSeason.isEmpty && inSeason.allSatisfy { saved[key($0.season, $0.episode)]?.finished == true }
+                    Button {
+                        Task { await store.markEpisodes(mm, inSeason, watched: !seasonDone); await loadSaved() }
+                    } label: { Label(seasonDone ? "Season watched" : "Mark season watched", systemImage: seasonDone ? "checkmark.circle.fill" : "checkmark.circle") }
+                    Button {
+                        Task { await store.markTitle(mm, watched: store.watched[mm.id] != "done"); await loadSaved() }
+                    } label: { Text(store.watched[mm.id] == "done" ? "Mark show unwatched" : "Mark whole show watched") }
                 }
                 .padding(.vertical, 20)
             }
@@ -140,6 +167,16 @@ struct DetailView: View {
     private func load() async {
         let full = await MetaCache.shared.full(meta)
         m = full
+        store.wantRelease(full)
+        let kind = full.isSeries ? "series" : "movie"
+        Task {
+            if let r = try? await API.feedGet("/similar/\(kind)/\(full.id)", timeout: 30) {
+                similar = r.arr("metas").map { Meta($0, type: kind) }.filter { !$0.id.isEmpty && $0.id != full.id }
+            }
+        }
+        Task {
+            if let r = try? await API.feedGet("/trailer/\(kind)/\(full.id)", timeout: 15), r.str("yt") != nil { hasTrailer = true }
+        }
         await loadSaved()
         if full.isSeries, store.progress[full.id] == nil,
            let n = try? await API.feedGet("/next/\(full.id)", timeout: 6), let s = n.int("season"), let e = n.int("episode") {

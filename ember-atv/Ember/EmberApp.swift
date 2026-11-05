@@ -37,6 +37,12 @@ struct RootView: View {
             TabView {
                 HomeView()
                     .tabItem { Label("Home", systemImage: "house") }
+                BrowseView(type: "movie")
+                    .tabItem { Label("Films", systemImage: "film") }
+                BrowseView(type: "series")
+                    .tabItem { Label("Series", systemImage: "tv") }
+                SearchView()
+                    .tabItem { Label("Search", systemImage: "magnifyingglass") }
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
             }
