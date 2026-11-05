@@ -150,10 +150,8 @@ public class PlayerActivity extends Activity {
             titleView.setVisibility(visibility);
             nextButton.setVisibility(hasNext && !upNextShown ? visibility : View.GONE);
             // controls up: the timeline has the focus, so left/right skip straight away (10 s a press, faster held)
-            if (visibility == View.VISIBLE && !upNextShown) {
-                View tb = view.findViewById(androidx.media3.ui.R.id.exo_progress);
-                if (tb != null) tb.requestFocus();
-            }
+            // (a moment later: the player puts the focus on play/pause itself as the controls appear)
+            if (visibility == View.VISIBLE && !upNextShown) h.postDelayed(this::focusTimeline, 150);
         });
 
         player = new ExoPlayer.Builder(this, new DefaultRenderersFactory(this).setEnableDecoderFallback(true)).build();
@@ -169,7 +167,11 @@ public class PlayerActivity extends Activity {
             ((DefaultTimeBar) tbv).setPlayedColor(ACCENT);
             ((DefaultTimeBar) tbv).setScrubberColor(ACCENT);
         }
-        if (tbv != null) { tbv.setFocusable(true); tbv.setFocusableInTouchMode(false); }
+        if (tbv != null) {
+            tbv.setFocusable(true);
+            tbv.setFocusableInTouchMode(false);
+            if (tbv instanceof DefaultTimeBar) tbv.setOnFocusChangeListener((v, f) -> ((DefaultTimeBar) v).setScrubberColor(f ? Color.WHITE : ACCENT));
+        }
         SubtitleView sv = view.getSubtitleView();
         if (sv != null) sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 0.9f);
 
@@ -269,6 +271,16 @@ public class PlayerActivity extends Activity {
             return;
         }
         upNextText.setText("Next episode in " + countdown);
+    }
+
+    private View timeline() { return view.findViewById(androidx.media3.ui.R.id.exo_progress); }
+
+    private void focusTimeline() {
+        View tb = timeline();
+        if (tb == null) return;
+        tb.setEnabled(true);
+        tb.setFocusable(true);
+        tb.requestFocus();
     }
 
     private void hideUpNext() {
@@ -371,6 +383,36 @@ public class PlayerActivity extends Activity {
                 return true;
             }
             if (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+        }
+        // Controls up: the timeline is ours to drive. Left/right skip 10 s (30 s once held a while), OK plays/pauses,
+        // down from the buttons above lands on it.
+        View tl = timeline();
+        if (view.isControllerFullyVisible() && tl != null) {
+            boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+            if (tl.isFocused()) {
+                if (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (down) {
+                        long step = e.getRepeatCount() > 8 ? 30_000 : 10_000;
+                        long to = player.getCurrentPosition() + (k == KeyEvent.KEYCODE_DPAD_RIGHT ? step : -step);
+                        long dur = player.getDuration();
+                        if (dur != C.TIME_UNSET && dur > 0) to = Math.min(to, dur - 1000);
+                        player.seekTo(Math.max(0, to));
+                        view.showController(); // keeps the controls up while skipping
+                    }
+                    return true;
+                }
+                if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (!down) { player.setPlayWhenReady(!player.getPlayWhenReady()); view.showController(); }
+                    return true;
+                }
+            } else if (k == KeyEvent.KEYCODE_DPAD_DOWN && down) {
+                View f = getCurrentFocus();
+                int[] a = new int[2], b = new int[2];
+                tl.getLocationOnScreen(b);
+                if (f == null) { focusTimeline(); return true; }
+                f.getLocationOnScreen(a);
+                if (a[1] + f.getHeight() <= b[1] + 4) { focusTimeline(); view.showController(); return true; }
+            }
         }
         if (k == KeyEvent.KEYCODE_BACK && e.getAction() == KeyEvent.ACTION_UP) {
             if (view.isControllerFullyVisible()) { view.hideController(); return true; }
