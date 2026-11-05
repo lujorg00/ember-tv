@@ -1995,7 +1995,10 @@ def _franchise_logo(title, metas):
     """A franchise's title logo: the first film of its TMDB collection, else the top title in your list."""
     try:
         res = _tmdb("/search/collection", query=title).get("results", [])
-        col = next((c for c in res if title.lower().split()[0] in c.get("name", "").lower()), None)
+        want = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
+        col = next((c for c in res if re.sub(r"[^a-z0-9 ]", "", c.get("name", "").lower()).replace(" collection", "").strip() == want), None) \
+            or next((c for c in res if c.get("name", "").lower().startswith(title.lower())), None) \
+            or next((c for c in res if title.lower().split()[0] in c.get("name", "").lower()), None)
         if col:
             parts = sorted(_tmdb(f"/collection/{col['id']}").get("parts", []), key=lambda x: x.get("release_date") or "9999")
             # the film called just the franchise's name (Jurassic Park, Toy Story, Star Trek) has the plainest logo
@@ -2032,7 +2035,10 @@ def _knockout(data):
         ring += [px[k, 1], px[k, h - 2]]
     for k in range(0, h, max(1, h // 24)):
         ring += [px[1, k], px[w - 2, k]]
-    ring = list({(c[0] // 8 * 8, c[1] // 8 * 8, c[2] // 8 * 8, 255) for c in ring if c[3] > 200}) or [(0, 0, 0, 255)]
+    solid_ring = [c for c in ring if c[3] > 200]
+    if len(solid_ring) < len(ring) * 0.8:
+        return data  # already on a transparent background: nothing to cut away
+    ring = list({(c[0] // 8 * 8, c[1] // 8 * 8, c[2] // 8 * 8, 255) for c in solid_ring})
     near, far = 40.0, 90.0
     for y in range(h):
         for x in range(w):
@@ -2092,6 +2098,11 @@ def _logo_look(data):
     import io
     from PIL import Image
     im = Image.open(io.BytesIO(data)).convert("RGBA")
+    alpha_box = im.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
+    if alpha_box and alpha_box != (0, 0, im.width, im.height):
+        pad = max(2, min(im.size) // 60)
+        im = im.crop((max(0, alpha_box[0] - pad), max(0, alpha_box[1] - pad),
+                      min(im.width, alpha_box[2] + pad), min(im.height, alpha_box[3] + pad)))
     sm = im.copy()
     sm.thumbnail((96, 96))
     px = list(sm.getdata())
@@ -2123,7 +2134,7 @@ def _logo_look(data):
     return mode, edge, out.getvalue()
 
 
-LOGO_VERSION = 3
+LOGO_VERSION = 4
 
 
 def _logo(url, knockout=False, whiten_right=False):
@@ -2138,8 +2149,14 @@ def _logo(url, knockout=False, whiten_right=False):
             info = json.loads(info_path.read_text())
             if info.get("v") == LOGO_VERSION:
                 return info
-            if img_path.exists():  # kept from before: just look at it again
-                mode, edge, _ = _logo_look(img_path.read_bytes())
+            if img_path.exists():  # kept from before: look at it again (and trim it)
+                raw = img_path.read_bytes()
+                if knockout:
+                    raw = _knockout(raw)
+                if whiten_right:
+                    raw = _whiten_right(raw)
+                mode, edge, raw = _logo_look(raw)
+                img_path.write_bytes(raw)
                 info.update(mode=mode, edge=edge, v=LOGO_VERSION)
                 info_path.write_text(json.dumps(info))
                 return info
@@ -2260,7 +2277,7 @@ def _build_tiles():
             t["logo"] = _wikidata_logo(t["title"])
         if t.get("logo"):
             try:
-                info = _logo(t["logo"], knockout=t.get("logo_kind") == "icon",
+                info = _logo(t["logo"], knockout=t.get("logo_kind") == "icon" or t["box"] == "franchises",
                              whiten_right=t["title"].lower() in ("marvel studios", "dc studios"))
                 t["logo"], t["logo_mode"] = info["src"], info["mode"]
                 if t["box"] == "services" and info.get("edge") and t.get("logo_kind") == "icon":
