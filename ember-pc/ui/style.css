@@ -462,3 +462,8 @@ input { font: inherit; color: var(--text); }
   background: rgba(14,11,9,.55); border: 1px solid rgba(255,255,255,.16); color: #F3E7DA; }
 .tp-rel.cinema { border-color: rgba(240,160,75,.55); }
 .tp-rel.cinema::before { content: "● "; color: var(--accent); }
+
+/* Top 10 cards: bigger names on the artwork */
+.t10-art span { font: 700 22px/1.15 "Segoe UI Variable Display", "Segoe UI", sans-serif; left: 14px; right: 14px; bottom: 12px;
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; text-shadow: 0 2px 12px #000, 0 0 2px #000; }
+.t10-art::after { background: linear-gradient(transparent 40%, rgba(0,0,0,.85)); }
