@@ -23,7 +23,10 @@ input { font: inherit; color: var(--text); }
 .logo { font: 600 20px "Segoe UI Variable Display", "Segoe UI", sans-serif; color: var(--accent); display: flex; align-items: center; gap: 10px; padding: 0 10px 22px; letter-spacing: .3px; }
 .flame { width: 14px; height: 18px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: radial-gradient(circle at 50% 70%, #FFE2B4 0 25%, #F0A04B 45%, #C2621F 100%); box-shadow: 0 0 18px #F0A04B88; }
 .nav { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: var(--muted); text-align: left; transition: background .15s, color .15s; }
-.nav i { font-style: normal; width: 18px; text-align: center; opacity: .9; }
+.nav i { font-style: normal; width: 20px; height: 20px; flex: none; display: grid; place-items: center; opacity: .9; }
+.nav i svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.nav i svg .fill { fill: currentColor; stroke: none; }
+.nav.on i svg { stroke-width: 2; }
 .nav:hover { background: rgba(255, 230, 200, .05); color: var(--text); }
 .nav.on { background: rgba(240, 160, 75, .12); color: var(--text); }
 .nav.on i { color: var(--accent); }

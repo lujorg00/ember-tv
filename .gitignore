@@ -8,3 +8,4 @@ lucapi/ember-feed/shared_settings.json
 lucapi/ember-feed/logo-cache/
 lucapi/ember-feed/progress.db
 ember-pc/ui/_test.html
+__pycache__/
