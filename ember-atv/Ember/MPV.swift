@@ -79,6 +79,12 @@ final class MPVCore {
         opt("gpu-context", "moltenvk")
         opt("hwdec", "videotoolbox")
         opt("video-rotate", "no")
+        // letterbox bars jet black; HDR passed to the TV as HDR when the Apple TV is outputting HDR, and when it
+        // isn't, a tone-mapping that keeps contrast (not the flat, washed-out look)
+        opt("background-color", "#000000")
+        opt("target-colorspace-hint", "yes")
+        opt("tone-mapping", "bt.2446a")
+        opt("hdr-contrast-recovery", "0.30")
         // English audio and subtitles first, as on the PC; forced subtitles (foreign bits) still show
         opt("alang", "en,eng")
         opt("slang", "en,eng")
