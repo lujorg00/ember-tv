@@ -158,6 +158,10 @@ async fn play(
     let _ = std::fs::create_dir_all(&logdir);
     let logfile = logdir.join("mpv-log.txt");
     let _ = std::fs::remove_file(&logfile);
+    // The player's full-screen button writes this file; the watcher below turns Ember's window full screen (or back).
+    let fsfile = logdir.join("fullscreen-request");
+    let _ = std::fs::remove_file(&fsfile);
+    let is_fs = app.webview_windows().values().next().and_then(|w| w.is_fullscreen().ok()).unwrap_or(false);
 
     let mut cmd = Command::new(&mpv);
     cmd.arg(&url)
@@ -165,7 +169,8 @@ async fn play(
         .arg(format!("--script={}", plain(&script)))
         .arg(format!("--script={}", plain(&controls)))
         .arg("--load-scripts=no") // only Ember's own scripts (its controls replace ModernZ)
-        .arg(format!("--script-opts={},ember_osc-statefile={}", opts, plain(&logdir.join("subtitle-size.txt"))))
+        .arg(format!("--script-opts={},ember_osc-statefile={},ember_osc-fsfile={},ember_osc-fs={}", opts,
+            plain(&logdir.join("subtitle-size.txt")), plain(&fsfile), if is_fs { "yes" } else { "no" }))
         .arg(format!("--log-file={}", logfile.display()))
         .arg("--msg-level=all=warn,ember=v,ember_osc=v")
         .arg("--force-window=immediate")
@@ -212,12 +217,19 @@ async fn play(
     // In the window: find mpv's window, attach it over Ember's page. Then watch for playback ending.
     let pid = player.0.lock().unwrap().child.as_ref().map(|c| c.id()).unwrap_or(0);
     let (app2, p2) = (app.clone(), player.clone());
+    let fs2 = fsfile.clone();
     std::thread::spawn(move || {
         let parent = main_hwnd(&app2);
         let mut tries = 0;
         loop {
-            std::thread::sleep(Duration::from_millis(if tries < 40 { 150 } else { 500 }));
+            std::thread::sleep(Duration::from_millis(if tries < 40 { 150 } else { 250 }));
             tries += 1;
+            if let Ok(want) = std::fs::read_to_string(&fs2) {
+                let _ = std::fs::remove_file(&fs2);
+                if let Some(w) = app2.webview_windows().values().next() {
+                    let _ = w.set_fullscreen(want.trim() == "on");
+                }
+            }
             let mut g = p2.0.lock().unwrap();
             let done = match g.child.as_mut() {
                 Some(c) => match c.try_wait() {

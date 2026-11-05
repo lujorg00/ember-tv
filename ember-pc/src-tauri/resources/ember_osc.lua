@@ -8,7 +8,7 @@ local mp = require "mp"
 local msg = require "mp.msg"
 local options = require "mp.options"
 
-local opts = { next = false, accent = "F0A04B", statefile = "" }
+local opts = { next = false, accent = "F0A04B", statefile = "", fsfile = "", fs = false }
 options.read_options(opts, "ember_osc")
 
 local ICON, FONT = "modernz-icons", "Segoe UI"
@@ -19,6 +19,14 @@ local panel = false
 local scroll = { audio = 0, sub = 0 }
 local hits, out = {}, {}
 local mx, my = -1, -1
+local fullscreen = opts.fs
+
+-- Full screen is Ember's window, not mpv's (mpv sits over Ember's page): ask Ember through a small file it watches.
+local function toggle_fullscreen()
+    if opts.fsfile == "" then return end
+    local f = io.open(opts.fsfile, "w")
+    if f then f:write(fullscreen and "off" or "on"); f:close(); fullscreen = not fullscreen end
+end
 
 local function bgr(hex) return hex:sub(5, 6) .. hex:sub(3, 4) .. hex:sub(1, 2) end
 local ACCENT = bgr(opts.accent)
@@ -149,6 +157,15 @@ local function icon(x, y, size, name, c, a)
                 end
                 stroke(pts, 0.065 * s, c)
             end
+        end
+    elseif name == "fullscreen" or name == "unfullscreen" then
+        -- four corners: pointing out to go full screen, in to come back
+        local d, l, t = 0.34 * s, 0.17 * s, 0.07 * s
+        for _, q in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+            local cx, cy = x + q[1] * d, y + q[2] * d
+            if name == "unfullscreen" then cx, cy = x + q[1] * (d - l), y + q[2] * (d - l) end
+            local sx, sy = (name == "fullscreen") and -q[1] or q[1], (name == "fullscreen") and -q[2] or q[2]
+            stroke({ cx + sx * l, cy, cx, cy, cx, cy + sy * l }, t, c)
         end
     elseif name == "check" then
         stroke({ x - 0.30 * s, y, x - 0.08 * s, y + 0.22 * s, x + 0.32 * s, y - 0.22 * s }, 0.11 * s, c)
@@ -404,6 +421,10 @@ local function render()
 
     -- right: next episode, audio & subtitles
     local rx = W - M - 16 * S
+    if opts.fsfile ~= "" then
+        button(rx, ry, 28 * S, fullscreen and "unfullscreen" or "fullscreen", toggle_fullscreen)
+        rx = rx - 58 * S
+    end
     button(rx, ry, 30 * S, "subtitles", function() panel = not panel end, panel)
     if opts.next then
         button(rx - 58 * S, ry, 28 * S, "next", function() mp.commandv("quit", "5") end)
@@ -448,7 +469,9 @@ mp.add_forced_key_binding("MBTN_LEFT", "ember_osc_click", function(e)
     mp.commandv("cycle", "pause") -- a click anywhere else: pause / play
     render()
 end, { complex = true })
-mp.add_forced_key_binding("MBTN_LEFT_DBL", "ember_osc_dbl", function() end)
+mp.add_forced_key_binding("MBTN_LEFT_DBL", "ember_osc_dbl", toggle_fullscreen) -- double-click: full screen, as in every player
+mp.add_forced_key_binding("f", "ember_osc_fs", toggle_fullscreen)
+mp.add_forced_key_binding("F11", "ember_osc_f11", toggle_fullscreen)
 
 -- Mouse wheel: in the panel it scrolls the list under it; elsewhere it's volume.
 local function wheel(dir)
