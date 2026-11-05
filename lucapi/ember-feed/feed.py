@@ -12,6 +12,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /progress/<imdb> -> every saved position for one title (episode lists)
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
   GET /watchlist, POST /watchlist {imdb, type, add} -> your Trakt watchlist (what your Watchlist rows show)
+  GET /cinemas -> films in UK cinemas now (for the "In cinemas" label)
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
@@ -2359,6 +2360,24 @@ def similar(typ, imdb):
         return {"metas": [], "error": str(e)}
 
 
+def in_cinemas():
+    """Films showing in UK cinemas now (TMDB 'now playing', GB): {"items": [imdb, ...]}. Refreshed every 6 hours."""
+    def build():
+        res = []
+        for page in (1, 2, 3, 4, 5):
+            r = _tmdb("/movie/now_playing", region="GB", page=page)
+            res += r.get("results", [])
+            if page >= (r.get("total_pages") or 1):
+                break
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            ids = list(ex.map(lambda x: _imdb_for("movie", x["id"]), res))
+        return sorted({i for i in ids if i and i.startswith("tt")})
+    try:
+        return {"items": cached("cinemas", 6 * 3600, build)}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
 def browse_tiles():
     try:
         return cached("browse:tiles", 24 * 3600, _build_tiles)
@@ -2521,6 +2540,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(jellyfin_summary())
             elif path == "/watchlist":
                 self._json(watchlist())
+            elif path == "/cinemas":
+                self._json(in_cinemas())
             elif path == "/watched":
                 self._json(watched_status())
             elif path == "/progress/dismissed":

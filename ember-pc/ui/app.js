@@ -87,8 +87,16 @@ document.addEventListener("click", async (e) => {
   }
   b.classList.remove("busy");
 }, true);
+// Films still in cinemas (UK), for a small label on their posters and details page.
+let cinemaSet = new Set(), cinemaAt = 0;
+async function loadCinemas() {
+  if (Date.now() - cinemaAt < 3 * 3600e3) return;
+  try { cinemaSet = new Set((await getJson(`${feed()}/cinemas`, 10000)).items || []); cinemaAt = Date.now(); } catch (e) {}
+}
+const cinemaTag = (m, type) => (m.type || type) === "movie" && cinemaSet.has(m.id) ? `<span class="incinema">In cinemas</span>` : "";
 async function loadProgress() {
-  const w = loadWatched();
+  const w = loadWatched(), c = loadCinemas();
+  await c;
   try { progress = (await getJson(`${feed()}/progress`, 6000)).items || {}; } catch (e) { progress = progress || {}; }
   await w;
 }
@@ -165,7 +173,7 @@ document.addEventListener("keydown", e => {
 function card(m, type) {
   const p = progress[m.id];
   const el = h(`<div class="poster" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(poster(m))}')">
-    ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}
+    ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}${cinemaTag(m, type)}
     ${p ? `<div class="bar"><i style="width:${Math.max(3, Math.min(100, p.progress))}%"></i></div>` : ""}</div>`);
   el.onclick = () => go("title", m.type || type, m.id, m);
   return el;
@@ -677,6 +685,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   };
   head.innerHTML = `${mm.logo ? `<img class="tp-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">` : `<h1>${esc(mm.name)}</h1>`}
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
+    ${type === "movie" && cinemaSet.has(id) ? `<div class="tp-cinema"><i></i>In cinemas now</div>` : ""}
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
     <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
