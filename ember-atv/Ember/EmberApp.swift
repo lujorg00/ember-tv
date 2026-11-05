@@ -18,7 +18,7 @@ struct EmberApp: App {
         URLCache.shared = URLCache(memoryCapacity: 96 << 20, diskCapacity: 768 << 20)
         // films and shows: full surround to the TV or soundbar (5.1 / 7.1), not stereo
         let audio = AVAudioSession.sharedInstance()
-        try? audio.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+        try? audio.setCategory(.playback, mode: .moviePlayback)
         try? audio.setActive(true)
         try? audio.setPreferredOutputNumberOfChannels(audio.maximumOutputNumberOfChannels)
     }
