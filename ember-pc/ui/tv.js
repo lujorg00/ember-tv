@@ -1,5 +1,5 @@
 // Ember TV: the same page, driven by the remote. Does nothing on the PC.
-//   arrows move between things (the nearest one that way), OK opens, hold OK on a poster to mark it watched,
+//   arrows move between things (the nearest one that way), OK opens, hold OK on a poster or episode to mark it watched,
 //   Back closes a panel or goes back a page, the keyboard comes up for search.
 "use strict";
 (() => {
@@ -97,10 +97,10 @@
     okLong = false;
     clearTimeout(okTimer);
     const el = cur;
-    if (el && (el.classList.contains("poster") || el.classList.contains("t10"))) {
+    if (el && (el.classList.contains("poster") || el.classList.contains("t10") || el.classList.contains("epc"))) {
       okTimer = setTimeout(() => {
         okLong = true;
-        const b = el.querySelector(".wbadge");
+        const b = el.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
         if (b) b.click();
       }, 650);
     }

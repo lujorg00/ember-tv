@@ -514,3 +514,6 @@ input { font: inherit; color: var(--text); }
 .apptile > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .apptile .ai { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #EDE2D6; font-weight: 600; font-size: 17px; }
 .apptile .ai img { width: 64px; height: 64px; }
+
+/* TV: an episode's tick shows while it's selected (hold OK to use it) */
+.tv .epc.tvf .ep-mark { opacity: 1; }
