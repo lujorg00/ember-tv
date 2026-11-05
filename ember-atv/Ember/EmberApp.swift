@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 enum Theme {
     static let accent = Color(red: 0.941, green: 0.627, blue: 0.294)     // #F0A04B, Ember's orange
@@ -15,6 +16,11 @@ struct EmberApp: App {
     init() {
         // posters and backdrops: keep plenty on disk so rows come back instantly
         URLCache.shared = URLCache(memoryCapacity: 96 << 20, diskCapacity: 768 << 20)
+        // films and shows: full surround to the TV or soundbar (5.1 / 7.1), not stereo
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+        try? audio.setActive(true)
+        try? audio.setPreferredOutputNumberOfChannels(audio.maximumOutputNumberOfChannels)
     }
 
     var body: some Scene {

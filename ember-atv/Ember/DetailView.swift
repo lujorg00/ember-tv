@@ -10,6 +10,8 @@ struct DetailView: View {
     @State private var nextUp: (Int, Int)?
     @State private var similar: [Meta] = []
     @State private var hasTrailer = false
+    @State private var picking = false
+    @State private var streamList: [Ranked]?
 
     private var mm: Meta { m ?? meta }
     private func key(_ s: Int?, _ e: Int?) -> String { "\(s.map(String.init) ?? ""):\(e.map(String.init) ?? "")" }
@@ -55,6 +57,7 @@ struct DetailView: View {
                     Text(mm.description).font(.system(size: 24)).lineLimit(4).frame(maxWidth: 920, alignment: .leading)
                     HStack(spacing: 24) {
                         Button { play() } label: { Label(playLabel, systemImage: "play.fill") }
+                        Button { chooseStream() } label: { Label("Choose stream", systemImage: "list.bullet") }
                         if !mm.isSeries {
                             let done = store.watched[mm.id] == "done"
                             Button {
@@ -83,6 +86,15 @@ struct DetailView: View {
         }
         .background(Theme.bg)
         .task { await load() }
+        .sheet(isPresented: $picking) {
+            StreamPicker(streams: streamList) { r in
+                picking = false
+                let v = current
+                let sp = mm.isSeries ? v.flatMap { saved[key($0.season, $0.episode)] } : saved[key(nil, nil)]
+                store.playChosen(mm, season: v?.season, episode: v?.episode, epTitle: v?.title ?? "",
+                                 start: sp?.resumable == true ? sp!.position : 0, stream: r)
+            }
+        }
         .onChange(of: store.progressVersion) { _, _ in Task { await loadSaved() } }
     }
 
@@ -192,6 +204,14 @@ struct DetailView: View {
         saved = out
     }
 
+    private func chooseStream() {
+        if mm.isSeries && current == nil { return store.say("Pick an episode first.") }
+        streamList = nil
+        picking = true
+        let v = current
+        Task { streamList = await store.streams(mm, season: v?.season, episode: v?.episode) ?? [] }
+    }
+
     private func play() {
         if mm.isSeries {
             guard let v = current else { return store.say("Pick an episode first.") }
@@ -205,5 +225,47 @@ struct DetailView: View {
     private func playEpisode(_ v: Video) {
         let sp = saved[key(v.season, v.episode)]
         store.playBest(mm, season: v.season, episode: v.episode, epTitle: v.title, start: sp?.resumable == true ? sp!.position : 0)
+    }
+}
+
+/// Every stream, best first, with what it is (4K, Dolby Vision, Atmos...), its speed test and its name.
+struct StreamPicker: View {
+    let streams: [Ranked]?
+    let pick: (Ranked) -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Choose stream").font(.system(size: 40, weight: .bold))
+            if let streams {
+                if streams.isEmpty { Text("No streams found.").foregroundStyle(Theme.muted) }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(streams.indices, id: \.self) { i in
+                            let r = streams[i]
+                            Button { pick(r) } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 8) {
+                                        ForEach(r.badges, id: \.self) { b in
+                                            Text(b).font(.system(size: 17, weight: .bold)).padding(.horizontal, 9).padding(.vertical, 3)
+                                                .background(Theme.accent.opacity(0.85), in: RoundedRectangle(cornerRadius: 6)).foregroundStyle(Theme.ink)
+                                        }
+                                        if let mb = r.mbps { Text("\(Int(mb)) Mbit/s").font(.system(size: 17)).foregroundStyle(Theme.muted) }
+                                        if !r.ok { Text("failed speed test").font(.system(size: 17)).foregroundStyle(.red.opacity(0.8)) }
+                                    }
+                                    Text(r.label).font(.system(size: 21)).lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 10)
+                }
+            } else {
+                HStack(spacing: 18) { ProgressView(); Text("Finding and testing streams…").foregroundStyle(Theme.muted) }
+                Spacer()
+            }
+        }
+        .padding(60)
+        .frame(width: 1300, height: 900, alignment: .topLeading)
     }
 }

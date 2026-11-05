@@ -54,6 +54,8 @@ android {
 
 dependencies {
     // The player: Google's Media3 (ExoPlayer), made for Android TV - 4K, HDR, Dolby Vision, passthrough, subtitles
-    implementation 'androidx.media3:media3-exoplayer:1.4.1'
-    implementation 'androidx.media3:media3-ui:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer:1.6.1'
+    implementation 'androidx.media3:media3-ui:1.6.1'
+    // FFmpeg audio decoders (Jellyfin's build): DTS, DTS-HD, TrueHD and the rest the Chromecast can't decode itself
+    implementation 'org.jellyfin.media3:media3-ffmpeg-decoder:1.6.1+2'
 }

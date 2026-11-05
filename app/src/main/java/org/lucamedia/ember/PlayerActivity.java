@@ -154,7 +154,12 @@ public class PlayerActivity extends Activity {
             if (visibility == View.VISIBLE && !upNextShown) h.postDelayed(this::focusTimeline, 150);
         });
 
-        player = new ExoPlayer.Builder(this, new DefaultRenderersFactory(this).setEnableDecoderFallback(true)).build();
+        // the Chromecast's own decoders first; FFmpeg's for the audio it can't do (DTS, TrueHD...), so nothing is skipped
+        DefaultRenderersFactory rf = new DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON);
+        player = new ExoPlayer.Builder(this, rf).build();
+        // the TV's refresh rate follows the film (24p stays 24p) when "Match content frame rate" is on in Google TV's settings
+        player.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF);
         // English audio and subtitles first, as on the PC; Dolby / DTS go untouched to the TV or soundbar when it can take them
         TrackSelectionParameters p = player.getTrackSelectionParameters().buildUpon()
                 .setPreferredAudioLanguage("en").setPreferredTextLanguage("en").build();
@@ -198,6 +203,9 @@ public class PlayerActivity extends Activity {
             }
 
             @Override
+            public void onVideoSizeChanged(androidx.media3.common.VideoSize size) { matchFrameRate(); }
+
+            @Override
             public void onIsPlayingChanged(boolean isPlaying) {
                 if (!isPlaying && started && !done) report("paused", false);
             }
@@ -218,6 +226,21 @@ public class PlayerActivity extends Activity {
         h.postDelayed(tick, 1000);
         // not started after 25 s: let Ember try the next stream
         h.postDelayed(() -> { if (!started && !done) finishWith(EXIT_STALL); }, 25_000);
+    }
+
+    /** Asks Android to switch the TV to the film's frame rate, even if the switch isn't seamless (as Google TV's own apps do). */
+    private void matchFrameRate() {
+        if (android.os.Build.VERSION.SDK_INT < 31 || player == null) return;
+        androidx.media3.common.Format f = player.getVideoFormat();
+        View sv = view.getVideoSurfaceView();
+        if (f == null || f.frameRate <= 0 || !(sv instanceof android.view.SurfaceView)) return;
+        android.view.Surface s = ((android.view.SurfaceView) sv).getHolder().getSurface();
+        if (s == null || !s.isValid()) return;
+        try {
+            s.setFrameRate(f.frameRate, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE, android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+        } catch (Exception e) {
+            Log.w(TAG, "frame rate: " + e);
+        }
     }
 
     private long lastReport = 0;

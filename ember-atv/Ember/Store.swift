@@ -409,11 +409,8 @@ final class Store: ObservableObject {
             loading = LoadState(art: full.backdropURL, logo: full.logoURL, title: full.name, sub: sub,
                                 steps: ["Finding streams", "Testing the best ones for speed", "Starting playback"])
             let stepper = Task { try? await Task.sleep(nanoseconds: 1_800_000_000); if loading?.step == 0 { loading?.step = 1 } }
-            let sid = full.isSeries ? "\(full.id):\(season ?? 1):\(episode ?? 1)" : full.id
-            let runtime = full.runtimeMinutes.map(String.init) ?? ""
-            let path = "/pick/\(full.isSeries ? "series" : "movie")/\(API.q(sid))?aio=\(API.q(aio))&quality=4k&runtime=\(runtime)&passthrough=0"
             let res: JSON
-            do { res = try await API.feedGet(path, timeout: 60) } catch {
+            do { res = try await API.feedGet(pickPath(full, season, episode), timeout: 60) } catch {
                 stepper.cancel(); loading = nil
                 say("Couldn't ask lucapi for the best stream: \(error.localizedDescription)")
                 return
@@ -427,6 +424,28 @@ final class Store: ObservableObject {
             playing = PlaySession(meta: full, season: season, episode: episode, epTitle: epTitle, start: start, ranked: ranked)
             try? await Task.sleep(nanoseconds: 1_400_000_000)
             loading = nil
+        }
+    }
+
+    private func pickPath(_ m: Meta, _ season: Int?, _ episode: Int?) -> String {
+        let sid = m.isSeries ? "\(m.id):\(season ?? 1):\(episode ?? 1)" : m.id
+        let runtime = m.runtimeMinutes.map(String.init) ?? ""
+        return "/pick/\(m.isSeries ? "series" : "movie")/\(API.q(sid))?aio=\(API.q(aio))&quality=4k&runtime=\(runtime)&passthrough=0"
+    }
+
+    /// Every stream for this film or episode, best first (as Ember PC's "Choose stream").
+    func streams(_ m: Meta, season: Int?, episode: Int?) async -> [Ranked]? {
+        guard !aio.isEmpty else { say("No AIOStreams link yet: open Ember PC once, it shares the link through lucapi."); return nil }
+        let full = await MetaCache.shared.full(m)
+        guard let r = try? await API.feedGet(pickPath(full, season, episode), timeout: 60) else { say("Couldn't reach lucapi for the streams."); return nil }
+        return r.arr("ranked").map(Ranked.init).filter { !$0.url.isEmpty }
+    }
+
+    /// One you picked: played as it is, no switching to another if it stalls.
+    func playChosen(_ m: Meta, season: Int?, episode: Int?, epTitle: String, start: Double, stream: Ranked) {
+        Task {
+            let full = await MetaCache.shared.full(m)
+            playing = PlaySession(meta: full, season: season, episode: episode, epTitle: epTitle, start: start, ranked: [stream])
         }
     }
 

@@ -25,6 +25,8 @@ struct Track: Identifiable, Hashable {
     let type: String       // "audio", "sub", "video"
     let label: String
     let selected: Bool
+    var lang: String = ""
+    var forced: Bool = false
 }
 
 /// Hosts mpv's picture: a Metal layer filling the screen.
@@ -89,7 +91,7 @@ final class MPVCore {
         opt("alang", "en,eng")
         opt("slang", "en,eng")
         opt("subs-fallback", "yes")
-        opt("sub-scale", "0.75")
+        opt("sub-scale", String(UserDefaults.standard.object(forKey: "subScale") as? Double ?? 0.75))
         opt("cache", "yes")
         opt("demuxer-max-bytes", "150MiB")
         opt("demuxer-max-back-bytes", "40MiB")
@@ -140,6 +142,13 @@ final class MPVCore {
         return Int(d)
     }
 
+    func double(_ name: String) -> Double {
+        guard let mpv else { return 0 }
+        var d: Double = 0
+        mpv_get_property(mpv, name, MPV_FORMAT_DOUBLE, &d)
+        return d
+    }
+
     func string(_ name: String) -> String? {
         guard let mpv, let c = mpv_get_property_string(mpv, name) else { return nil }
         defer { mpv_free(c) }
@@ -175,7 +184,9 @@ final class MPVCore {
             if !title.isEmpty && title.lowercased() != name.lowercased() { parts.append(title) }
             if type == "audio" { if !ch.isEmpty { parts.append(ch) }; if !codec.isEmpty { parts.append(codec) } }
             if forced { parts.append("Forced") }
-            out.append(Track(id: id, type: type, label: parts.joined(separator: " · "), selected: flag("track-list/\(i)/selected")))
+            if flag("track-list/\(i)/external") && type == "sub" && title.isEmpty { parts.append("Downloaded") }
+            out.append(Track(id: id, type: type, label: parts.joined(separator: " · "), selected: flag("track-list/\(i)/selected"),
+                             lang: lang.lowercased(), forced: forced))
         }
         return out
     }

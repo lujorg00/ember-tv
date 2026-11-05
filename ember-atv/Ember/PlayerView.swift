@@ -1,5 +1,8 @@
 import SwiftUI
 import UIKit
+import AVKit
+import AVFoundation
+import CoreMedia
 
 /// What the player screen shows and does: playback state from mpv, progress reports to lucapi,
 /// giving up on a stream that won't start or keeps stalling, and the "Next episode" pop-up in the credits.
@@ -14,6 +17,8 @@ final class PlayerModel: ObservableObject, MPVEvents {
     @Published var upNext = false
     @Published var countdown = 15
     @Published var tracks: [Track] = []
+    @Published var subDelay: Double = 0
+    @Published var subScale: Double = UserDefaults.standard.object(forKey: "subScale") as? Double ?? 0.75
 
     let core = MPVCore()
     private(set) var session: PlaySession?
@@ -26,6 +31,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var done = false
     private var ticker: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
+    private var switching = false        // the TV is changing mode (frame rate / HDR): playback held meanwhile
 
     func begin(_ s: PlaySession, store: Store) {
         guard session == nil else { return }
@@ -55,6 +61,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     func mpvDuration(_ d: Double) { dur = d }
     func mpvPaused(_ p: Bool) {
         paused = p
+        if switching { return }
         if p && started && !done { report("paused") }
         if p { showControls(for: 3600) } else { showControls() }
     }
@@ -63,7 +70,11 @@ final class PlayerModel: ObservableObject, MPVEvents {
         bufferingSince = b && started ? Date() : nil
     }
     func mpvStarted() {
-        if !started { tracks = core.tracks() }
+        if !started {
+            tracks = core.tracks()
+            matchDisplay()
+            setupTracks()
+        }
         started = true
         buffering = false
         bufferingSince = nil
@@ -120,9 +131,104 @@ final class PlayerModel: ObservableObject, MPVEvents {
         showControls()
     }
     func togglePause() { core.togglePause() }
-    func refreshTracks() { tracks = core.tracks() }
-    func selectSubtitle(_ t: Track?) { core.set("sid", t.map { String($0.id) } ?? "no"); refreshTracks() }
-    func selectAudio(_ t: Track) { core.set("aid", String(t.id)); refreshTracks() }
+    func refreshTracks() { tracks = core.tracks(); subDelay = core.double("sub-delay") }
+    func selectSubtitle(_ t: Track?) {
+        core.set("sid", t.map { String($0.id) } ?? "no")
+        remember("sub", t.map { $0.lang.isEmpty ? "und" : $0.lang } ?? "off")
+        refreshTracks()
+    }
+    func selectAudio(_ t: Track) {
+        core.set("aid", String(t.id))
+        remember("audio", t.lang)
+        refreshTracks()
+    }
+    func setSubScale(_ v: Double) {
+        subScale = v
+        core.set("sub-scale", String(v))
+        UserDefaults.standard.set(v, forKey: "subScale")
+    }
+    func nudgeSubs(_ by: Double) {
+        if by == 0 { core.set("sub-delay", "0") } else { core.command(["add", "sub-delay", String(by)]) }
+        refreshTracks()
+    }
+
+    // MARK: audio and subtitle choices, remembered per film or show
+
+    private var tracksKey: String { "tracks:\(session?.meta.id ?? "")" }
+    private func remember(_ k: String, _ v: String) {
+        guard session?.trailer == false else { return }
+        var d = UserDefaults.standard.dictionary(forKey: tracksKey) as? [String: String] ?? [:]
+        d[k] = v
+        UserDefaults.standard.set(d, forKey: tracksKey)
+    }
+
+    /// Your last choices for this show (or film) put back; English subtitles fetched from OpenSubtitles
+    /// (the same source as Stremio's) when the file has none of its own.
+    private func setupTracks() {
+        guard let s = session, !s.trailer else { return }
+        let saved = UserDefaults.standard.dictionary(forKey: tracksKey) as? [String: String] ?? [:]
+        if let a = saved["audio"], !a.isEmpty, let t = tracks.first(where: { $0.type == "audio" && $0.lang == a && !$0.selected }) {
+            core.set("aid", String(t.id))
+        }
+        if let sub = saved["sub"] {
+            if sub == "off" { core.set("sid", "no") }
+            else if let t = tracks.first(where: { $0.type == "sub" && $0.lang == sub && !$0.forced }) { core.set("sid", String(t.id)) }
+        }
+        let english = tracks.contains { $0.type == "sub" && !$0.forced && ["en", "eng"].contains($0.lang) }
+        if !english {
+            let wantNow = ["en", "eng"].contains(saved["sub"] ?? "")
+            let type = s.meta.isSeries ? "series" : "movie"
+            let id = s.season != nil ? "\(s.meta.id):\(s.season!):\(s.episode ?? 1)" : s.meta.id
+            Task {
+                guard let j = try? await API.get("https://opensubtitles-v3.strem.io/subtitles/\(type)/\(id).json", timeout: 12) else { return }
+                let eng = j.arr("subtitles").filter { ["eng", "en"].contains(($0.str("lang") ?? "").lowercased()) }.compactMap { $0.str("url") }
+                for (i, u) in eng.prefix(3).enumerated() {
+                    core.command(["sub-add", u, i == 0 && wantNow ? "select" : "auto", "OpenSubtitles \(i + 1)", "eng"])
+                }
+                refreshTracks()
+            }
+        }
+        refreshTracks()
+    }
+
+    // MARK: the TV's picture mode follows the video (frame rate, HDR), when "Match Content" is on in the Apple TV's settings
+
+    private var displayManager: AVDisplayManager? {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.avDisplayManager
+    }
+
+    private func matchDisplay() {
+        guard let dm = displayManager, dm.isDisplayCriteriaMatchingEnabled else { return }
+        let gamma = core.string("video-params/gamma") ?? ""
+        let w = core.int("video-params/w"), h = core.int("video-params/h")
+        let fps = core.double("container-fps")
+        guard w > 0, h > 0 else { return }
+        // Dolby Vision is shown as HDR10 by mpv, so the TV is asked for HDR10 then (not Dolby Vision mode)
+        let hdr = gamma == "pq" || gamma == "hlg"
+        let transfer = gamma == "pq" ? kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ
+            : gamma == "hlg" ? kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG : kCMFormatDescriptionTransferFunction_ITU_R_709_2
+        let ext: [String: Any] = [
+            kCMFormatDescriptionExtension_TransferFunction as String: transfer,
+            kCMFormatDescriptionExtension_ColorPrimaries as String: hdr ? kCMFormatDescriptionColorPrimaries_ITU_R_2020 : kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+            kCMFormatDescriptionExtension_YCbCrMatrix as String: hdr ? kCMFormatDescriptionYCbCrMatrix_ITU_R_2020 : kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2,
+        ]
+        var fd: CMFormatDescription?
+        CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCMVideoCodecType_HEVC,
+                                       width: Int32(w), height: Int32(h), extensions: ext as CFDictionary, formatDescriptionOut: &fd)
+        guard let fd else { return }
+        dm.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(fps), formatDescription: fd)
+        // hold playback while the TV changes mode, so nothing is missed in the blank second or two
+        switching = true
+        core.pause()
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            for _ in 0..<50 where dm.isDisplayModeSwitchInProgress { try? await Task.sleep(nanoseconds: 150_000_000) }
+            switching = false
+            core.play()
+        }
+    }
+
+    private func resetDisplay() { displayManager?.preferredDisplayCriteria = nil }
     func watchCredits() { creditsWanted = true; upNext = false }
     func playNext() {
         guard !done else { return }
@@ -143,6 +249,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     private func finish(_ how: PlayEnd) {
         done = true
+        if case .next = how {} else { resetDisplay() }   // straight into the next episode: stay in this mode
         ticker?.cancel()
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
@@ -230,9 +337,19 @@ struct PlayerScreen: View {
         .onChange(of: model.controls) { _, on in if !on && !model.upNext { focus = .catcher } }
         .onChange(of: model.upNext) { _, on in focus = on ? .upPlay : .catcher }
         .confirmationDialog("Subtitles", isPresented: $showSubs) {
-            Button("Off") { model.selectSubtitle(nil) }
-            ForEach(model.tracks.filter { $0.type == "sub" }) { t in
+            let subs = model.tracks.filter { $0.type == "sub" }
+            Button((subs.contains { $0.selected } ? "" : "✓ ") + "Off") { model.selectSubtitle(nil) }
+            ForEach(subs) { t in
                 Button((t.selected ? "✓ " : "") + t.label) { model.selectSubtitle(t) }
+            }
+            Button("Size: " + (model.subScale < 0.7 ? "Small" : model.subScale > 0.8 ? "Large" : "Medium") + "  (change)") {
+                model.setSubScale(model.subScale < 0.7 ? 0.75 : model.subScale > 0.8 ? 0.6 : 0.9)
+                reopenSubs()
+            }
+            Button("Timing: show earlier (−0.5 s)") { model.nudgeSubs(-0.5); reopenSubs() }
+            Button("Timing: show later (+0.5 s)") { model.nudgeSubs(0.5); reopenSubs() }
+            if model.subDelay != 0 {
+                Button("Timing: reset (now \(String(format: "%+.1f", model.subDelay)) s)") { model.nudgeSubs(0); reopenSubs() }
             }
         }
         .confirmationDialog("Audio", isPresented: $showAudio) {
@@ -240,6 +357,11 @@ struct PlayerScreen: View {
                 Button((t.selected ? "✓ " : "") + t.label) { model.selectAudio(t) }
             }
         }
+    }
+
+    /// Size and timing changes keep the menu open (it closes itself after each choice), so you can see the effect and go again.
+    private func reopenSubs() {
+        Task { try? await Task.sleep(nanoseconds: 450_000_000); showSubs = true }
     }
 
     // MARK: the controls: title, timeline, subtitles, audio, next episode
