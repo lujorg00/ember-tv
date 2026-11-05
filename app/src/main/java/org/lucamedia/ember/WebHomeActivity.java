@@ -81,11 +81,36 @@ public class WebHomeActivity extends Activity {
     }
 
     // Back: the page decides (close a panel, go back a page); on the first page it does nothing, as a home screen should.
+    // Holding OK: Android sees the hold (the page doesn't reliably), so it's spotted here and passed on.
+    private long okDownAt = 0;
+    private boolean okHeld = false;
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+        int k = e.getKeyCode();
+        if (k == KeyEvent.KEYCODE_BACK) {
             if (e.getAction() == KeyEvent.ACTION_UP) web.evaluateJavascript("window.emberTvBack && emberTvBack()", null);
             return true;
+        }
+        if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                if (e.getRepeatCount() == 0) {
+                    okDownAt = e.getEventTime();
+                    okHeld = false;
+                    return super.dispatchKeyEvent(e);
+                }
+                // still held: after 0.6 s it's a hold, once; the rest of the repeats are swallowed
+                if (!okHeld && e.getEventTime() - okDownAt >= 600) {
+                    okHeld = true;
+                    web.evaluateJavascript("window.emberTvLongOk && emberTvLongOk()", null);
+                }
+                return true;
+            }
+            if (e.getAction() == KeyEvent.ACTION_UP && okHeld) {
+                okHeld = false;
+                web.evaluateJavascript("window.emberTvOkCancel && emberTvOkCancel()", null);
+                return true; // a hold isn't also a press
+            }
         }
         return super.dispatchKeyEvent(e);
     }

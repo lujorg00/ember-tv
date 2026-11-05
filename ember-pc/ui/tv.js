@@ -90,24 +90,17 @@
     return pick;
   }
 
-  // OK: open it. Held on a poster: mark it watched (the tick box on the PC).
-  let okTimer = 0, okLong = false;
-  function okDown(e) {
-    if (e.repeat) return;
-    okLong = false;
-    clearTimeout(okTimer);
-    const el = cur;
-    if (el && (el.classList.contains("poster") || el.classList.contains("t10") || el.classList.contains("epc"))) {
-      okTimer = setTimeout(() => {
-        okLong = true;
-        const b = el.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
-        if (b) b.click();
-      }, 650);
-    }
-  }
+  // OK: open it. Held (Android tells us, see WebHomeActivity): mark a poster or episode watched.
+  let okLong = false;
+  function okDown(e) { if (!e.repeat) okLong = false; }
+  window.emberTvLongOk = () => {
+    okLong = true;
+    const b = cur && cur.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
+    if (b) b.click();
+  };
+  window.emberTvOkCancel = () => { okLong = true; };
   function okUp() {
-    clearTimeout(okTimer);
-    if (okLong || !cur) return;
+    if (okLong || !cur) { okLong = false; return; }
     const el = cur;
     if (el.matches("input[type=text], input:not([type])")) { el.focus(); EmberTV.showKeyboard(); return; }
     if (el.tagName === "SELECT") { el.focus(); return; }
