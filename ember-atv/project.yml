@@ -1,0 +1,47 @@
+# Ember for Apple TV. The Xcode project is generated from this on GitHub's Mac builders (XcodeGen),
+# built unsigned, and atvloadly on lucapi signs and installs it.
+name: Ember
+options:
+  bundleIdPrefix: org.lucamedia
+  deploymentTarget:
+    tvOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  MPVKit:
+    url: https://github.com/mpvkit/MPVKit.git
+    revision: 98c3453e252922e3136422da3fbb2e341ed9edc8   # 1.1.0-n9.0.2 (mpv 0.41, FFmpeg 9)
+targets:
+  Ember:
+    type: application
+    platform: tvOS
+    scheme: {}
+    sources:
+      - path: Ember
+    dependencies:
+      - package: MPVKit
+        product: MPVKit-GPL
+    info:
+      path: Ember/Info.plist
+      properties:
+        CFBundleDisplayName: Ember
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UIRequiredDeviceCapabilities: [arm64]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true          # lucapi is plain http on the home network
+        NSLocalNetworkUsageDescription: Ember talks to lucapi, your home server, for your rows and where you are in each show.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.lucamedia.ember
+        PRODUCT_NAME: Ember
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+        TARGETED_DEVICE_FAMILY: "3"
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+        DEAD_CODE_STRIPPING: "YES"

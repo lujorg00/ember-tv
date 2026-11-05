@@ -9,3 +9,7 @@ lucapi/ember-feed/logo-cache/
 lucapi/ember-feed/progress.db
 ember-pc/ui/_test.html
 __pycache__/
+ember-atv/Ember.xcodeproj/
+ember-atv/build/
+ember-atv/Payload/
+ember-atv/*.ipa

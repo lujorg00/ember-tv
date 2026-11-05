@@ -1,0 +1,50 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @EnvironmentObject var store: Store
+    @AppStorage("feed") private var feed = ""
+
+    var body: some View {
+        NavigationStack {
+            HStack(alignment: .top, spacing: 80) {
+                VStack(spacing: 24) {
+                    Flame().frame(width: 120, height: 155)
+                    Text("Ember").font(.system(size: 60, weight: .bold)).foregroundStyle(Theme.accent)
+                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+                .frame(width: 520)
+                .padding(.top, 60)
+
+                List {
+                    Section {
+                        TextField("lucapi address", text: $feed, prompt: Text(API.defaultFeed))
+                            .keyboardType(.URL)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    } header: { Text("lucapi") } footer: {
+                        Text("Your rows, where you are in everything, and the stream picker all come from here. Leave it empty for \(API.defaultFeed).")
+                    }
+                    Section("AIOStreams") {
+                        HStack {
+                            Text(store.aio.isEmpty ? "Not linked yet" : "Linked, from lucapi")
+                            Spacer()
+                            Image(systemName: store.aio.isEmpty ? "exclamationmark.triangle" : "checkmark.circle.fill")
+                                .foregroundStyle(store.aio.isEmpty ? .yellow : Theme.accent)
+                        }
+                        if store.aio.isEmpty {
+                            Text("Open Ember PC once: it shares the link with your TVs through lucapi.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    Section {
+                        Button("Reload everything") { Task { await store.loadHome() } }
+                    } footer: {
+                        Text("Plays and progress are reported as \"\(API.deviceName)\", so Ember PC and Ember TV can carry on where you stopped.")
+                    }
+                }
+                .frame(maxWidth: 1000)
+            }
+            .padding(.horizontal, 90)
+        }
+    }
+}

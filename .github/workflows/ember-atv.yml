@@ -1,0 +1,71 @@
+name: Build Ember for Apple TV
+
+# Builds the tvOS app unsigned on GitHub's Mac builders. atvloadly on lucapi signs it with your Apple ID,
+# installs it, and re-signs it every week. The newest build is always at
+# https://github.com/<you>/<repo>/releases/download/atv/Ember.ipa
+on:
+  push:
+    branches: [main]
+    paths: ['ember-atv/**', '.github/workflows/ember-atv.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ember-atv
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          brew install xcodegen
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i tvos || true
+
+      - name: tvOS platform
+        run: xcodebuild -showsdks | grep -q appletvos || xcodebuild -downloadPlatform tvOS
+
+      - name: Generate the Xcode project
+        working-directory: ember-atv
+        run: |
+          sed -i '' "s/CFBundleVersion: \"1\"/CFBundleVersion: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+
+      - name: Build (unsigned)
+        working-directory: ember-atv
+        run: |
+          set -o pipefail
+          xcodebuild -project Ember.xcodeproj -scheme Ember -configuration Release \
+            -sdk appletvos -destination 'generic/platform=tvOS' -derivedDataPath build \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* " || true
+          test -d build/Build/Products/Release-appletvos/Ember.app || { grep -E "error:" -A3 build.log | head -80; exit 1; }
+
+      - name: Package Ember.ipa
+        working-directory: ember-atv
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-appletvos/Ember.app Payload/
+          zip -qry Ember.ipa Payload
+          ls -lh Ember.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ember-ipa
+          path: ember-atv/Ember.ipa
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: atv
+          name: Ember for Apple TV
+          body: "Unsigned. Install with atvloadly on lucapi (http://192.168.4.141:5533). Build ${{ github.run_number }}."
+          files: ember-atv/Ember.ipa
+          prerelease: true
+          make_latest: false
