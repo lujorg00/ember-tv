@@ -1194,10 +1194,12 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
     loader.hide(1600); // mpv's window is up and covering us by then
     if (!retry && !chosen) toast(`${mm.name}${season ? ` S${season} E${episode}` : ""}${start ? " from " + fmt(start) : ""}${chosen && chosen.filename ? " · " + chosen.filename.slice(0, 60) : ""}. Esc goes back.`, 5000);
     sky.pause(true);
+    document.body.classList.add("playing"); // anything showing round the picture is black
     clearInterval(watching);
     watching = setInterval(async () => {
       if (await invoke("playing")) return;
       clearInterval(watching);
+      document.body.classList.remove("playing");
       const code = await invoke("last_exit");
       if (attempt && (code === 2 || code === 4) && await tryNext(code === 2 ? "wouldn't play" : "kept stalling")) return;
       if (code === 5 && next) { // "Next episode" in the player

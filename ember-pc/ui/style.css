@@ -533,3 +533,7 @@ input { font: inherit; color: var(--text); }
 .tvm-b { padding: 12px 16px; border-radius: 10px; text-align: left; font-size: 17px; background: rgba(255,255,255,.06); color: var(--text); }
 .tvm-b.tvf { background: #fff; color: #1A0F08; box-shadow: none !important; }
 .tvm-b.danger.tvf { background: #E2553F; color: #fff; }
+
+/* while a film plays: everything behind mpv's window is black (no glow or page showing round the picture) */
+body.playing, body.playing #view { background: #000 !important; }
+body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidden; }
