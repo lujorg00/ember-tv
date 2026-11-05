@@ -46,7 +46,7 @@ jobs:
             -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)|\*\* " || true
-          test -d build/Build/Products/Release-appletvos/Ember.app || { grep -E "error:" -A3 build.log | head -80; exit 1; }
+          grep -q "BUILD SUCCEEDED" build.log || { grep -E "error:" -A3 build.log | head -80; exit 1; }
 
       - name: Package Ember.ipa
         working-directory: ember-atv

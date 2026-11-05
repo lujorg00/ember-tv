@@ -339,7 +339,8 @@ final class Store: ObservableObject {
                                       ranked: [Ranked(["url": url, "name": "Trailer"])], trailer: true)
                 return
             }
-            let yt = r?.str("yt") ?? ((try? await API.feedGet(path, timeout: 15))?.str("yt") ?? "")
+            var yt = r?.str("yt") ?? ""
+            if yt.isEmpty, let j = try? await API.feedGet(path, timeout: 15) { yt = j.str("yt") ?? "" }
             guard !yt.isEmpty else { say("No trailer found for \(m.name)."); return }
             for link in ["youtube://watch/\(yt)", "youtube://www.youtube.com/watch?v=\(yt)", "https://www.youtube.com/watch?v=\(yt)"] {
                 if let u = URL(string: link), await UIApplication.shared.open(u, options: [:]) { return }
