@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     # the TV app now carries Ember PC's interface (ember-pc/ui), so only the PC-only parts are ignored
-    paths-ignore: ['ember-pc/src-tauri/**', 'ember-pc/package*.json', '.github/workflows/ember-pc.yml']
+    paths-ignore: ['ember-pc/src-tauri/**', 'ember-pc/package*.json', '.github/workflows/ember-pc.yml', 'ember-atv/**', '.github/workflows/ember-atv.yml', 'lucapi/**']
   workflow_dispatch:
 
 permissions:
