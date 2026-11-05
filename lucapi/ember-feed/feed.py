@@ -1976,7 +1976,7 @@ def _wikidata_logo(article):
         q = urllib.parse.urlencode({"action": "wbgetentities", "sites": "enwiki", "titles": article, "props": "claims",
                                     "format": "json", "redirects": "yes"})
         req = urllib.request.Request(f"https://www.wikidata.org/w/api.php?{q}",
-                                     headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
+                                     headers={"User-Agent": WIKI_UA})
         with urllib.request.urlopen(req, timeout=12) as r:
             ents = json.loads(r.read()).get("entities", {})
         for e in ents.values():
@@ -1998,6 +1998,10 @@ def _franchise_logo(title, metas):
         col = next((c for c in res if title.lower().split()[0] in c.get("name", "").lower()), None)
         if col:
             parts = sorted(_tmdb(f"/collection/{col['id']}").get("parts", []), key=lambda x: x.get("release_date") or "9999")
+            # the film called just the franchise's name (Jurassic Park, Toy Story, Star Trek) has the plainest logo
+            plain = lambda t: re.sub(r"^the ", "", re.sub(r"[^a-z0-9 ]", "", (t or "").lower())).strip()
+            named = [p for p in parts if plain(p.get("title")) == plain(title)]
+            parts = named + [p for p in parts if p not in named]
             for part in parts[:2]:
                 logos = _tmdb(f"/movie/{part['id']}/images", include_image_language="en,null").get("logos", [])
                 logos.sort(key=lambda l: (l.get("iso_639_1") != "en", -l.get("vote_average", 0)))
@@ -2010,6 +2014,8 @@ def _franchise_logo(title, metas):
 
 
 LOGO_DIR = HERE / "logo-cache"
+# Wikimedia asks for a User-Agent that says who's asking and how to get in touch
+WIKI_UA = "ember-feed/1.0 (personal home media server; non-commercial) python-urllib"
 
 
 def _knockout(data):
@@ -2140,7 +2146,7 @@ def _logo(url, knockout=False, whiten_right=False):
         except Exception:
             pass
     LOGO_DIR.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "ember-feed/1.0 (personal home media server)"})
+    req = urllib.request.Request(url, headers={"User-Agent": WIKI_UA})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = r.read()
     info = {"src": f"/logo/{key}", "mode": "light", "edge": "", "v": LOGO_VERSION}

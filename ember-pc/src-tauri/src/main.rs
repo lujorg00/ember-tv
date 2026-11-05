@@ -193,6 +193,7 @@ async fn play(
         cmd.arg("--no-border").arg("--title=Ember video");
         // Don't let mpv size its window to the video: Ember decides where it goes.
         cmd.arg("--auto-window-resize=no").arg("--keepaspect-window=no");
+        cmd.arg("--window-dragging=no"); // it stays fixed over Ember's page
     } else {
         cmd.arg("--fs");
     }

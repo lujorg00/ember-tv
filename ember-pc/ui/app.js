@@ -460,10 +460,11 @@ function top10Row(title, metas, onPick) {
 // Designed tiles (Omni-style): a brand-colour gradient with the logo big in the middle, no film artwork.
 // [gradient from, gradient to, logo ink, (logo kept in Ember), (caption under it)]: w = white, k = black, o = its own colours, W = always white
 const BRAND = {
-  "netflix": ["#3a0606", "#0c0202", "o", "brands/netflix.svg"], "prime video": ["#79bdf7", "#2f86e0", "k"], "apple tv+": ["#3a3a3a", "#050505", "w", "brands/apple-tv-plus.svg"],
+  "netflix": ["#3a0606", "#0c0202", "o", "brands/netflix.svg"], "prime video": ["#1f8fff", "#0a3f8a", "w", "brands/prime-video.svg"], "apple tv+": ["#3a3a3a", "#050505", "w", "brands/apple-tv-plus.svg"],
   "disney+": ["#1d3a9c", "#070f33", "w"], "hbo max": ["#262626", "#000000", "w"], "hulu": ["#1ed27a", "#0a6b3b", "w"],
   "paramount +": ["#3c7bff", "#1238b8", "w"], "paramount+": ["#3c7bff", "#1238b8", "w"], "peacock": ["#2a2a2a", "#000000", "w"],
-  "discovery +": ["#2468e8", "#0a2a7a", "w"], "discovery+": ["#2468e8", "#0a2a7a", "w"], "crunchyroll": ["#ff8a3d", "#c24a0c", "w"],
+  "discovery +": ["#2468e8", "#0a2a7a", "w", "brands/discovery-plus.svg"], "discovery+": ["#2468e8", "#0a2a7a", "w", "brands/discovery-plus.svg"],
+  "crunchyroll": ["#ff8a3d", "#c24a0c", "w", "brands/crunchyroll.svg"],
   "marvel studios": ["#d3191f", "#5c080b", "o"], "dc studios": ["#2a6be8", "#0a2a72", "o"], "pixar": ["#3a3a3a", "#0a0a0a", "w"],
   "walt disney": ["#1a2f80", "#070d29", "w"], "walt disney animation studios": ["#1a2f80", "#070d29", "w"],
   "dreamworks animation": ["#2a62c9", "#0a1f4f", "w"], "illumination studios": ["#ffd23a", "#d39a00", "k"],
@@ -472,8 +473,8 @@ const BRAND = {
   "warner brothers": ["#2357b0", "#0a2350", "o"], "warner brothers animation": ["#2357b0", "#0a2350", "o", "", "ANIMATION"],
   "lionsgate": ["#4a4a4a", "#111111", "w"], "miramax": ["#2a2a2a", "#000000", "w"], "mgm": ["#8a6a24", "#2b1d06", "w"],
   "searchlight pictures": ["#24384e", "#070d14", "w"],
-  "cbeebies": ["#22307a", "#0b1238", "o"], "cartoon network": ["#9a9a9a", "#4a4a4a", "o"], "nickelodeon": ["#ff7a1a", "#c94a00", "w"],
-  "disney kids": ["#4b33b5", "#1a1150", "w"], "imdb top 250": ["#2a2a2a", "#000000", "o", "brands/imdb.svg", "TOP 250"],
+  "cbeebies": ["#22307a", "#0b1238", "o", "brands/cbeebies.png"], "cartoon network": ["#9a9a9a", "#4a4a4a", "o", "brands/cartoon-network.png"],
+  "nickelodeon": ["#2a2a2a", "#050505", "o", "brands/nickelodeon.png"], "disney kids": ["#4b33b5", "#1a1150", "o", "brands/disney-channel.png"], "imdb top 250": ["#2a2a2a", "#000000", "o", "brands/imdb.svg", "TOP 250"],
 };
 // Awards: [gradient from, to, small line, big title]
 const AWARD = {
@@ -512,6 +513,8 @@ async function tileRows(hidden = new Set(), typ = "") {
         const parts = (tile.title || "").split(" "), last = parts.length > 1 ? parts.pop() : "";
         inner = `<div class="tile director"><div class="ph" style="background-image:url('${esc(tile.image)}')"></div><b>${esc(parts.join(" "))}<br>${esc(last)}</b></div>`;
       }
+      else if (key === "007") // the films' logos all carry their own titles: a designed one instead
+        inner = `<div class="tile art haslogo bond" style="background-image:url('${esc(tile.image || "")}')"><b>007</b><small>JAMES BOND</small></div>`;
       else if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
       else inner = `<div class="tile art ${tile.logo ? "haslogo" : ""}" style="background-image:url('${esc(tile.image || "")}')">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
@@ -521,7 +524,8 @@ async function tileRows(hidden = new Set(), typ = "") {
         img.onerror = () => { img.closest(".haslogo")?.classList.remove("haslogo"); img.remove(); };
         if (br) return; // designed tile: its colours are set
         // dark one-colour logos turn white; everything else keeps its own colours
-        const mode = { dark: "lg-white", mono: "lg-white", colour: "lg-orig", light: "lg-orig", duo: "lg-orig", box: "lg-orig", ok: "lg-orig" }[tile.logo_mode];
+        // dark logos are inverted (light, with their detail kept); everything else keeps its own colours
+        const mode = { dark: "lg-inv", mono: "lg-inv", colour: "lg-orig", light: "lg-orig", duo: "lg-orig", box: "lg-orig", ok: "lg-orig" }[tile.logo_mode];
         if (g.style === "logo") { img.classList.add("lg-full"); if (!tile.logo_mode) serviceTile(img, el); }
         else if (mode) img.classList.add(mode);
         else smartLogo(img); // an older lucapi: work it out here
