@@ -276,6 +276,23 @@ fn player_log(app: tauri::AppHandle) -> String {
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
 
+/// "Watch trailer": the YouTube page in the default browser. Only takes a YouTube video id, never a URL.
+#[tauri::command]
+fn open_trailer(id: String) -> Result<(), String> {
+    if id.len() < 6 || id.len() > 20 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("not a YouTube id".into());
+    }
+    let url = format!("https://www.youtube.com/watch?v={id}");
+    let mut cmd = Command::new("cmd");
+    cmd.args(["/C", "start", "", &url]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // no console window
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn last_exit(player: tauri::State<Player>) -> i32 {
     player.0.lock().unwrap().last_exit
@@ -293,7 +310,7 @@ fn playing(player: tauri::State<Player>) -> bool {
 fn main() {
     tauri::Builder::default()
         .manage(Player::default())
-        .invoke_handler(tauri::generate_handler![play, stop, playing, player_log, last_exit])
+        .invoke_handler(tauri::generate_handler![play, stop, playing, player_log, last_exit, open_trailer])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) {
                 let app = window.app_handle();

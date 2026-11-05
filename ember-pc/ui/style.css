@@ -4,6 +4,7 @@
   --hero-h: 60vh;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
   font: 16px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; user-select: none; }
@@ -31,7 +32,7 @@ input { font: inherit; color: var(--text); }
 #view { position: absolute; z-index: 1; left: 196px; right: 0; top: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; }
 
 /* hero */
-.hero { position: relative; height: var(--hero-h); min-height: 330px; padding: 48px 48px 0; }
+.hero { position: relative; min-height: max(330px, var(--hero-h)); padding: 48px 48px 64px; } /* grows with a tall logo or blurb, so ‹ dots › never sit over the buttons */
 .hero .bd { position: absolute; inset: 0 0 -60px 22%; background-size: cover; background-position: center 20%; opacity: 0; transition: opacity .6s;
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 38%), linear-gradient(to top, transparent 0, #000 45%);
   -webkit-mask-composite: source-in; mask-composite: intersect; }
@@ -313,6 +314,7 @@ input { font: inherit; color: var(--text); }
 .tp-dr .panel.sticky { position: static; }
 
 .tile-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .tile-bar .sorts .chip { font-size: 14.5px; }
 
 /* Logos on tiles, in black and white so they stand out from the artwork:
@@ -496,6 +498,7 @@ input { font: inherit; color: var(--text); }
 .tv .btn.tvf, .tv .btn-chip.tvf, .tv .hn.tvf, .tv .tp-dr-x.tvf, .tv .back.tvf, .tv .wk-ep.tvf, .tv .stream.tvf, .tv label.tvf, .tv select.tvf, .tv input.tvf, .tv .ep-mark.tvf {
   box-shadow: 0 0 0 3px var(--accent) !important; }
 .tv .btn.primary.tvf { transform: scale(1.06); }
+.tv .btn-chip.on.tvf, .tv .btn.primary.tvf { box-shadow: 0 0 0 3px #fff !important; }
 .tv .nav.tvf { background: rgba(240,160,75,.2); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
 .tv .poster.tvf .wbadge.add, .tv .t10.tvf .wbadge.add { opacity: 1; }
 /* the Chromecast is far slower than a PC: no frosted glass, no moving background, no hover-only bits */

@@ -17,6 +17,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET/POST /settings/shared -> settings Ember PC shares with Ember TV (the AIOStreams link)
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
+  GET /trailer/<movie|series>/<imdb> -> {"yt": YouTube id} of its trailer (TMDB), for "Watch trailer"
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
   GET /alerts       -> calendar and reminder pop-ups (12h, 1h, 30 min before; early shifts 9h before)
@@ -2472,6 +2473,28 @@ def similar(typ, imdb):
         return {"metas": [], "error": str(e)}
 
 
+def trailer(typ, imdb):
+    """The YouTube id of a film's or show's trailer (TMDB): an official English trailer first, then any trailer,
+    then a teaser. Cached for a week."""
+    kind = "movie" if typ == "movie" else "tv"
+
+    def build():
+        found = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+        hits = found.get("movie_results" if kind == "movie" else "tv_results") or []
+        if not hits:
+            return {"yt": ""}
+        vids = [v for v in _tmdb(f"/{kind}/{hits[0]['id']}/videos").get("results", [])
+                if v.get("site") == "YouTube" and re.fullmatch(r"[A-Za-z0-9_-]{6,20}", v.get("key") or "")]
+        order = {"Trailer": 0, "Teaser": 1}
+        vids = sorted((v for v in vids if v.get("type") in order),
+                      key=lambda v: (order[v["type"]], not v.get("official"), v.get("iso_639_1") != "en"))
+        return {"yt": vids[0]["key"] if vids else ""}
+    try:
+        return cached(f"trailer:{kind}:{imdb}", 7 * 24 * 3600, build)
+    except Exception as e:
+        return {"yt": "", "error": str(e)}
+
+
 def in_cinemas():
     """Films showing in UK cinemas now (TMDB 'now playing', GB): {"items": [imdb, ...]}. Refreshed every 6 hours."""
     def build():
@@ -2667,6 +2690,9 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):
                 _, _, typ, imdb = path.split("/")
                 self._json(similar(typ, imdb))
+            elif re.fullmatch(r"/trailer/(movie|series)/tt\d+", path):
+                _, _, typ, imdb = path.split("/")
+                self._json(trailer(typ, imdb))
             elif path == "/browse/tiles":
                 self._json(browse_tiles())
             elif re.fullmatch(r"/browse/cat/[a-z0-9-]+", path):

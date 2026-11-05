@@ -258,6 +258,23 @@ public class WebHomeActivity extends Activity {
             });
         }
 
+        /** "Watch trailer": hand the YouTube video to the TV's YouTube app (or whatever plays YouTube links). */
+        @JavascriptInterface
+        public void openTrailer(final String id) {
+            if (id == null || !id.matches("[A-Za-z0-9_-]{6,20}")) return;
+            main.post(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:" + id)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ex) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=" + id)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    } catch (Exception ex2) {
+                        Log.w(TAG, "trailer: no app plays YouTube " + ex2);
+                    }
+                }
+            });
+        }
+
         @JavascriptInterface
         public String deviceName() { return "Ember TV"; }
     }

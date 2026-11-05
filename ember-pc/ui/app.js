@@ -13,6 +13,7 @@ const tvInvoke = async (cmd, a = {}) => {
   if (cmd === "play") { const r = EmberTV.play(JSON.stringify(a)); if (String(r).startsWith("error")) throw new Error(r); return r; }
   if (cmd === "playing") return EmberTV.playing();
   if (cmd === "last_exit") return EmberTV.lastExit();
+  if (cmd === "open_trailer") return EmberTV.openTrailer(a.id);
   if (cmd === "player_log") return "The TV player doesn't keep a log here.";
   return null;
 };
@@ -759,7 +760,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
     <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
-      ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
+      <button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button></div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // In cinemas / not out yet
   (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -774,6 +775,15 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     playBest(mm, cur ? cur.season : null, cur ? cur.episode : null, e ? e.name || e.title || "" : "", sp && !sp.finished && sp.position > 20 ? sp.position : 0);
   };
   $("#resumeBtn", head).onclick = startBest;
+  // Watch trailer: Cinemeta's YouTube trailer, else TMDB's (from lucapi); the button only shows when there is one.
+  {
+    const tb = $("#trailerBtn", head);
+    const known = ((mm.trailerStreams || [])[0] || {}).ytId || ((mm.trailers || []).find(t => t.type === "Trailer") || {}).source || "";
+    const show = (yt) => { if (!yt || !/^[\w-]{6,20}$/.test(yt) || !invoke) return;
+      tb.hidden = false; tb.onclick = () => invoke("open_trailer", { id: yt }).catch(e => toast("Couldn't open the trailer: " + e)); };
+    if (known) show(known);
+    else getJson(`${feed()}/trailer/${type}/${id}`, 15000).then(r => show(r.yt)).catch(() => {});
+  }
   if (opts.autoplay) setTimeout(startBest, 300);
 
   // Streams stay out of the way: "Choose stream" slides them in from the right for the selected episode.
