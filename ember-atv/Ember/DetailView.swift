@@ -40,12 +40,12 @@ struct DetailView: View {
             LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0.3), .clear], startPoint: .bottom, endPoint: .top).ignoresSafeArea()
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
-                    TitleArt(meta: mm, height: 190, width: 760).padding(.top, 60)
-                    Text(mm.metaLine).font(.callout.weight(.medium)).foregroundStyle(.white.opacity(0.85))
+                    TitleArt(meta: mm, height: 160, width: 640).padding(.top, 60)
+                    Text(mm.metaLine).font(.system(size: 24, weight: .medium)).foregroundStyle(.white.opacity(0.85))
                     if let p = store.progress[mm.id] {
-                        Text(p.line).font(.callout.weight(.semibold)).foregroundStyle(Theme.accent)
+                        Text(p.line).font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.accent)
                     }
-                    Text(mm.description).font(.callout).lineLimit(4).frame(maxWidth: 1000, alignment: .leading)
+                    Text(mm.description).font(.system(size: 24)).lineLimit(4).frame(maxWidth: 920, alignment: .leading)
                     HStack(spacing: 24) {
                         Button { play() } label: { Label(playLabel, systemImage: "play.fill") }
                         if !mm.isSeries {
@@ -84,7 +84,7 @@ struct DetailView: View {
             .scrollClipDisabled()
             .focusSection()
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 36) {
+                LazyHStack(alignment: .top, spacing: 30) {
                     ForEach(episodes) { v in episodeCard(v) }
                 }
                 .padding(.vertical, 30)
@@ -103,7 +103,7 @@ struct DetailView: View {
                     AsyncImage(url: v.thumbnail ?? mm.backdropURL) { ph in
                         if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
                     }
-                    .frame(width: 420, height: 236)
+                    .frame(width: 360, height: 202)
                     .clipped()
                     if sp?.finished == true {
                         VStack { HStack { Spacer(); WatchBadge(state: "done") }; Spacer() }
@@ -111,11 +111,11 @@ struct DetailView: View {
                         ProgressBar(fraction: sp.percent / 100).padding(12)
                     }
                     if !v.aired {
-                        Text("Not out yet").font(.caption.weight(.bold)).padding(.horizontal, 12).padding(.vertical, 6)
+                        Text("Not out yet").font(.system(size: 19, weight: .bold)).padding(.horizontal, 12).padding(.vertical, 6)
                             .background(.black.opacity(0.65), in: Capsule()).padding(12)
                     }
                 }
-                .frame(width: 420, height: 236)
+                .frame(width: 360, height: 202)
             }
             .buttonStyle(.card)
             .contextMenu {
@@ -130,9 +130,9 @@ struct DetailView: View {
                     Task { await store.markEpisodes(mm, mm.videos.filter { $0.season == v.season && $0.aired }, watched: true); await loadSaved() }
                 }
             }
-            Text("E\(v.episode)  \(v.title)").font(.callout.weight(.semibold)).lineLimit(1).frame(width: 420, alignment: .leading)
+            Text("E\(v.episode)  \(v.title)").font(.system(size: 24, weight: .semibold)).lineLimit(1).frame(width: 360, alignment: .leading)
             if let d = v.released {
-                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(Theme.muted)
+                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.system(size: 20)).foregroundStyle(Theme.muted)
             }
         }
     }

@@ -6,7 +6,7 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 46) {
+                LazyVStack(alignment: .leading, spacing: 30) {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
                     if !store.cw.isEmpty { ContinueRow(items: store.cw) }
                     ForEach(store.rows) { r in
@@ -22,7 +22,7 @@ struct HomeView: View {
                 .padding(.bottom, 80)
             }
             .scrollClipDisabled()
-            .ignoresSafeArea(edges: .top)
+            .ignoresSafeArea()
             .background(Theme.bg)
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
         }
@@ -44,20 +44,19 @@ struct HeroView: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Backdrop(url: m.backdropURL)
-                .frame(height: 860)
+            Backdrop(url: m.backdropURL, height: 760)
                 .id(m.id)
                 .transition(.opacity)
             LinearGradient(colors: [Theme.bg.opacity(0.95), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
             LinearGradient(colors: [Theme.bg, .clear], startPoint: .bottom, endPoint: .center)
             VStack(alignment: .leading, spacing: 20) {
-                TitleArt(meta: m, height: 200, width: 760)
+                TitleArt(meta: m, height: 160, width: 620)
                 if let p = store.progress[m.id] {
-                    Text(p.line).font(.callout.weight(.medium)).foregroundStyle(Theme.accent)
+                    Text(p.line).font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.accent)
                 } else {
-                    Text(m.metaLine).font(.callout.weight(.medium)).foregroundStyle(Theme.accent)
+                    Text(m.metaLine).font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.accent)
                 }
-                Text(m.description).font(.callout).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 980, alignment: .leading)
+                Text(m.description).font(.system(size: 24)).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 900, alignment: .leading)
                 HStack(spacing: 24) {
                     Button {
                         play()
@@ -78,7 +77,8 @@ struct HeroView: View {
             .padding(.leading, 90)
             .padding(.bottom, 40)
         }
-        .frame(height: 860)
+        .frame(height: 760)
+        .clipped()
         .animation(.easeInOut(duration: 0.6), value: idx)
         .task(id: idx) {
             let base = items[min(idx, items.count - 1)]
@@ -107,15 +107,20 @@ struct HeroView: View {
     }
 }
 
-/// A backdrop that fades in once loaded.
+/// A backdrop that fills its space (cropped, never spilling out) and fades in once loaded.
 struct Backdrop: View {
     let url: URL?
+    var height: CGFloat? = nil
     var body: some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.5))) { ph in
-            if let img = ph.image { img.resizable().scaledToFill() } else { Theme.bg }
-        }
-        .frame(maxWidth: .infinity)
-        .clipped()
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: height == nil ? .infinity : nil)
+            .frame(height: height)
+            .overlay {
+                AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.5))) { ph in
+                    if let img = ph.image { img.resizable().scaledToFill() } else { Theme.bg }
+                }
+            }
+            .clipped()
     }
 }
 
@@ -130,7 +135,7 @@ struct TitleArt: View {
                 img.resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
             } else {
-                Text(meta.name).font(.system(size: 76, weight: .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
+                Text(meta.name).font(.system(size: 60, weight: .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
             }
         }
@@ -146,9 +151,9 @@ struct RowHeader: View {
     var count: Int? = nil
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(title).font(.title3.weight(.bold))
-            if let kind { Text(kind).font(.callout.weight(.semibold)).foregroundStyle(Theme.accent) }
-            if let count { Text("\(count)").font(.caption).foregroundStyle(Theme.muted) }
+            Text(title).font(.system(size: 34, weight: .bold))
+            if let kind { Text(kind).font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.accent) }
+            if let count { Text("\(count)").font(.system(size: 20)).foregroundStyle(Theme.muted) }
         }
         .padding(.leading, 90)
     }
@@ -160,11 +165,11 @@ struct PosterRow: View {
         VStack(alignment: .leading, spacing: 8) {
             RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
+                LazyHStack(spacing: 32) {
                     ForEach(row.metas) { m in PosterCard(meta: m) }
                 }
                 .padding(.horizontal, 90)
-                .padding(.vertical, 36)
+                .padding(.vertical, 28)
             }
             .scrollClipDisabled()
         }
@@ -183,15 +188,15 @@ struct TopRow: View {
                     ForEach(0..<min(10, row.metas.count), id: \.self) { i in
                         HStack(alignment: .bottom, spacing: -18) {
                             Text("\(i + 1)")
-                                .font(.system(size: 190, weight: .heavy, design: .rounded))
+                                .font(.system(size: 150, weight: .heavy, design: .rounded))
                                 .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent.opacity(0.35)], startPoint: .top, endPoint: .bottom))
-                                .offset(y: 26)
+                                .offset(y: 20)
                             PosterCard(meta: row.metas[i])
                         }
                     }
                 }
                 .padding(.horizontal, 90)
-                .padding(.vertical, 36)
+                .padding(.vertical, 28)
             }
             .scrollClipDisabled()
         }
@@ -203,14 +208,14 @@ struct TopRow: View {
 struct PosterCard: View {
     @EnvironmentObject var store: Store
     let meta: Meta
-    var width: CGFloat = 250
+    var width: CGFloat = 205
 
     var body: some View {
         NavigationLink(value: meta) {
             ZStack(alignment: .topTrailing) {
                 AsyncImage(url: meta.posterURL) { ph in
                     if let img = ph.image { img.resizable().scaledToFill() }
-                    else { ZStack { Theme.card; Text(meta.name).font(.caption).multilineTextAlignment(.center).padding() } }
+                    else { ZStack { Theme.card; Text(meta.name).font(.system(size: 20)).multilineTextAlignment(.center).padding() } }
                 }
                 .frame(width: width, height: width * 1.5)
                 .clipped()
@@ -267,7 +272,7 @@ struct ContinueRow: View {
         VStack(alignment: .leading, spacing: 8) {
             RowHeader(title: "Continue watching", count: items.count)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 40) {
+                LazyHStack(alignment: .top, spacing: 32) {
                     ForEach(items) { it in
                         VStack(alignment: .leading, spacing: 14) {
                             NavigationLink(value: it.meta) {
@@ -275,27 +280,27 @@ struct ContinueRow: View {
                                     AsyncImage(url: it.art) { ph in
                                         if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
                                     }
-                                    .frame(width: 520, height: 292)
+                                    .frame(width: 430, height: 242)
                                     .clipped()
                                     LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .bottom, endPoint: .center)
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(it.label).font(.callout.weight(.bold))
+                                        Text(it.label).font(.system(size: 24, weight: .bold))
                                         if let p = it.percent { ProgressBar(fraction: p / 100) }
                                     }
                                     .padding(18)
                                 }
-                                .frame(width: 520, height: 292)
+                                .frame(width: 430, height: 242)
                             }
                             .buttonStyle(.card)
                             .contextMenu {
                                 Button("Remove from Continue watching", role: .destructive) { store.dismiss(it.id) }
                             }
-                            Text(it.meta.name).font(.callout.weight(.semibold)).lineLimit(1).frame(width: 520, alignment: .leading)
+                            Text(it.meta.name).font(.system(size: 24, weight: .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)
                         }
                     }
                 }
                 .padding(.horizontal, 90)
-                .padding(.vertical, 36)
+                .padding(.vertical, 28)
             }
             .scrollClipDisabled()
         }

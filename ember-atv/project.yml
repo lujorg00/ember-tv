@@ -24,7 +24,7 @@ targets:
       path: Ember/Info.plist
       properties:
         CFBundleDisplayName: Ember
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "0.1.1"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
