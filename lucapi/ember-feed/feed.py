@@ -13,6 +13,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   POST /progress/report -> a player reports where you are (Ember TV, Ember PC); passed on to Trakt
   GET /watchlist, POST /watchlist {imdb, type, add} -> your Trakt watchlist (what your Watchlist rows show)
   GET /cinemas -> films in UK cinemas now (for the "In cinemas" label)
+  POST /release {ids} -> which of those are only in cinemas, or not out yet (labels on posters)
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
@@ -2337,6 +2338,71 @@ def browse_cat(tid, typ="movie", skip=0, sort=""):
     return cached(f"browse:cat:{tid}:{typ}:{skip}", 3600, build)
 
 
+def _release_one(imdb):
+    """{"s": "cinema" | "soon" | "", "d": "YYYY-MM-DD"} for one title, from TMDB's release dates (UK, else US).
+    cinema: out at the cinema but not yet to watch at home (d = its digital date, if known)
+    soon:   not out yet (d = when it comes out)"""
+    found = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+    today = datetime.now(TZ).date().isoformat()
+    tv = (found.get("tv_results") or [None])[0]
+    mv = (found.get("movie_results") or [None])[0]
+    if tv and not mv:
+        first = tv.get("first_air_date") or ""
+        return {"s": "soon", "d": first} if first and first > today else {"s": "", "d": ""}
+    if not mv:
+        return {"s": "", "d": ""}
+    rd = _tmdb(f"/movie/{mv['id']}/release_dates").get("results", [])
+    def dates(country, kinds):
+        for c in rd:
+            if c.get("iso_3166_1") == country:
+                ds = sorted((x.get("release_date") or "")[:10] for x in c.get("release_dates", []) if x.get("type") in kinds)
+                return [d for d in ds if d]
+        return []
+    cinema = dates("GB", (2, 3)) or dates("US", (2, 3))
+    home = dates("GB", (4, 5, 6)) or dates("US", (4, 5, 6))
+    first_home = home[0] if home else ""
+    if first_home and first_home <= today:
+        return {"s": "", "d": ""}  # you can watch it at home
+    if cinema and cinema[0] > today:
+        return {"s": "soon", "d": cinema[0]}
+    if not cinema and not home:
+        rel = mv.get("release_date") or ""
+        return {"s": "soon", "d": rel} if rel and rel > today else {"s": "", "d": ""}
+    if cinema and cinema[0] <= today:
+        days = (datetime.now(TZ).date() - datetime.fromisoformat(cinema[0]).date()).days
+        if days <= 180:
+            return {"s": "cinema", "d": first_home}
+    if first_home and first_home > today:
+        return {"s": "soon", "d": first_home}
+    return {"s": "", "d": ""}
+
+
+def release_status(body):
+    """For the labels on posters: {imdb: {"s", "d"}} for the ids asked about (recent titles only, kept for 12 hours)."""
+    ids = [i for i in (body.get("ids") or [])[:150] if isinstance(i, str) and i.startswith("tt") and i[2:].isdigit()]
+    now = int(time.time())
+    with _db_lock:
+        db().execute("CREATE TABLE IF NOT EXISTS release_cache (imdb TEXT PRIMARY KEY, s TEXT, d TEXT, at INTEGER)")
+        marks = ",".join("?" * len(ids)) or "''"
+        have = {r[0]: {"s": r[1], "d": r[2]} for r in db().execute(
+            "SELECT imdb, s, d, at FROM release_cache WHERE imdb IN (" + marks + ")", ids).fetchall()
+            if now - r[3] < 12 * 3600}
+    todo = [i for i in ids if i not in have]
+    if todo and _tmdb_creds():
+        def one(i):
+            try:
+                return i, _release_one(i)
+            except Exception:
+                return i, None
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            got = [x for x in ex.map(one, todo) if x[1] is not None]
+        with _db_lock:
+            db().executemany("INSERT OR REPLACE INTO release_cache VALUES (?, ?, ?, ?)", [(i, r["s"], r["d"], now) for i, r in got])
+            db().commit()
+        have.update(dict(got))
+    return {"items": {i: r for i, r in have.items() if r.get("s")}}
+
+
 def similar(typ, imdb):
     """'You may also like' for a film or show: TMDB's recommendations (people who liked this also liked),
     topped up with its 'similar' list if that's short. Cached for a day."""
@@ -2470,6 +2536,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(dismiss(body))
             elif path == "/watchlist":
                 self._json(watchlist_set(body))
+            elif path == "/release":
+                self._json(release_status(body))
             elif path == "/progress/watched":
                 self._json(mark_watched(body))
             elif path == "/pick/failed":

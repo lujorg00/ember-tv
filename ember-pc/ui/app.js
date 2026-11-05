@@ -172,7 +172,8 @@ document.addEventListener("keydown", e => {
 
 function card(m, type) {
   const p = progress[m.id];
-  const el = h(`<div class="poster" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(poster(m))}')">
+  const yr = (String(m.releaseInfo || m.year || "").match(/\d{4}/) || [""])[0];
+  const el = h(`<div class="poster" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" data-year="${yr}" style="background-image:url('${esc(poster(m))}')">
     ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}${cinemaTag(m, type)}
     ${p ? `<div class="bar"><i style="width:${Math.max(3, Math.min(100, p.progress))}%"></i></div>` : ""}</div>`);
   el.onclick = () => go("title", m.type || type, m.id, m);
@@ -190,6 +191,48 @@ function row(title, metas, type, onPick) {
   strip.addEventListener("wheel", e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && e.shiftKey) { strip.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
   return r;
 }
+
+// ---------------------------------------------------------------- in cinemas / coming soon
+// Recent titles are checked with lucapi (TMDB release dates); the label sits top left of the poster.
+const relCache = {};
+const relDate = (d) => {
+  if (!d) return "";
+  const t = new Date(d + "T12:00:00"), same = t.getFullYear() === new Date().getFullYear();
+  return t.toLocaleDateString("en-GB", same ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+};
+const relLabel = (r) => !r || !r.s ? "" : r.s === "cinema" ? "In cinemas" : r.d ? `Coming ${relDate(r.d)}` : "Coming soon";
+const relLine = (r) => !r || !r.s ? "" : r.s === "cinema"
+  ? `In cinemas now${r.d ? ` · to watch at home from ${relDate(r.d)}` : " · not yet out to watch at home"}`
+  : `Not out yet${r.d ? ` · comes out ${relDate(r.d)}` : ""}`;
+function relApply(el) {
+  const r = relCache[el.dataset.wid];
+  if (!r || !r.s || el.querySelector(".rel")) return;
+  el.insertAdjacentHTML("beforeend", `<span class="rel ${r.s}">${esc(relLabel(r))}</span>`);
+}
+let relQueue = new Set(), relTimer = 0;
+async function relFlush() {
+  const ids = [...relQueue].filter(i => !(i in relCache)).slice(0, 150);
+  relQueue = new Set();
+  if (ids.length) {
+    try {
+      const r = await fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+      const items = (await r.json()).items || {};
+      for (const i of ids) relCache[i] = items[i] || { s: "" };
+    } catch (e) { return; }
+  }
+  document.querySelectorAll(".poster[data-wid]").forEach(relApply);
+}
+function relScan() {
+  const thisYear = new Date().getFullYear();
+  document.querySelectorAll("#view .poster[data-wid]:not([data-rel])").forEach(el => {
+    el.dataset.rel = "1";
+    const y = +el.dataset.year;
+    if (y && y < thisYear - 1) return; // older titles are out everywhere
+    if (el.dataset.wid in relCache) relApply(el); else relQueue.add(el.dataset.wid);
+  });
+  if (relQueue.size) { clearTimeout(relTimer); relTimer = setTimeout(relFlush, 400); }
+}
+new MutationObserver(relScan).observe(document.getElementById("view"), { childList: true, subtree: true });
 
 // ---------------------------------------------------------------- row arrows
 // Every sideways row gets ‹ › buttons (shown on hover, hidden at either end); added automatically to any row on any page.
@@ -691,6 +734,11 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}
       ${mm.trailers && mm.trailers.length ? "" : ""}</div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
+  // In cinemas / not out yet
+  (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: [id] }) }).then(r => r.json()).then(j => (relCache[id] = (j.items || {})[id] || { s: "" })))
+    .then(r => { if (r && r.s && document.body.contains(head)) $(".tp-meta", head).insertAdjacentHTML("afterend", `<div class="tp-rel ${r.s}">${esc(relLine(r))}</div>`); })
+    .catch(() => {});
   // Resume: the streams for that episode, best first; one more click plays.
   const startBest = () => {
     if (type === "series" && !cur) return toast("Pick an episode first.");
