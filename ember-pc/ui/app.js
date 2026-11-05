@@ -860,8 +860,10 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       eps.filter(e => e.season === season).forEach(e => {
         const sp = saved[e.season + ":" + e.episode];
         const isCur = cur && cur.season === e.season && cur.episode === e.episode;
-        const el = h(`<div class="epc ${isCur ? "sel" : ""}">
+        const soon = !aired(e);
+        const el = h(`<div class="epc ${isCur ? "sel" : ""} ${soon ? "notyet" : ""}">
             <div class="thumb" style="background-image:url('${esc(e.thumbnail || "")}')">
+              ${soon ? `<span class="rel soon">${e.released ? "Coming " + esc(relDate(e.released.slice(0, 10))) : "Coming soon"}</span>` : ""}
               ${aired(e) ? `<button class="ep-mark ${sp && sp.finished ? "on" : ""}" title="${sp && sp.finished ? "Watched (click to undo)" : "Mark as watched"}">✓</button>` : ""}
               ${sp && !sp.finished ? `<div class="bar"><i style="width:${Math.max(3, sp.percent)}%"></i></div>` : ""}
               <span class="num">E${e.episode}</span></div>
