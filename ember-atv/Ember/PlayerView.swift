@@ -82,6 +82,10 @@ final class PlayerModel: ObservableObject, MPVEvents {
     func mpvEnded(error: Bool) {
         guard !done else { return }
         if error { return fail(started ? "kept stalling" : "wouldn't play") }
+        // a two-minute "this file is unavailable" video from the service instead of the episode: try the next stream
+        if let s = session, !s.trailer, dur > 0, dur < 180, (s.meta.runtimeMinutes ?? 30) >= 10 {
+            return fail("was unavailable")
+        }
         report("stopped", finished: true)
         finish(hasNext ? .next : .stopped)
     }

@@ -75,7 +75,9 @@ struct HeroView: View {
                     } label: {
                         Label(store.progress[m.id].map { "Resume \(clock($0.position))" } ?? "Play", systemImage: "play.fill")
                     }
+                    .buttonStyle(EmberButtonStyle(primary: true))
                     NavigationLink(value: m) { Text("Details") }
+                        .buttonStyle(EmberButtonStyle())
                 }
                 .focused($focused)
                 .padding(.top, 8)

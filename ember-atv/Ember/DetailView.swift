@@ -37,42 +37,66 @@ struct DetailView: View {
         return sp?.resumable == true ? "Resume · \(clock(sp!.position))" : "Play"
     }
 
+    enum Btn: Hashable { case play, stream, trailer, watchlist, watched, more }
+    @FocusState private var btn: Btn?
+    @State private var showMore = false
+
+    private var caption: String {
+        switch btn {
+        case .stream: return "Choose stream"
+        case .trailer: return "Watch trailer"
+        case .watchlist: return store.watchlist.contains(mm.id) ? "On your watchlist" : "Add to watchlist"
+        case .watched: return store.watched[mm.id] == "done" ? "Watched · select to undo" : "Mark as watched"
+        case .more: return "Mark seasons or the whole show"
+        default: return " "
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             Backdrop(url: mm.backdropURL, kenBurns: true).ignoresSafeArea()
-            LinearGradient(colors: [Theme.bg.opacity(0.97), Theme.bg.opacity(0.6), .clear], startPoint: .leading, endPoint: .trailing).ignoresSafeArea()
-            LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0.3), .clear], startPoint: .bottom, endPoint: .top).ignoresSafeArea()
+            LinearGradient(colors: [Theme.bg.opacity(0.96), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing).ignoresSafeArea()
+            LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0.25), .clear], startPoint: .bottom, endPoint: .top).ignoresSafeArea()
             ScrollView(.vertical, showsIndicators: false) {
-              VStack(alignment: .leading, spacing: 30) {
-                VStack(alignment: .leading, spacing: 22) {
-                    TitleArt(meta: mm, height: 160, width: 640).padding(.top, 60)
-                    Text(mm.metaLine).font(.system(size: 24, weight: .medium)).foregroundStyle(.white.opacity(0.85))
-                    if let line = store.release[mm.id]?.line {
-                        Label(line, systemImage: store.release[mm.id]?.s == "cinema" ? "film" : "calendar")
-                            .font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.accent)
+              VStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: 16) {
+                    TitleArt(meta: mm, height: 130, width: 560).padding(.top, 70)
+                    HStack(spacing: 18) {
+                        Text(mm.metaLine).foregroundStyle(.white.opacity(0.75))
+                        if let line = store.release[mm.id]?.line { Text(line).foregroundStyle(Theme.accent) }
                     }
+                    .font(.system(size: 21, weight: .medium))
                     if let p = store.progress[mm.id] {
-                        Text(p.line).font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.accent)
+                        Text(p.line).font(.system(size: 21, weight: .semibold)).foregroundStyle(Theme.accent)
                     }
-                    Text(mm.description).font(.system(size: 24)).lineLimit(4).frame(maxWidth: 920, alignment: .leading)
-                    HStack(spacing: 24) {
+                    Text(mm.description).font(.system(size: 22)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
+                        .frame(maxWidth: 860, alignment: .leading)
+                    HStack(spacing: 20) {
                         Button { play() } label: { Label(playLabel, systemImage: "play.fill") }
-                        Button { chooseStream() } label: { Label("Choose stream", systemImage: "list.bullet") }
-                        if !mm.isSeries {
-                            let done = store.watched[mm.id] == "done"
-                            Button {
-                                Task { await store.markTitle(mm, watched: !done) }
-                            } label: { Label(done ? "Watched" : "Mark watched", systemImage: done ? "checkmark.circle.fill" : "checkmark.circle") }
-                        }
-                        let onList = store.watchlist.contains(mm.id)
-                        Button {
-                            Task { await store.toggleWatchlist(mm) }
-                        } label: { Label(onList ? "On watchlist" : "Watchlist", systemImage: onList ? "checkmark" : "plus") }
+                            .buttonStyle(EmberButtonStyle(primary: true)).focused($btn, equals: .play)
+                        Button { chooseStream() } label: { Image(systemName: "list.bullet") }
+                            .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .stream)
                         if hasTrailer {
-                            Button { store.playTrailer(mm) } label: { Label("Watch trailer", systemImage: "play.rectangle") }
+                            Button { store.playTrailer(mm) } label: { Image(systemName: "film") }
+                                .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .trailer)
+                        }
+                        Button { Task { await store.toggleWatchlist(mm) } } label: {
+                            Image(systemName: store.watchlist.contains(mm.id) ? "checkmark" : "plus")
+                        }
+                        .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .watchlist)
+                        if mm.isSeries {
+                            Button { showMore = true } label: { Image(systemName: "ellipsis") }
+                                .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .more)
+                        } else {
+                            let done = store.watched[mm.id] == "done"
+                            Button { Task { await store.markTitle(mm, watched: !done) } } label: {
+                                Image(systemName: done ? "checkmark.circle.fill" : "checkmark.circle")
+                            }
+                            .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .watched)
                         }
                     }
-                    .padding(.top, 10)
+                    .padding(.top, 14)
+                    Text(caption).font(.system(size: 19)).foregroundStyle(Theme.muted).animation(nil, value: btn)
                     if mm.isSeries && !mm.videos.isEmpty { episodesSection }
                 }
                 .padding(.horizontal, 90)
@@ -86,6 +110,17 @@ struct DetailView: View {
         }
         .background(Theme.bg)
         .task { await load() }
+        .defaultFocus($btn, .play)
+        .confirmationDialog(mm.name, isPresented: $showMore) {
+            let inSeason = episodes.filter(\.aired)
+            let seasonDone = !inSeason.isEmpty && inSeason.allSatisfy { saved[key($0.season, $0.episode)]?.finished == true }
+            Button(seasonDone ? "Mark season \(season) unwatched" : "Mark season \(season) watched") {
+                Task { await store.markEpisodes(mm, inSeason, watched: !seasonDone); await loadSaved() }
+            }
+            Button(store.watched[mm.id] == "done" ? "Mark the whole show unwatched" : "Mark the whole show watched") {
+                Task { await store.markTitle(mm, watched: store.watched[mm.id] != "done"); await loadSaved() }
+            }
+        }
         .sheet(isPresented: $picking) {
             StreamPicker(streams: streamList) { r in
                 picking = false
@@ -99,62 +134,53 @@ struct DetailView: View {
     }
 
     @ViewBuilder private var episodesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
+                HStack(spacing: 8) {
                     ForEach(seasons, id: \.self) { s in
-                        Button { season = s } label: {
-                            Text("Season \(s)").fontWeight(s == season ? .bold : .regular)
-                                .foregroundStyle(s == season ? Theme.accent : .primary)
-                        }
+                        Button { season = s } label: { Text("Season \(s)") }
+                            .buttonStyle(TabTextStyle(selected: s == season))
                     }
-                    Spacer().frame(width: 40)
-                    let inSeason = episodes.filter(\.aired)
-                    let seasonDone = !inSeason.isEmpty && inSeason.allSatisfy { saved[key($0.season, $0.episode)]?.finished == true }
-                    Button {
-                        Task { await store.markEpisodes(mm, inSeason, watched: !seasonDone); await loadSaved() }
-                    } label: { Label(seasonDone ? "Season watched" : "Mark season watched", systemImage: seasonDone ? "checkmark.circle.fill" : "checkmark.circle") }
-                    Button {
-                        Task { await store.markTitle(mm, watched: store.watched[mm.id] != "done"); await loadSaved() }
-                    } label: { Text(store.watched[mm.id] == "done" ? "Mark show unwatched" : "Mark whole show watched") }
+                    Text("\(episodes.count) episodes").font(.system(size: 19)).foregroundStyle(Theme.muted).padding(.leading, 20).padding(.bottom, 12)
                 }
-                .padding(.vertical, 20)
+                .padding(.vertical, 14)
             }
             .scrollClipDisabled()
             .focusSection()
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 30) {
+                LazyHStack(alignment: .top, spacing: 28) {
                     ForEach(episodes) { v in episodeCard(v) }
                 }
-                .padding(.vertical, 30)
+                .padding(.vertical, 24)
             }
             .scrollClipDisabled()
             .focusSection()
         }
-        .padding(.top, 20)
+        .padding(.top, 26)
     }
 
     private func episodeCard(_ v: Video) -> some View {
         let sp = saved[key(v.season, v.episode)]
-        return VStack(alignment: .leading, spacing: 10) {
+        let isCurrent = current?.season == v.season && current?.episode == v.episode
+        return VStack(alignment: .leading, spacing: 8) {
             Button { playEpisode(v) } label: {
                 ZStack(alignment: .bottomLeading) {
                     AsyncImage(url: v.thumbnail ?? mm.backdropURL) { ph in
                         if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
                     }
-                    .frame(width: 360, height: 202)
+                    .frame(width: 320, height: 180)
                     .clipped()
                     if sp?.finished == true {
                         VStack { HStack { Spacer(); WatchBadge(state: "done") }; Spacer() }
                     } else if let sp, sp.percent > 1 {
-                        ProgressBar(fraction: sp.percent / 100).padding(12)
+                        ProgressBar(fraction: sp.percent / 100).padding(10)
                     }
                     if !v.aired {
-                        Text("Not out yet").font(.system(size: 19, weight: .bold)).padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(.black.opacity(0.65), in: Capsule()).padding(12)
+                        Text("Not out yet").font(.system(size: 16, weight: .bold)).padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(.black.opacity(0.65), in: Capsule()).padding(10)
                     }
                 }
-                .frame(width: 360, height: 202)
+                .frame(width: 320, height: 180)
             }
             .buttonStyle(.card)
             .contextMenu {
@@ -165,13 +191,14 @@ struct DetailView: View {
                     let upTo = mm.videos.filter { ($0.season, $0.episode) <= (v.season, v.episode) && $0.aired }
                     Button("Mark watched up to here") { Task { await store.markEpisodes(mm, upTo, watched: true); await loadSaved() } }
                 }
-                Button("Mark Season \(v.season) watched") {
-                    Task { await store.markEpisodes(mm, mm.videos.filter { $0.season == v.season && $0.aired }, watched: true); await loadSaved() }
-                }
             }
-            Text("E\(v.episode)  \(v.title)").font(.system(size: 24, weight: .semibold)).lineLimit(1).frame(width: 360, alignment: .leading)
+            HStack(spacing: 8) {
+                Text("\(v.episode)").font(.system(size: 19, weight: .bold)).foregroundStyle(isCurrent ? Theme.accent : Theme.muted)
+                Text(v.title).font(.system(size: 20, weight: .semibold)).lineLimit(1)
+            }
+            .frame(width: 320, alignment: .leading)
             if let d = v.released {
-                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.system(size: 20)).foregroundStyle(Theme.muted)
+                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.system(size: 17)).foregroundStyle(Theme.muted)
             }
         }
     }

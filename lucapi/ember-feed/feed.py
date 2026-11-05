@@ -1201,14 +1201,47 @@ def _score(s, want_res, runtime_min, passthrough, fails):
     return score, why, text, need
 
 
-def _probe(url, timeout=6.0, want_bytes=6 * 1024 * 1024, max_s=2.5):
-    """Asks for the start of the file and times it. Returns ok, time to first byte, Mbit/s."""
+def _size_of(text):
+    """The file size a stream says it is ("4.2 GB"), in bytes, or None."""
+    m = re.search(r"(\d+(?:\.\d+)?)\s?(GB|GiB|MB|MiB)\b", text or "", re.I)
+    if not m:
+        return None
+    return float(m.group(1)) * (1024 ** 3 if m.group(2).upper().startswith("G") else 1024 ** 2)
+
+
+def _service(text):
+    """Which debrid service a stream comes through (AIOStreams tags them [AD+], [RD+]... or by name)."""
+    m = re.search(r"\[?\b(AD|RD|TB|PM|DL|ED|OC|PK|EN|SR|PP)\s?(?:\+|⚡|☁|\])", text or "")
+    if m:
+        return m.group(1)
+    for code, name in (("AD", "alldebrid"), ("RD", "real-?debrid"), ("TB", "torbox"), ("PM", "premiumize"),
+                       ("DL", "debrid-?link"), ("ED", "easydebrid"), ("OC", "offcloud")):
+        if re.search(name, text or "", re.I):
+            return code
+    return ""
+
+
+def _probe(url, timeout=6.0, want_bytes=6 * 1024 * 1024, max_s=2.5, expect=None):
+    """Asks for the start of the file and times it. Returns ok, time to first byte, Mbit/s.
+    Also catches the short "this file is unavailable" videos services send instead of the film: a file of a few MB,
+    or one far smaller than the stream said it was, or one served from an error page."""
     t0 = time.time()
     try:
         req = urllib.request.Request(url, headers={"Range": f"bytes=0-{want_bytes - 1}", "User-Agent": "ember-feed/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.status not in (200, 206):
                 return {"ok": False, "why": f"HTTP {r.status}"}
+            total = None
+            cr = r.headers.get("Content-Range", "")
+            if "/" in cr and cr.rsplit("/", 1)[1].strip().isdigit():
+                total = int(cr.rsplit("/", 1)[1])
+            elif r.status == 200 and (r.headers.get("Content-Length") or "").isdigit():
+                total = int(r.headers["Content-Length"])
+            final = (r.geturl() or "").lower()
+            if re.search(r"/(static|errors?|unavailable|placeholder)/|\b(error|unavailable|not[-_]?cached|failed)\.(mp4|mkv|webm)", final):
+                return {"ok": False, "why": "unavailable (the service sent its error video)"}
+            if total is not None and (total < 40 * 1024 * 1024 or (expect and total < expect * 0.2)):
+                return {"ok": False, "why": f"unavailable (only {round(total / 1048576)} MB: the service's error video)"}
             first = r.read(65536)
             ttfb = time.time() - t0
             got, t1 = len(first), time.time()
@@ -1242,15 +1275,24 @@ def pick(typ, sid, aio, want="4k", runtime_min=None, passthrough=False, probe_to
                        "name": s.get("name", ""), "title": s.get("title") or s.get("description") or "",
                        "filename": (s.get("behaviorHints") or {}).get("filename", ""), "hints": s.get("behaviorHints") or {}})
     scored.sort(key=lambda x: -x["score"])
-    top = [x for x in scored if x["score"] > -1e8][:probe_top]
+    for x in scored:
+        x["service"] = _service(f"{x['name']}\n{x['title']}")
+    usable = [x for x in scored if x["score"] > -1e8]
+    top = usable[:probe_top]
+    # and the best from each other service too, so one service being down can't sink the whole pick
+    for svc in {x["service"] for x in usable} - {x["service"] for x in top}:
+        best = next((x for x in usable if x["service"] == svc), None)
+        if best and len(top) < probe_top + 3:
+            top.append(best)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(top))) as ex:
-        for x, pr in zip(top, ex.map(lambda x: _probe(x["url"]), top)):
+        for x, pr in zip(top, ex.map(lambda x: _probe(x["url"], expect=_size_of(f"{x['name']} {x['title']}")), top)):
             x["probe"] = pr
+    down = {x["service"] for x in top if x.get("probe") and not x["probe"]["ok"]} - {x["service"] for x in top if x.get("probe", {}).get("ok")}
     # Best = highest score that answered and comes in comfortably faster than it plays.
     def verdict(x):
         pr = x.get("probe")
         if not pr:
-            return 1  # untested: after the tested ones
+            return 2.5 if x["service"] in down else 1  # untested: after the tested ones (last if its service failed every test)
         if not pr["ok"]:
             return 3
         if x["need_mbps"] and pr["mbps"] < x["need_mbps"] * 1.3:
