@@ -287,18 +287,16 @@ input { font: inherit; color: var(--text); }
 .wnone { color: var(--faint); font-size: 14px; margin-top: auto; }
 .wday.empty { opacity: .6; }
 
-/* New This Week: panel, top right of the hero */
-.wk { position: absolute; top: 66px; right: 40px; z-index: 2; width: 315px; padding: 15px; border-radius: 18px;
-  background: rgba(20,15,11,.62); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.08); box-shadow: 0 10px 30px #0007; }
-.wk-h { font-size: 15px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase; color: var(--muted); margin-bottom: 9px; }
-.wk-list { display: flex; flex-direction: column; gap: 5px; min-height: 45px; }
-.wk-ep { display: flex; gap: 11px; align-items: center; padding: 5px; border-radius: 11px; cursor: pointer; transition: background .15s; min-width: 0; }
-.wk-ep > div:last-child { min-width: 0; overflow: hidden; }
+/* New This Week: a small panel, bottom right of the hero, clear of the picture */
+.wk { position: absolute; bottom: 14px; right: 40px; z-index: 2; width: 400px; padding: 10px 12px 8px; border-radius: 14px;
+  background: rgba(20,15,11,.55); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.07); box-shadow: 0 8px 24px #0006; }
+.wk-h { font-size: 12.5px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase; color: var(--muted); margin: 0 6px 4px; }
+.wk-list { display: flex; flex-direction: column; gap: 1px; }
+.wk-ep { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; padding: 4px 6px; border-radius: 8px; cursor: pointer; transition: background .15s; min-width: 0; }
 .wk-ep:hover { background: rgba(255,255,255,.07); }
-.wk-art { flex: none; width: 81px; aspect-ratio: 16/9; border-radius: 6px; background: var(--card) center/cover; background-size: cover; }
-.wk-t { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wk-s { font-size: 15.5px; color: var(--muted); white-space: nowrap; margin-top: 1px; }
-.wk-none { font-size: 16px; color: var(--muted); padding: 6px 5px; }
+.wk-t { font-size: 15.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.wk-s { font-size: 13.5px; color: var(--muted); white-space: nowrap; flex: none; }
+.wk-none { font-size: 13px; color: var(--muted); padding: 2px 6px; }
 @media (max-width: 1100px) { .wk { display: none; } }
 
 /* Details page: streams hidden until "Choose stream" */

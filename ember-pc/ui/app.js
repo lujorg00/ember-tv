@@ -319,7 +319,7 @@ function homeRowName(name, type) {
   return { name, kind: type === "movie" ? "Films" : "Series" };
 }
 
-const HERO_EVERY_MS = 10000, HERO_HOLD_MS = 60000;
+const HERO_EVERY_MS = 15000, HERO_HOLD_MS = 60000;
 let heroTimer = 0;
 
 /** The big slideshow at the top of Home, Films and Series. A page name ("Films") sits over it, blending in. */
@@ -1061,7 +1061,7 @@ async function outThisWeek() {
 }
 
 /** This week, as a calendar: seven days from yesterday, each with the new episodes of your shows that day. */
-/** New This Week: a small list at the top right of the hero. "Out now", or when it lands ("Fri 2am"). */
+/** New This Week: a small list at the bottom right of the hero. "Out now", or when it lands ("Fri 2am"). */
 async function weekCalendar() {
   let eps = [];
   try { eps = (await getJson(`${feed()}/upcoming?days=6`, 8000)).episodes || []; } catch (e) { return null; }
@@ -1078,22 +1078,13 @@ async function weekCalendar() {
   };
   const box = h(`<aside class="wk fade-in"><div class="wk-h">New This Week</div><div class="wk-list"></div></aside>`);
   const list = $(".wk-list", box);
-  for (const e of eps.slice(0, 6)) {
-    const it = h(`<div class="wk-ep"><div class="wk-art"></div><div><div class="wk-t">${esc(e.show)}</div>
-      <div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div></div>`);
-    const art = $(".wk-art", it);
-    // The show's artwork straight away; the episode still on top once there is one.
-    const show = `url('https://images.metahub.space/background/small/${e.imdb}/img'), url('https://images.metahub.space/poster/small/${e.imdb}/img')`;
-    art.style.backgroundImage = show;
+  // Compact: one line each, the show on the left, when on the right
+  for (const e of eps.slice(0, 4)) {
+    const it = h(`<div class="wk-ep"><div class="wk-t">${esc(e.show)}</div><div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div>`);
     it.onclick = () => go("title", "series", e.imdb, { name: e.show });
     list.appendChild(it);
-    meta("series", e.imdb).then(m => {
-      const ep = (m.videos || []).find(x => x.season === e.season && x.episode === e.episode);
-      const better = (ep && ep.thumbnail) || m.background || "";
-      if (better) art.style.backgroundImage = `url('${better}'), ${show}`;
-    }).catch(() => {});
   }
-  if (eps.length > 6) list.appendChild(h(`<div class="wk-none">and ${eps.length - 6} more</div>`));
+  if (eps.length > 4) list.appendChild(h(`<div class="wk-none">and ${eps.length - 4} more</div>`));
   // Names too long for the panel scroll slowly back and forth so you can read them.
   const marquee = () => box.querySelectorAll(".wk-t").forEach(t => {
     if (t.querySelector("span")) return;
