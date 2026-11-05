@@ -478,3 +478,7 @@ input { font: inherit; color: var(--text); }
   background: rgba(14,11,9,.7); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.2); color: #F3E7DA; }
 .epc.notyet .thumb { filter: saturate(.6) brightness(.75); }
 .epc.notyet .t, .epc.notyet .d { opacity: .7; }
+
+/* Award titles in white */
+.tile.brand.award b { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: #fff; font-weight: 400;
+  filter: drop-shadow(0 3px 10px rgba(0,0,0,.85)); }
