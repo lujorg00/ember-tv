@@ -15,6 +15,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.media3.common.C;
@@ -25,6 +26,8 @@ import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.DefaultTimeBar;
+import androidx.media3.ui.TimeBar;
 import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.SubtitleView;
 
@@ -50,6 +53,13 @@ public class PlayerActivity extends Activity {
     private ExoPlayer player;
     private PlayerView view;
     private TextView titleView, nextButton;
+    // "Next episode" pop-up at the start of the credits: counts down, then plays it
+    private LinearLayout upNext;
+    private TextView upNextText, upNextPlay, upNextStay;
+    private boolean upNextShown = false, creditsWanted = false;
+    private int countdown = 0;
+    private static final int COUNTDOWN_S = 15;
+    private static final int ACCENT = Color.parseColor("#F0A04B"), INK = Color.parseColor("#1A0F08");
     private final Handler h = new Handler(Looper.getMainLooper());
     private final Map<String, String> o = new HashMap<>();
     private boolean started = false, done = false, hasNext = false;
@@ -98,22 +108,52 @@ public class PlayerActivity extends Activity {
         nextButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         nextButton.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         nextButton.setPadding(dp(18), dp(10), dp(18), dp(10));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#F0A04B"));
-        bg.setCornerRadius(dp(10));
-        nextButton.setBackground(bg);
-        nextButton.setFocusable(true);
-        nextButton.setOnClickListener(v -> finishWith(EXIT_NEXT));
-        nextButton.setOnFocusChangeListener((v, f) -> v.setScaleX(f ? 1.08f : 1f));
+        style(nextButton, true);
+        nextButton.setOnClickListener(v -> { report("stopped", true); finishWith(EXIT_NEXT); });
         FrameLayout.LayoutParams nl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
         nl.setMargins(0, 0, dp(48), dp(120));
         root.addView(nextButton, nl);
         nextButton.setVisibility(View.GONE);
+
+        // Up next: bottom right, over the credits
+        upNext = new LinearLayout(this);
+        upNext.setOrientation(LinearLayout.VERTICAL);
+        upNext.setPadding(dp(20), dp(16), dp(20), dp(18));
+        GradientDrawable ub = new GradientDrawable();
+        ub.setColor(Color.argb(235, 20, 15, 11));
+        ub.setCornerRadius(dp(14));
+        ub.setStroke(dp(1), Color.argb(30, 255, 255, 255));
+        upNext.setBackground(ub);
+        upNextText = new TextView(this);
+        upNextText.setTextColor(Color.WHITE);
+        upNextText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        upNextText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        upNext.addView(upNextText);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        upNextPlay = pill("▶  Play now");
+        upNextStay = pill("Watch credits");
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
+        bl.setMargins(0, dp(12), dp(10), 0);
+        row.addView(upNextPlay, bl);
+        row.addView(upNextStay, new LinearLayout.LayoutParams(bl));
+        upNext.addView(row);
+        upNextPlay.setOnClickListener(v -> { report("stopped", true); finishWith(EXIT_NEXT); });
+        upNextStay.setOnClickListener(v -> { creditsWanted = true; hideUpNext(); });
+        FrameLayout.LayoutParams ul = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        ul.setMargins(0, 0, dp(48), dp(48));
+        root.addView(upNext, ul);
+        upNext.setVisibility(View.GONE);
         setContentView(root);
 
         view.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility -> {
             titleView.setVisibility(visibility);
-            nextButton.setVisibility(hasNext ? visibility : View.GONE);
+            nextButton.setVisibility(hasNext && !upNextShown ? visibility : View.GONE);
+            // controls up: the timeline has the focus, so left/right skip straight away (10 s a press, faster held)
+            if (visibility == View.VISIBLE && !upNextShown) {
+                View tb = view.findViewById(androidx.media3.ui.R.id.exo_progress);
+                if (tb != null) tb.requestFocus();
+            }
         });
 
         player = new ExoPlayer.Builder(this, new DefaultRenderersFactory(this).setEnableDecoderFallback(true)).build();
@@ -122,6 +162,14 @@ public class PlayerActivity extends Activity {
                 .setPreferredAudioLanguage("en").setPreferredTextLanguage("en").build();
         player.setTrackSelectionParameters(p);
         view.setPlayer(player);
+        // the timeline: selectable with the remote, 10 s a press, in Ember's colour
+        View tbv = view.findViewById(androidx.media3.ui.R.id.exo_progress);
+        if (tbv instanceof TimeBar) ((TimeBar) tbv).setKeyTimeIncrement(10_000);
+        if (tbv instanceof DefaultTimeBar) {
+            ((DefaultTimeBar) tbv).setPlayedColor(ACCENT);
+            ((DefaultTimeBar) tbv).setScrubberColor(ACCENT);
+        }
+        if (tbv != null) { tbv.setFocusable(true); tbv.setFocusableInTouchMode(false); }
         SubtitleView sv = view.getSubtitleView();
         if (sv != null) sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 0.9f);
 
@@ -135,8 +183,16 @@ public class PlayerActivity extends Activity {
                     bufferingSince = System.currentTimeMillis();
                 } else if (s == Player.STATE_ENDED) {
                     report("stopped", true);
-                    finishWith(0);
+                    finishWith(hasNext ? EXIT_NEXT : 0); // a series carries on with the next episode
                 }
+            }
+
+            // Subtitles "None": the player only switches off subtitles that aren't in a preferred language,
+            // and English is preferred, so English ones stayed on. Dropping the preference makes "None" mean none.
+            @Override
+            public void onTrackSelectionParametersChanged(TrackSelectionParameters p) {
+                if (p.ignoredTextSelectionFlags != 0 && !p.preferredTextLanguages.isEmpty())
+                    player.setTrackSelectionParameters(p.buildUpon().setPreferredTextLanguages().build());
             }
 
             @Override
@@ -169,6 +225,7 @@ public class PlayerActivity extends Activity {
             if (done) return;
             long now = System.currentTimeMillis();
             if (started && player.isPlaying() && now - lastReport > 15_000) report("playing", false);
+            upNextTick();
             // stuck buffering for more than 12 s once it had started: this stream isn't keeping up
             if (bufferingSince > 0 && now - bufferingSince > 12_000) {
                 report("stopped", false);
@@ -178,6 +235,73 @@ public class PlayerActivity extends Activity {
             h.postDelayed(this, 1000);
         }
     };
+
+    /** Where the credits roughly start. Streams don't say, so it's an estimate: the last 4% of the episode,
+     *  at least 25 s and at most 100 s (about 50 s on a half-hour show, 100 s on an hour-long one). */
+    private long creditsAt(long dur) {
+        return dur - Math.max(25_000, Math.min(100_000, dur / 25));
+    }
+
+    private void upNextTick() {
+        if (!hasNext || !started || player == null) return;
+        long dur = player.getDuration(), pos = player.getCurrentPosition();
+        if (dur == C.TIME_UNSET || dur < 5 * 60_000) return;
+        boolean inCredits = pos >= creditsAt(dur);
+        if (!inCredits) { // went back before the credits: start again
+            if (upNextShown) hideUpNext();
+            creditsWanted = false;
+            return;
+        }
+        if (creditsWanted) return;
+        if (!upNextShown) {
+            upNextShown = true;
+            countdown = COUNTDOWN_S;
+            view.hideController();
+            nextButton.setVisibility(View.GONE);
+            upNext.setVisibility(View.VISIBLE);
+            upNextPlay.requestFocus();
+        } else if (player.isPlaying()) {
+            countdown--;
+        }
+        if (countdown <= 0) {
+            report("stopped", true);
+            finishWith(EXIT_NEXT);
+            return;
+        }
+        upNextText.setText("Next episode in " + countdown);
+    }
+
+    private void hideUpNext() {
+        upNextShown = false;
+        upNext.setVisibility(View.GONE);
+    }
+
+    /** A button that shows focus with a ring and a colour change, never by stretching. */
+    private void style(TextView b, boolean primary) {
+        b.setFocusable(true);
+        b.setFocusableInTouchMode(false);
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        Runnable paint = () -> {
+            boolean f = b.isFocused();
+            if (primary) { bg.setColor(ACCENT); b.setTextColor(INK); }
+            else { bg.setColor(f ? Color.WHITE : Color.argb(40, 255, 255, 255)); b.setTextColor(f ? INK : Color.WHITE); }
+            bg.setStroke(dp(3), f ? Color.WHITE : Color.TRANSPARENT);
+            b.setBackground(bg);
+        };
+        paint.run();
+        b.setOnFocusChangeListener((v, f) -> paint.run());
+    }
+
+    private TextView pill(String text) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setPadding(dp(18), dp(10), dp(18), dp(10));
+        style(b, false);
+        return b;
+    }
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
@@ -232,6 +356,22 @@ public class PlayerActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
+        if (upNextShown) {
+            boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+            if (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (down) (k == KeyEvent.KEYCODE_DPAD_LEFT ? upNextPlay : upNextStay).requestFocus();
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (!down) (upNextStay.isFocused() ? upNextStay : upNextPlay).performClick();
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_BACK) { // Back: keep watching the credits
+                if (!down) { creditsWanted = true; hideUpNext(); }
+                return true;
+            }
+            if (k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+        }
         if (k == KeyEvent.KEYCODE_BACK && e.getAction() == KeyEvent.ACTION_UP) {
             if (view.isControllerFullyVisible()) { view.hideController(); return true; }
             report("stopped", false);
@@ -239,7 +379,7 @@ public class PlayerActivity extends Activity {
             return true;
         }
         if (k == KeyEvent.KEYCODE_BACK) return true;
-        if (k == KeyEvent.KEYCODE_MEDIA_NEXT && hasNext && e.getAction() == KeyEvent.ACTION_UP) { finishWith(EXIT_NEXT); return true; }
+        if (k == KeyEvent.KEYCODE_MEDIA_NEXT && hasNext && e.getAction() == KeyEvent.ACTION_UP) { report("stopped", true); finishWith(EXIT_NEXT); return true; }
         // the remote's own play/pause and fast-forward/rewind work as they do in other TV apps
         if (e.getAction() == KeyEvent.ACTION_DOWN && !view.isControllerFullyVisible()
                 && (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT)) {
