@@ -43,4 +43,17 @@ android {
         abortOnError false
         checkReleaseBuilds false
     }
+
+    // The same interface as Ember PC: ember-pc/ui is bundled into the app and shown full screen.
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets', '../ember-pc/ui']
+        }
+    }
+}
+
+dependencies {
+    // The player: Google's Media3 (ExoPlayer), made for Android TV - 4K, HDR, Dolby Vision, passthrough, subtitles
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
 }

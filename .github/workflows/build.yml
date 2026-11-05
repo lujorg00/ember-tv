@@ -3,7 +3,8 @@ name: Build Ember APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['ember-pc/**', '.github/workflows/ember-pc.yml']
+    # the TV app now carries Ember PC's interface (ember-pc/ui), so only the PC-only parts are ignored
+    paths-ignore: ['ember-pc/src-tauri/**', 'ember-pc/package*.json', '.github/workflows/ember-pc.yml']
   workflow_dispatch:
 
 permissions:

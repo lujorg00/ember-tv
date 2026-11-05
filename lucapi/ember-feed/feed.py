@@ -14,6 +14,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /watchlist, POST /watchlist {imdb, type, add} -> your Trakt watchlist (what your Watchlist rows show)
   GET /cinemas -> films in UK cinemas now (for the "In cinemas" label)
   POST /release {ids} -> which of those are only in cinemas, or not out yet (labels on posters)
+  GET/POST /settings/shared -> settings Ember PC shares with Ember TV (the AIOStreams link)
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
@@ -765,6 +766,28 @@ def dismiss(body):
     threading.Thread(target=clear_trakt, daemon=True).start()
     print(f"[ember-feed] removed {imdb} from continue watching", flush=True)
     return {"ok": True}
+
+
+SHARED_PATH = HERE / "shared_settings.json"
+
+
+def shared_settings(body=None):
+    """Settings Ember PC shares with Ember TV, so they needn't be typed with a remote: {"aio": your AIOStreams link}.
+    Kept on the Pi only (outside access to the Pi needs the api_key, as everything else)."""
+    try:
+        cur = json.loads(SHARED_PATH.read_text()) if SHARED_PATH.exists() else {}
+    except Exception:
+        cur = {}
+    if body is not None:
+        aio = str(body.get("aio", "")).strip()
+        if aio.startswith("http") and len(aio) < 4000:
+            cur["aio"] = aio
+            SHARED_PATH.write_text(json.dumps(cur))
+            try:
+                os.chmod(SHARED_PATH, 0o600)
+            except Exception:
+                pass
+    return cur
 
 
 def _watchlist_ids():
@@ -2561,6 +2584,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(watchlist_set(body))
             elif path == "/release":
                 self._json(release_status(body))
+            elif path == "/settings/shared":
+                self._json(shared_settings(body))
             elif path == "/progress/watched":
                 self._json(mark_watched(body))
             elif path == "/pick/failed":
@@ -2631,6 +2656,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(jellyfin_summary())
             elif path == "/watchlist":
                 self._json(watchlist())
+            elif path == "/settings/shared":
+                self._json(shared_settings())
             elif path == "/cinemas":
                 self._json(in_cinemas())
             elif path == "/watched":

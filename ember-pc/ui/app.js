@@ -7,7 +7,23 @@ const store = {
   get: (k, d = "") => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
 };
-const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
+// On the Chromecast the same page runs in Ember TV: window.EmberTV plays streams in the TV's player instead of mpv.
+const TV = !!window.EmberTV;
+const tvInvoke = async (cmd, a = {}) => {
+  if (cmd === "play") { const r = EmberTV.play(JSON.stringify(a)); if (String(r).startsWith("error")) throw new Error(r); return r; }
+  if (cmd === "playing") return EmberTV.playing();
+  if (cmd === "last_exit") return EmberTV.lastExit();
+  if (cmd === "player_log") return "The TV player doesn't keep a log here.";
+  return null;
+};
+const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : TV ? tvInvoke : null;
+if (TV) {
+  document.documentElement.classList.add("tv");
+  // lay the page out 1600 wide and let the TV scale it up: everything about 20% bigger than on a 1080p PC screen
+  const vp = document.createElement("meta"); vp.name = "viewport"; vp.content = "width=1600, user-scalable=no";
+  document.head.appendChild(vp);
+  try { if (localStorage.getItem("motion") === null) localStorage.setItem("motion", "0"); } catch (e) {}
+}
 const CINEMETA = "https://v3-cinemeta.strem.io";
 const feed = () => store.get("feed", "http://192.168.4.141:8090").replace(/\/+$/, "");
 const aioBase = () => store.get("aio").replace(/\/manifest\.json.*$/, "");
@@ -135,11 +151,27 @@ const loader = (() => {
 // ---------------------------------------------------------------- navigation
 
 const pages = { home: showHome, search: showSearch, films: () => showBrowse("movie"), series: () => showBrowse("series"),
-  settings: showSettings, match: showMatch, year: showYear };
+  settings: showSettings, match: showMatch, year: showYear, apps: showApps };
+
+/** Ember TV only: the apps on the TV (Netflix, YouTube...), most used first. */
+async function showApps() {
+  const v = $("#view");
+  v.innerHTML = `<div class="page-h"><h1>Apps</h1><div class="muted">Everything installed on this TV</div></div><div class="apps fade-in"></div>`;
+  if (!TV) { $(".apps", v).innerHTML = `<div class="empty">Apps are on Ember TV.</div>`; return; }
+  let list = [];
+  try { list = JSON.parse(EmberTV.apps()); } catch (e) {}
+  const box = $(".apps", v);
+  for (const a of list) {
+    const el = h(`<button class="apptile" title="${esc(a.label)}">${a.banner ? `<img src="${a.banner}" alt="">` : `<span class="ai">${a.icon ? `<img src="${a.icon}" alt="">` : ""}<b>${esc(a.label)}</b></span>`}</button>`);
+    el.onclick = () => EmberTV.launchApp(a.pkg);
+    box.appendChild(el);
+  }
+  if (!list.length) box.innerHTML = `<div class="empty">No apps found.</div>`;
+}
 const hiddenRows = () => { try { return new Set(JSON.parse(store.get("hiddenRows", "[]"))); } catch (e) { return new Set(); } };
 const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]));
 const catKey = (c) => `cat:${c.type}:${c.id}`;
-const deviceName = () => store.get("deviceName", "Ember PC") || "Ember PC";
+const deviceName = () => store.get("deviceName", TV ? "Ember TV" : "Ember PC") || (TV ? "Ember TV" : "Ember PC");
 let navStack = [];
 function go(page, ...args) {
   document.querySelectorAll(".nav").forEach(b => b.classList.toggle("on", b.dataset.page === page));
@@ -1222,13 +1254,33 @@ function showSettings() {
   };
   $("#picksUrl").value = picksUrl();
   $("#copyPicks").onclick = async () => { try { await navigator.clipboard.writeText($("#picksUrl").value); toast("Copied"); } catch (e) { $("#picksUrl").select(); } };
+  if (TV) {
+    $(".form", v)?.insertAdjacentHTML("afterbegin", `<label>This TV</label><div class="btns" style="margin-bottom:14px"><button class="btn" id="tvSettings">Dimmer, screensaver and home screen…</button></div>`);
+    $("#tvSettings").onclick = () => EmberTV.openTvSettings();
+  }
   $("#save").onclick = () => {
-    store.set("aio", $("#aio").value.trim()); store.set("feed", $("#feed").value.trim()); store.set("deviceName", $("#dev").value.trim().slice(0, 30));
+    store.set("aio", $("#aio").value.trim());
+    shareSettings(); store.set("feed", $("#feed").value.trim()); store.set("deviceName", $("#dev").value.trim().slice(0, 30));
     store.set("playMode", document.querySelector("input[name=pm]:checked").value);
     store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0");
     addonCatalogs = null; sky.start(); $("#picksUrl").value = picksUrl(); toast("Saved");
   };
 }
+
+// ---------------------------------------------------------------- shared settings
+// Your AIOStreams link is kept on lucapi too, so Ember TV picks it up without typing it with the remote.
+function shareSettings() {
+  const aio = store.get("aio"); if (!aio) return;
+  fetch(`${feed()}/settings/shared`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aio }) }).catch(() => {});
+}
+async function fetchSharedSettings() {
+  if (store.get("aio")) { shareSettings(); return; }
+  try {
+    const s = await getJson(`${feed()}/settings/shared`, 5000);
+    if (s.aio) { store.set("aio", s.aio); aioCatalogsP = null; }
+  } catch (e) {}
+}
+fetchSharedSettings();
 
 // ---------------------------------------------------------------- background: day, evening, night (quiet)
 

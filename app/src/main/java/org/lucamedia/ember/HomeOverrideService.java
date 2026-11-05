@@ -61,14 +61,14 @@ public class HomeOverrideService extends AccessibilityService {
 
         prefs.setLastStockWindow(pkg + "/" + cls);
         boolean isHome = stockHomeClasses.contains(cls)
-                || cls.endsWith(".HomeActivity") || cls.endsWith(".MainActivity");
+                || cls.endsWith(".HomeActivity") || cls.endsWith(".WebHomeActivity") || cls.endsWith(".MainActivity");
         if (!isHome) return; // a panel or dialog, not the home screen
 
         long now = SystemClock.elapsedRealtime();
         if (now - lastSwap < 700) return;
         lastSwap = now;
 
-        Intent i = new Intent(this, HomeActivity.class);
+        Intent i = new Intent(this, WebHomeActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(i);
     }

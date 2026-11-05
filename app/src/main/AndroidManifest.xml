@@ -39,14 +39,16 @@
         android:supportsRtl="false"
         android:allowBackup="true">
 
+        <!-- Ember's home: the same interface as Ember PC, made for the remote -->
         <activity
-            android:name=".HomeActivity"
+            android:name=".WebHomeActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:stateNotNeeded="true"
             android:clearTaskOnLaunch="true"
             android:excludeFromRecents="true"
             android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustPan"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -60,6 +62,22 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- The player (Media3) -->
+        <activity
+            android:name=".PlayerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.Ember"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode" />
+
+        <!-- The earlier, native home screen (kept for now; not on the launcher) -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape" />
 
         <activity
             android:name=".SettingsActivity"

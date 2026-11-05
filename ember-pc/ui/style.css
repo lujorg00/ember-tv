@@ -482,3 +482,35 @@ input { font: inherit; color: var(--text); }
 /* Award titles in white */
 .tile.brand.award b { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: #fff; font-weight: 400;
   filter: drop-shadow(0 3px 10px rgba(0,0,0,.85)); }
+
+/* ================================================================ Ember TV (the same page on the Chromecast) */
+.tv-only { display: none !important; }
+.tv .tv-only { display: flex !important; }
+/* nothing hovers on a TV; the remote's focus gets a clear glow instead */
+.tv .tvf { outline: none; }
+.tv .poster.tvf, .tv .t10.tvf .t10-art, .tv .cw.tvf .cw-art, .tv .tile.tvf, .tv .tile.tvf .face, .tv .epc.tvf .thumb, .tv .apptile.tvf {
+  box-shadow: 0 0 0 4px var(--accent), 0 14px 36px #000c !important; transform: scale(1.07); z-index: 3; }
+.tv .poster.tvf, .tv .tile.tvf, .tv .apptile.tvf { transition: transform .15s, box-shadow .15s; }
+.tv .t10.tvf .t10-art, .tv .cw.tvf .cw-art, .tv .epc.tvf .thumb { transition: transform .15s, box-shadow .15s; }
+.tv .t10.tvf b { -webkit-text-stroke-color: var(--accent); }
+.tv .btn.tvf, .tv .btn-chip.tvf, .tv .hn.tvf, .tv .tp-dr-x.tvf, .tv .back.tvf, .tv .wk-ep.tvf, .tv .stream.tvf, .tv label.tvf, .tv select.tvf, .tv input.tvf, .tv .ep-mark.tvf {
+  box-shadow: 0 0 0 3px var(--accent) !important; }
+.tv .btn.primary.tvf { transform: scale(1.06); }
+.tv .nav.tvf { background: rgba(240,160,75,.2); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
+.tv .poster.tvf .wbadge.add, .tv .t10.tvf .wbadge.add { opacity: 1; }
+/* the Chromecast is far slower than a PC: no frosted glass, no moving background, no hover-only bits */
+.tv *, .tv *::before, .tv *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.tv #sky, .tv #glow { display: none; }
+.tv #fullscreen, .tv .sa { display: none !important; }
+.tv .wk, .tv .tp-dr { background: rgba(20,15,11,.94); }
+/* keep clear of the screen's edges (TVs crop a little) */
+.tv #side { padding-top: 34px; padding-bottom: 30px; }
+.tv #view { right: 24px; }
+.tv .strip { padding-left: 56px; padding-right: 56px; scroll-behavior: smooth; }
+/* Apps */
+.apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; padding: 10px 48px 60px; }
+.apptile { aspect-ratio: 16/9; border-radius: 14px; overflow: hidden; background: #1c1612; display: grid; place-items: center; padding: 0;
+  box-shadow: 0 6px 18px #0006; }
+.apptile > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.apptile .ai { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #EDE2D6; font-weight: 600; font-size: 17px; }
+.apptile .ai img { width: 64px; height: 64px; }
