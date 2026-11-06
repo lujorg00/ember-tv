@@ -162,6 +162,17 @@ async function showApps() {
   let list = [];
   try { list = JSON.parse(EmberTV.apps()); } catch (e) {}
   const box = $(".apps", v);
+  // the Chromecast's own Settings and the Play Store aren't in Google TV's app list, so they're always first here
+  if (EmberTV.openSystem) {
+    const sys = [["settings", "Settings", `<svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.6 4.9-1.9-.4a7 7 0 0 1-.6 1.5l1.1 1.6-1.8 1.8-1.6-1.1c-.5.3-1 .5-1.5.6l-.4 1.9h-2.6l-.4-1.9a7 7 0 0 1-1.5-.6l-1.6 1.1-1.8-1.8 1.1-1.6c-.3-.5-.5-1-.6-1.5l-1.9-.4v-2.6l1.9-.4c.1-.5.3-1 .6-1.5L4.6 6.9l1.8-1.8 1.6 1.1c.5-.3 1-.5 1.5-.6l.4-1.9h2.6l.4 1.9c.5.1 1 .3 1.5.6l1.6-1.1 1.8 1.8-1.1 1.6c.3.5.5 1 .6 1.5l1.9.4v2.8Z"/></svg>`],
+                 ["store", "Play Store", `<svg viewBox="0 0 24 24"><path d="M4.5 3.2 13.4 12l-8.9 8.8c-.3-.2-.5-.6-.5-1V4.2c0-.4.2-.8.5-1Zm10 7.7L6.6 3l10.1 5.7-2.2 2.2Zm0 2.2 2.2 2.2L6.6 21l7.9-7.9Zm3.4-3.7 2.6 1.5c.7.4.7 1.4 0 1.8l-2.6 1.5-2.4-2.4 2.4-2.4Z"/></svg>`]];
+    for (const [what, label, icon] of sys) {
+      const el = h(`<button class="apptile sys" title="${label}"><span class="ai">${icon}<b>${label}</b></span></button>`);
+      el.onclick = () => EmberTV.openSystem(what);
+      box.appendChild(el);
+    }
+    list = list.filter((a) => !/^com\.android\.(vending|tv\.settings)$/.test(a.pkg));
+  }
   for (const a of list) {
     const el = h(`<button class="apptile" title="${esc(a.label)}">${a.banner ? `<img src="${a.banner}" alt="">` : `<span class="ai">${a.icon ? `<img src="${a.icon}" alt="">` : ""}<b>${esc(a.label)}</b></span>`}</button>`);
     el.onclick = () => EmberTV.launchApp(a.pkg);
@@ -174,17 +185,52 @@ const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]))
 const catKey = (c) => `cat:${c.type}:${c.id}`;
 const deviceName = () => store.get("deviceName", TV ? "Ember TV" : "Ember PC") || (TV ? "Ember TV" : "Ember PC");
 let navStack = [];
+// Home, Films and Series are kept when you leave them (for 10 minutes, or until something is played):
+// Back, or coming back to the tab, shows them again as they were, on the same row and item.
+const KEEP = new Set(["home", "films", "series"]);
+const kept = {};
+const keptPages = new Set();
+function keepPage() {
+  const cur = navStack[navStack.length - 1];
+  const v = $("#view");
+  if (!cur || !KEEP.has(cur[0]) || !v.firstChild) return;
+  const snap = { nodes: [...v.childNodes], top: v.scrollTop, strips: [...v.querySelectorAll(".strip")].map(x => x.scrollLeft),
+                 focus: window.emberTvCurrent ? window.emberTvCurrent() : null, at: Date.now() };
+  kept[cur[0]] = snap;
+  keptPages.clear(); Object.values(kept).forEach(k => k.nodes.forEach(n => n.querySelectorAll && n.querySelectorAll(".hero").forEach(x => keptPages.add(x))));
+  snap.nodes.forEach(n => n.classList && n.classList.contains("hero") && keptPages.add(n));
+}
+function forgetKept() { for (const k of Object.keys(kept)) delete kept[k]; keptPages.clear(); }
+function restorePage(page, where) {
+  const snap = kept[page];
+  if (!snap || Date.now() - snap.at > 10 * 60 * 1000) return false;
+  const v = $("#view");
+  v.replaceChildren(...snap.nodes);
+  delete kept[page];
+  [...v.querySelectorAll(".strip")].forEach((x, i) => { x.scrollLeft = where ? (snap.strips[i] || 0) : 0; });
+  v.scrollTop = where ? snap.top : 0;
+  if (where && snap.focus && snap.focus.isConnected && window.emberTvFocus) setTimeout(() => window.emberTvFocus(snap.focus), 30);
+  return true;
+}
 function go(page, ...args) {
   document.querySelectorAll(".nav").forEach(b => b.classList.toggle("on", b.dataset.page === page));
+  keepPage();
   navStack.push([page, args]);
   if (navStack.length > 30) navStack.shift();
+  if (KEEP.has(page) && !args.length && restorePage(page, false)) return;
   const fn = page === "title" ? showTitle : page === "tile" ? showTile : pages[page];
   $("#view").scrollTop = 0;
   fn(...args);
 }
 function back() {
   navStack.pop();
-  const prev = navStack.pop() || ["home", []];
+  const prev = navStack[navStack.length - 1] || ["home", []];
+  if (KEEP.has(prev[0])) {
+    document.querySelectorAll(".nav").forEach(b => b.classList.toggle("on", b.dataset.page === prev[0]));
+    if (!navStack.length) navStack.push(prev);
+    if (restorePage(prev[0], true)) return;
+  }
+  navStack.pop();
   go(prev[0], ...prev[1]);
 }
 document.querySelectorAll(".nav").forEach(b => b.onclick = () => go(b.dataset.page));
@@ -314,7 +360,12 @@ async function catalogRow(c) {
 }
 
 /** Home rows get "Films" or "Series" on the end, unless the name already says which. */
+/** Friendlier names for the addon's lists: "Top 20 Trending Films" is "Trending Today", "All-Time" loses its hyphen. */
+function niceName(name) {
+  return String(name || "").replace(/^\s*top\s*\d+\s*trending\b.*$/i, "Trending Today").replace(/all-time/ig, "All Time");
+}
 function homeRowName(name, type) {
+  name = niceName(name);
   if (/\b(films?|movies?|series|shows?|tv)\b/i.test(name)) return name;
   return { name, kind: type === "movie" ? "Films" : "Series" };
 }
@@ -324,11 +375,11 @@ let heroTimer = 0;
 
 /** The big slideshow at the top of Home, Films and Series. A page name ("Films") sits over it, blending in. */
 function createHero(pageName) {
-  clearInterval(heroTimer);
   const hero = h(`<header class="hero ${pageName ? "named" : ""}"><div class="bd a"></div><div class="bd b"></div>
     ${pageName ? `<div class="pagename">${esc(pageName)}</div>` : ""}<div class="info"></div>
     <div class="hnav"><button class="hn prev" aria-label="Previous">‹</button><div class="dots"></div><button class="hn next" aria-label="Next">›</button></div></header>`);
-  let flip = false, heroFor = null, pool = [], idx = 0, heldUntil = 0;
+  let flip = false, heroFor = null, pool = [], idx = 0, heldUntil = 0, changedAt = Date.now();
+  const loadImg = (src) => new Promise((ok) => { if (!src) return ok(); const i = new Image(); i.onload = i.onerror = () => ok(); i.src = src; setTimeout(ok, 2500); });
 
   const setHero = async (m) => {
     if (!m || heroFor === m.id) return;
@@ -337,10 +388,13 @@ function createHero(pageName) {
     const full = await meta(type, m.id);
     if (heroFor !== m.id) return;
     const mm = { ...m, ...full };
+    // the picture and the logo arrive together: both loaded first, then faded in at once
+    await Promise.all([loadImg(backdrop(mm)), loadImg(mm.logo)]);
+    if (heroFor !== m.id) return;
+    changedAt = Date.now();
     const layers = hero.querySelectorAll(".bd"); flip = !flip;
     const on = layers[flip ? 0 : 1], off = layers[flip ? 1 : 0];
-    const img = new Image(); img.src = backdrop(mm);
-    img.onload = () => { if (heroFor !== m.id) return; on.style.backgroundImage = `url('${img.src}')`; on.classList.add("show"); off.classList.remove("show"); };
+    on.style.backgroundImage = `url('${backdrop(mm)}')`; on.classList.add("show"); off.classList.remove("show");
     const p = progress[m.id];
     const info = $(".info", hero);
     info.classList.remove("fade-in"); void info.offsetWidth; info.classList.add("fade-in");
@@ -364,16 +418,17 @@ function createHero(pageName) {
     if (!pool.length) return;
     hero.querySelector(".dots").innerHTML = pool.map(() => "<i></i>").join("");
     hero.querySelectorAll(".dots i").forEach((d, k) => d.onclick = () => { idx = k; pick(pool[k]); });
-    const step = (dir) => { idx = (idx + dir + pool.length) % pool.length; heldUntil = Date.now() + HERO_HOLD_MS; setHero(pool[idx]); };
+    // skipping by hand: the slideshow carries on from there (15 s later), it doesn't stop
+    const step = (dir) => { idx = (idx + dir + pool.length) % pool.length; changedAt = Date.now(); setHero(pool[idx]); };
     hero.querySelector(".hn.prev").onclick = () => step(-1);
     hero.querySelector(".hn.next").onclick = () => step(1);
     setHero(pool[0]);
-    clearInterval(heroTimer);
-    heroTimer = setInterval(() => {
-      if (!document.body.contains(hero)) return clearInterval(heroTimer);
-      if (Date.now() < heldUntil || document.hidden || hero.matches(":hover")) return;
-      idx = (idx + 1) % pool.length; setHero(pool[idx]);
-    }, HERO_EVERY_MS);
+    clearInterval(hero._timer);
+    hero._timer = setInterval(() => {
+      if (!hero.isConnected) { if (!keptPages.has(hero)) clearInterval(hero._timer); return; } // a page kept for Back waits
+      if (Date.now() < heldUntil || Date.now() - changedAt < HERO_EVERY_MS || document.hidden || (!TV && hero.matches(":hover"))) return;
+      idx = (idx + 1) % pool.length; changedAt = Date.now(); setHero(pool[idx]);
+    }, 1000);
   };
   return { el: hero, pick, start };
 }
@@ -396,7 +451,7 @@ async function showHome() {
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
   const hidden = hiddenRows();
-  const shown = cats.filter(c => !hidden.has(catKey(c)));
+  const shown = cats.filter(c => !hidden.has(catKey(c)) && !/all.?time/i.test(c.name || "")); // all-time picks live on Films and Series
   const tops = shown.filter(isTop), others = shown.filter(c => !isTop(c) && !isContinue(c));
   const topSlots = tops.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
@@ -414,7 +469,8 @@ async function showHome() {
     })),
     Promise.all(others.map(async (c, i) => {
       const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
-      if (metas.length) otherSlots[i].replaceWith(row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
+      if (metas.length) otherSlots[i].replaceWith(/watchlist/i.test(c.name || "") ? wideRow(homeRowName(c.name || c.id, c.type), metas)
+        : row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
       return metas;
     })),
   ]);
@@ -471,6 +527,18 @@ async function continueRow(cwCat) {
 }
 
 /** Top 10: big rank numbers beside wide artwork. */
+/** Your watchlists: wide pictures with the title on them, so they stand apart from the poster rows. */
+function wideRow(title, metas) {
+  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip wide"></div></section>`);
+  metas.forEach((m) => {
+    const el = h(`<div class="t10"><div class="t10-art" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
+    el.onclick = () => go("title", m.type, m.id, m);
+    $(".strip", r).appendChild(el);
+  });
+  return r;
+}
+
 function top10Row(title, metas, onPick) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
@@ -699,8 +767,9 @@ async function showBrowse(type) {
   const mine = lists.filter(c => c.type === type), theirs = aio.filter(c => c.type === type);
   const find = (re, ...pools) => { for (const p of pools) { const c = p.find(x => re.test((x.name || "").trim())); if (c) return c; } return null; };
   const plan = [
-    { name: "Trending Now", cat: find(/trending/i, mine, theirs) },
+    { name: "Trending Today", cat: find(/trending/i, mine, theirs) },
     { name: `New ${kind} For You`, cat: find(/^new .*for you/i, mine) },
+    { name: "All Time Recommendations", cat: find(/all.?time/i, mine) },
     { name: `Netflix Top ${kind}`, cat: find(/netflix top/i, mine, theirs), top: true },
     { name: `Disney+ Top ${kind}`, cat: find(/disney\s*\+/i, theirs, mine), top: true },
     { name: `Apple TV+ Top ${kind}`, cat: find(/apple tv\s*\+/i, theirs, mine), top: true },
@@ -730,11 +799,13 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <section class="tp-more"></section>
     <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
   v.appendChild(page);
+  setTimeout(() => page.classList.add("ready"), 700); // never waits longer than this for the picture
   $(".back", page).onclick = back;
   const [m] = await Promise.all([meta(type, id), loadProgress()]);
   const mm = { ...hint, ...m, id, type };
   const bdUrl = backdrop(mm);
-  if (bdUrl) { const img = new Image(); img.onload = () => { $(".tp-bd", page).style.backgroundImage = `url('${bdUrl}')`; $(".tp-bd", page).classList.add("show"); }; img.src = bdUrl; }
+  if (bdUrl) { const img = new Image(); img.onload = () => { $(".tp-bd", page).style.backgroundImage = `url('${bdUrl}')`; $(".tp-bd", page).classList.add("show"); page.classList.add("ready"); }; img.src = bdUrl; }
+  setTimeout(() => page.classList.add("ready"), bdUrl ? 450 : 0);
   let saved = {};
   try { (await getJson(`${feed()}/progress/${id}`, 6000)).positions.forEach(p => saved[(p.season ?? "") + ":" + (p.episode ?? "")] = p); } catch (e) {}
 
@@ -1182,6 +1253,7 @@ function nextEpisode(mm, season, episode) {
 }
 
 async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
+  forgetKept(); // Continue watching will have changed: Home is drawn fresh after this
   if (!chosen) attempt = null; // picked by hand: no automatic switching
   if (!invoke) return toast("Playing only works inside the Ember app.");
   const embed = store.get("playMode", "window") === "window";
@@ -1267,8 +1339,9 @@ function showSettings() {
   $("#picksUrl").value = picksUrl();
   $("#copyPicks").onclick = async () => { try { await navigator.clipboard.writeText($("#picksUrl").value); toast("Copied"); } catch (e) { $("#picksUrl").select(); } };
   if (TV) {
-    $(".form", v)?.insertAdjacentHTML("afterbegin", `<label>This TV</label><div class="btns" style="margin-bottom:14px"><button class="btn" id="tvSettings">Dimmer, screensaver and home screen…</button></div>`);
+    $(".form", v)?.insertAdjacentHTML("afterbegin", `<label>This TV</label><div class="btns" style="margin-bottom:14px"><button class="btn" id="tvSettings">Dimmer, screensaver and home screen…</button>${EmberTV.openSystem ? `<button class="btn" id="sysSettings">Chromecast settings</button><button class="btn" id="playStore">Play Store</button>` : ""}</div>`);
     $("#tvSettings").onclick = () => EmberTV.openTvSettings();
+    if ($("#sysSettings")) { $("#sysSettings").onclick = () => EmberTV.openSystem("settings"); $("#playStore").onclick = () => EmberTV.openSystem("store"); }
   }
   $("#save").onclick = () => {
     store.set("aio", $("#aio").value.trim());
@@ -1299,14 +1372,15 @@ fetchSharedSettings();
 const sky = (() => {
   const cv = $("#sky"), g = cv.getContext("2d"), glow = $("#glow");
   let mode = "night", parts = [], raf = 0, paused = false, last = 0, rise = 7 * 60, set = 17 * 60;
-  const size = () => { cv.width = innerWidth / 2; cv.height = innerHeight / 2; };
+  // on the Chromecast: a third of the size and 12 frames a second, so rows still scroll smoothly over it
+  const size = () => { const k = TV ? 3 : 2; cv.width = Math.round(innerWidth / k); cv.height = Math.round(innerHeight / k); };
   const pickMode = () => {
     const d = new Date(), m = d.getHours() * 60 + d.getMinutes();
     return m < rise + 20 || m > set + 45 ? "night" : m > set - 75 ? "evening" : "day";
   };
   const seed = () => {
     parts = [];
-    const n = mode === "night" ? 70 : mode === "evening" ? 26 : 0;
+    const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : 0;
     for (let i = 0; i < n; i++) parts.push({ x: Math.random(), y: Math.random(), r: Math.random(), s: Math.random(), p: Math.random() * 6.28 });
     glow.style.background = mode === "day"
       ? "radial-gradient(1200px 700px at 88% -10%, rgba(255,214,150,.16), transparent 60%), linear-gradient(#17110D, #0E0B09)"
@@ -1316,14 +1390,14 @@ const sky = (() => {
   };
   const draw = (t) => {
     raf = requestAnimationFrame(draw);
-    if (paused || t - last < 50) return; // 20 fps is plenty for this
+    if (paused || t - last < (TV ? 80 : 50)) return; // 20 fps is plenty for this (12 on the TV)
     last = t;
     const W = cv.width, H = cv.height, s = t / 1000;
     g.clearRect(0, 0, W, H);
     for (const p of parts) {
       if (mode === "night") {
         const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(s * (0.4 + p.s) + p.p));
-        g.fillStyle = `rgba(232,236,255,${a * 0.8})`; g.fillRect(p.x * W, p.y * H * 0.7, 1 + p.r, 1 + p.r);
+        g.fillStyle = `rgba(232,236,255,${a * 0.8})`; g.fillRect(p.x * W, p.y * H * 0.7, (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1), (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1));
       } else {
         const life = (s * (0.03 + p.s * 0.04) + p.p) % 1;
         const x = (p.x * 0.35) * W + Math.sin(s * 0.6 + p.p) * 12 + life * W * 0.12, y = H - life * H * 0.85;

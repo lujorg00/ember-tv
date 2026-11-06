@@ -2,9 +2,12 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var store: Store
+    @State private var path = NavigationPath()
+    @FocusState private var focusKey: String?
+    @State private var lastKey: String?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
           ZStack {
             AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
@@ -12,7 +15,7 @@ struct HomeView: View {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
                     if !store.cw.isEmpty { ContinueRow(items: store.cw) }
                     ForEach(store.rows) { r in
-                        if r.top { TopRow(row: r) } else { PosterRow(row: r) }
+                        if r.top { TopRow(row: r) } else if r.wide { WideRow(row: r) } else { PosterRow(row: r) }
                     }
                     ForEach(store.tileGroups) { g in TileRow(group: g, type: "") }
                     if !store.homeLoaded {
@@ -27,32 +30,106 @@ struct HomeView: View {
             .scrollClipDisabled()
             .ignoresSafeArea()
           }
+            .environment(\.focusMemory, $focusKey)
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
             .navigationDestination(for: Tile.self) { t in TilePage(tile: t, type: "") }
+        }
+        .rememberFocus($focusKey, last: $lastKey, depth: path.count)
+    }
+}
+
+// MARK: - coming back to the same spot
+
+private struct FocusMemoryKey: EnvironmentKey { static let defaultValue: FocusState<String?>.Binding? = nil }
+extension EnvironmentValues {
+    /// The page's focus, so Back can land on the row and item you opened.
+    var focusMemory: FocusState<String?>.Binding? {
+        get { self[FocusMemoryKey.self] }
+        set { self[FocusMemoryKey.self] = newValue }
+    }
+}
+
+/// Marks a card so the page can put the focus back on it.
+struct Remember: ViewModifier {
+    @Environment(\.focusMemory) private var memory
+    let key: String
+    func body(content: Content) -> some View {
+        if let memory { content.focused(memory, equals: key) } else { content }
+    }
+}
+
+extension View {
+    func remember(_ key: String) -> some View { modifier(Remember(key: key)) }
+
+    /// Notes what has the focus; coming back from a details page (the stack getting shorter), puts it back there.
+    func rememberFocus(_ focus: FocusState<String?>.Binding, last: Binding<String?>, depth: Int) -> some View {
+        self
+            .onChange(of: focus.wrappedValue) { _, k in if let k { last.wrappedValue = k } }
+            .onChange(of: depth) { old, new in
+                guard new < old, let k = last.wrappedValue else { return }
+                Task {
+                    try? await Task.sleep(nanoseconds: 60_000_000)
+                    focus.wrappedValue = k
+                }
+            }
+    }
+}
+
+/// While a poster is selected, its details and pictures load ahead, so the details page opens complete.
+struct Prefetch: View {
+    let meta: Meta
+    @Environment(\.isFocused) private var focused
+    var body: some View {
+        Color.clear.onChange(of: focused) { _, on in
+            guard on else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                let full = await MetaCache.shared.full(meta)
+                _ = await ImageStore.shared.load(optional: full.backdropURL)
+                _ = await ImageStore.shared.load(optional: full.logoURL)
+            }
         }
     }
 }
 
 // MARK: - hero
 
-/// The slideshow at the top: backdrop, logo, a line about it, Play and Details. Moves on every 15 seconds.
+/// The slideshow at the top: backdrop, logo, a line about it, Play and Details. Moves on every 15 seconds
+/// (counting from the last change, so skipping by hand doesn't stop it). Each slide's picture and logo load first,
+/// then fade in together.
 struct HeroView: View {
     @EnvironmentObject var store: Store
     let items: [Meta]
     var pageName: String? = nil
     @State private var idx = 0
     @State private var full: [String: Meta] = [:]
-    @State private var holdUntil = Date.distantPast
-    @FocusState private var focused: Bool
+    @State private var changedAt = Date()
     @State private var shown = false
+    @State private var moving = false
+    enum Btn: Hashable { case prev, play, details, next }
+    @FocusState private var btn: Btn?
 
     private var m: Meta { let base = items[min(idx, items.count - 1)]; return full[base.id] ?? base }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Backdrop(url: m.backdropURL, height: 760, kenBurns: true)
-                .id(m.id)
-                .transition(.opacity)
+            // the slide: picture, logo and words, crossfading as one
+            ZStack(alignment: .bottomLeading) {
+                Backdrop(url: m.backdropURL, height: 760, kenBurns: true)
+                LinearGradient(colors: [Theme.bg.opacity(0.95), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                LinearGradient(colors: [Theme.bg, .clear], startPoint: .bottom, endPoint: .center)
+                VStack(alignment: .leading, spacing: 20) {
+                    TitleArt(meta: m, height: 160, width: 620)
+                    Text(store.progress[m.id]?.line ?? m.metaLine).font(.ember(24, .medium)).foregroundStyle(Theme.accent)
+                    Text(m.description).font(.ember(24)).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 900, alignment: .leading)
+                    Color.clear.frame(height: 60 + 8 + 12 + 50)   // room for the buttons and dots, which stay put
+                }
+                .padding(.leading, 90)
+                .padding(.bottom, 40)
+            }
+            .id(m.id)
+            .transition(.opacity)
+
             if let pageName {
                 // the page's name, big and faint at the top, blending into the picture (as on Ember PC)
                 Text(pageName).font(.ember(120, .heavy)).foregroundStyle(.white.opacity(0.10))
@@ -60,37 +137,36 @@ struct HeroView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .allowsHitTesting(false)
             }
-            LinearGradient(colors: [Theme.bg.opacity(0.95), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
-            LinearGradient(colors: [Theme.bg, .clear], startPoint: .bottom, endPoint: .center)
             VStack(alignment: .leading, spacing: 20) {
-                TitleArt(meta: m, height: 160, width: 620)
-                if let p = store.progress[m.id] {
-                    Text(p.line).font(.ember(24, .medium)).foregroundStyle(Theme.accent)
-                } else {
-                    Text(m.metaLine).font(.ember(24, .medium)).foregroundStyle(Theme.accent)
-                }
-                Text(m.description).font(.ember(24)).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 900, alignment: .leading)
                 HStack(spacing: 24) {
-                    Button {
-                        play()
-                    } label: {
+                    Button { play() } label: {
                         Label(store.progress[m.id].map { "Resume \(clock($0.position))" } ?? "Play", systemImage: "play.fill")
                     }
                     .buttonStyle(EmberButtonStyle(primary: true))
+                    .focused($btn, equals: .play)
                     NavigationLink(value: m) { Text("Details") }
                         .buttonStyle(EmberButtonStyle())
+                        .focused($btn, equals: .details)
                 }
-                .focused($focused)
                 .padding(.top, 8)
-                HStack(spacing: 10) {
-                    ForEach(items.indices, id: \.self) { i in
-                        Capsule().fill(i == idx ? Theme.accent : .white.opacity(0.3)).frame(width: i == idx ? 30 : 10, height: 10)
+                HStack(spacing: 16) {
+                    Button { step(-1) } label: { Image(systemName: "chevron.left") }
+                        .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .prev).scaleEffect(0.8)
+                    HStack(spacing: 10) {
+                        ForEach(items.indices, id: \.self) { i in
+                            Capsule().fill(i == idx ? Theme.accent : .white.opacity(0.3)).frame(width: i == idx ? 30 : 10, height: 10)
+                        }
                     }
+                    Button { step(1) } label: { Image(systemName: "chevron.right") }
+                        .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .next).scaleEffect(0.8)
                 }
-                .padding(.top, 12)
             }
             .padding(.leading, 90)
             .padding(.bottom, 40)
+            .onMoveCommand { d in
+                // left from Play (nothing else that way): the slide before
+                if d == .left && btn == .play { step(-1) }
+            }
             if pageName == nil && !store.upcoming.isEmpty {
                 WeekPanel(eps: store.upcoming)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -103,22 +179,38 @@ struct HeroView: View {
         .opacity(shown ? 1 : 0)
         .onAppear { withAnimation(.easeIn(duration: 0.45)) { shown = true } }
         .onDisappear { shown = false }
-        .animation(.easeInOut(duration: 0.6), value: idx)
-        .task(id: idx) {
-            let base = items[min(idx, items.count - 1)]
-            if full[base.id] == nil { full[base.id] = await MetaCache.shared.full(base) }
-        }
         .task {
+            await prepare(idx)
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
-                if !focused, Date() > holdUntil, !items.isEmpty { idx = (idx + 1) % items.count }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Date().timeIntervalSince(changedAt) >= 15, !items.isEmpty, !moving { await go(to: (idx + 1) % items.count) }
             }
         }
-        // left and right on the hero's buttons, past either end, change slide
-        .onMoveCommand { d in
-            guard focused else { return }
-            if d == .left || d == .right { holdUntil = Date().addingTimeInterval(60) }
-        }
+    }
+
+    private func step(_ d: Int) {
+        guard !items.isEmpty else { return }
+        Task { await go(to: (idx + d + items.count) % items.count) }
+    }
+
+    /// Details, picture and logo ready before the slide shows, so they appear together.
+    private func prepare(_ i: Int) async {
+        let base = items[min(i, items.count - 1)]
+        var f: Meta
+        if let known = full[base.id] { f = known } else { f = await MetaCache.shared.full(base) }
+        full[base.id] = f
+        async let b = ImageStore.shared.load(optional: f.backdropURL)
+        async let l = ImageStore.shared.load(optional: f.logoURL)
+        _ = await (b, l)
+    }
+
+    private func go(to i: Int) async {
+        moving = true
+        changedAt = Date()
+        await prepare(i)
+        withAnimation(.easeInOut(duration: 0.7)) { idx = i }
+        changedAt = Date()
+        moving = false
     }
 
     private func play() {
@@ -188,22 +280,39 @@ struct WeekPanel: View {
     }
 }
 
-/// The title's logo, or its name when there's no logo.
+/// The title's logo, or its name when there's no logo (shown straight away when it's been loaded before).
 struct TitleArt: View {
     let meta: Meta
     var height: CGFloat
     var width: CGFloat
+    @State private var img: UIImage?
+    @State private var failed = false
+
+    init(meta: Meta, height: CGFloat, width: CGFloat) {
+        self.meta = meta
+        self.height = height
+        self.width = width
+        _img = State(initialValue: meta.logoURL.flatMap { ImageStore.shared.cache.object(forKey: $0 as NSURL) })
+    }
+
     var body: some View {
-        AsyncImage(url: meta.logoURL) { ph in
-            if let img = ph.image {
-                img.resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .leading)
+        Group {
+            if let img {
+                Image(uiImage: img).resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
-            } else {
+            } else if meta.logoURL == nil || failed {
                 Text(meta.name).font(.ember(60, .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
+            } else {
+                Color.clear
             }
         }
         .frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
+        .frame(height: height, alignment: .bottomLeading)
+        .task(id: meta.logoURL) {
+            guard img == nil, let u = meta.logoURL else { return }
+            if let got = await ImageStore.shared.load(u) { withAnimation(.easeIn(duration: 0.3)) { img = got } } else { failed = true }
+        }
     }
 }
 
@@ -230,7 +339,7 @@ struct PosterRow: View {
             RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 32) {
-                    ForEach(row.metas) { m in PosterCard(meta: m) }
+                    ForEach(row.metas) { m in PosterCard(meta: m).remember("\(row.id)|\(m.id)") }
                 }
                 .padding(.horizontal, 90)
                 .padding(.vertical, 28)
@@ -267,11 +376,54 @@ struct TopRow: View {
                                 .frame(width: 400, height: 225)
                             }
                             .buttonStyle(.card)
+                            .remember("\(row.id)|\(m.id)")
                             .onAppear { store.wantRelease(m) }
                             .contextMenu {
                                 Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
                                     Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
                                 }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 90)
+                .padding(.vertical, 28)
+            }
+            .scrollClipDisabled()
+        }
+        .focusSection()
+    }
+}
+
+/// Your watchlists: wide pictures with the title on them, so they stand apart from the poster rows.
+struct WideRow: View {
+    @EnvironmentObject var store: Store
+    let row: RowData
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 32) {
+                    ForEach(row.metas) { m in
+                        NavigationLink(value: m) {
+                            ZStack(alignment: .bottomLeading) {
+                                RemoteImage(url: m.backdropURL) { Theme.card }
+                                    .frame(width: 400, height: 225)
+                                    .clipped()
+                                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+                                Text(m.name).font(.ember(24, .bold)).lineLimit(2)
+                                    .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
+                                WatchBadge(state: store.watched[m.id]).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            }
+                            .frame(width: 400, height: 225)
+                            .background(Prefetch(meta: m))
+                        }
+                        .buttonStyle(.card)
+                        .remember("\(row.id)|\(m.id)")
+                        .onAppear { store.wantRelease(m) }
+                        .contextMenu {
+                            Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
+                                Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
                             }
                         }
                     }
@@ -313,6 +465,7 @@ struct PosterCard: View {
                 }
             }
             .frame(width: width, height: width * 1.5)
+            .background(Prefetch(meta: meta))
         }
         .buttonStyle(.card)
         .onAppear { store.wantRelease(meta) }
@@ -379,6 +532,7 @@ struct ContinueRow: View {
                                 .frame(width: 430, height: 242)
                             }
                             .buttonStyle(.card)
+                            .remember("cw|\(it.id)")
                             .contextMenu {
                                 Button("Remove from Continue watching", role: .destructive) { store.dismiss(it.id) }
                             }

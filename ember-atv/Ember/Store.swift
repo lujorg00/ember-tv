@@ -8,6 +8,13 @@ struct RowData: Identifiable {
     let kind: String?      // "Films" / "Series" when the name doesn't already say
     let metas: [Meta]
     let top: Bool          // a top-10 list: big rank numbers
+    var wide = false       // watchlists: wide pictures, to stand apart from the poster rows
+}
+
+/// Friendlier names for the addon's lists: "Top 20 Trending Films" is "Trending Today", "All-Time" loses its hyphen.
+func niceName(_ name: String) -> String {
+    if name.range(of: "^\\s*top\\s*\\d+\\s*trending\\b", options: [.regularExpression, .caseInsensitive]) != nil { return "Trending Today" }
+    return name.replacingOccurrences(of: "All-Time", with: "All Time").replacingOccurrences(of: "all-time", with: "all time")
 }
 
 struct CWItem: Identifiable {
@@ -136,8 +143,9 @@ final class Store: ObservableObject {
         let isCont = { (c: JSON) in named(c, "pick up|left off|continue") }
         let isTop = { (c: JSON) in named(c, "\\btop\\b") }
         cwCats = homeList.filter(isCont)
-        let ordered: [(JSON, Bool)] = homeList.filter { isTop($0) && !isCont($0) }.map { ($0, true) }
-            + homeList.filter { !isTop($0) && !isCont($0) }.map { ($0, false) }
+        let allTime = { (c: JSON) in named(c, "all.?time") }    // those live on Films and Series instead
+        let ordered: [(JSON, Bool)] = homeList.filter { isTop($0) && !isCont($0) && !allTime($0) }.map { ($0, true) }
+            + homeList.filter { !isTop($0) && !isCont($0) && !allTime($0) }.map { ($0, false) }
 
         // every row at once; shown in their order
         let built = await withTaskGroup(of: (Int, RowData?).self, returning: [RowData].self) { g in
@@ -145,10 +153,13 @@ final class Store: ObservableObject {
                 g.addTask {
                     let metas = await API.catalog(c)
                     guard !metas.isEmpty else { return (i, nil) }
-                    let name = c.str("name") ?? c.str("id") ?? ""
+                    let raw = c.str("name") ?? c.str("id") ?? ""
+                    let name = niceName(raw)
                     let says = name.range(of: "\\b(films?|movies?|series|shows?|tv)\\b", options: [.regularExpression, .caseInsensitive]) != nil
                     let kind: String? = says ? nil : (c.str("type") == "movie" ? "Films" : "Series")
-                    return (i, RowData(id: "\(c.str("type") ?? ""):\(c.str("id") ?? "")", title: name, kind: kind, metas: metas, top: top))
+                    var r = RowData(id: "\(c.str("type") ?? ""):\(c.str("id") ?? "")", title: name, kind: kind, metas: metas, top: top)
+                    r.wide = raw.range(of: "watchlist", options: .caseInsensitive) != nil
+                    return (i, r)
                 }
             }
             var out = [RowData?](repeating: nil, count: ordered.count)
@@ -257,8 +268,9 @@ final class Store: ObservableObject {
             return nil
         }
         let plan: [(String, JSON?, Bool)] = [
-            ("Trending Now", find("trending", mine, theirs), false),
+            ("Trending Today", find("trending", mine, theirs), false),
             ("New \(kind) For You", find("^new .*for you", mine), false),
+            ("All Time Recommendations", find("all.?time", mine), false),
             ("Netflix Top \(kind)", find("netflix top", mine, theirs), true),
             ("Disney+ Top \(kind)", find("disney\\s*\\+", theirs, mine), true),
             ("Apple TV+ Top \(kind)", find("apple tv\\s*\\+", theirs, mine), true),

@@ -505,9 +505,9 @@ input { font: inherit; color: var(--text); }
 .tv .btn-chip.on.tvf, .tv .btn.primary.tvf { box-shadow: 0 0 0 3px #fff !important; }
 .tv .nav.tvf { background: rgba(240,160,75,.2); color: #fff; box-shadow: inset 3px 0 0 var(--accent); }
 .tv .poster.tvf .wbadge.add, .tv .t10.tvf .wbadge.add { opacity: 1; }
-/* the Chromecast is far slower than a PC: no frosted glass, no moving background, no hover-only bits */
+/* the Chromecast is far slower than a PC: no frosted glass or hover-only bits; the moving background is drawn smaller and slower */
 .tv *, .tv *::before, .tv *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-.tv #sky, .tv #glow { display: none; }
+.tv #sky { image-rendering: auto; }
 .tv #fullscreen, .tv .sa { display: none !important; }
 .tv .wk, .tv .tp-dr { background: rgba(20,15,11,.94); }
 /* keep clear of the screen's edges (TVs crop a little) */
@@ -521,6 +521,8 @@ input { font: inherit; color: var(--text); }
 .apptile > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .apptile .ai { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #EDE2D6; font-weight: 600; font-size: 17px; }
 .apptile .ai img { width: 64px; height: 64px; }
+.apptile.sys { background: linear-gradient(135deg, #2a1d14, #17110d); }
+.apptile .ai svg { width: 60px; height: 60px; fill: #FF8A3D; }
 
 /* TV: an episode's tick shows while it's selected (hold OK to use it) */
 .tv .epc.tvf .ep-mark { opacity: 1; }
@@ -537,3 +539,13 @@ input { font: inherit; color: var(--text); }
 /* while a film plays: everything behind mpv's window is black (no glow or page showing round the picture) */
 body.playing, body.playing #view { background: #000 !important; }
 body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidden; }
+
+/* the details page: fades up quickly as its picture arrives */
+.tp { opacity: 0; transform: scale(1.01); transition: opacity .32s ease, transform .45s ease; }
+.tp.ready { opacity: 1; transform: none; }
+.tp-bd { transition: opacity .5s; }
+/* the hero's picture and logo arrive together: a slower, softer crossfade */
+.hero .bd { transition: opacity .7s ease; }
+.hero .info.fade-in { animation: fade .6s ease both; }
+/* watchlists: wide pictures, like the Top 10 cards without the numbers */
+.strip.wide { gap: 18px; }

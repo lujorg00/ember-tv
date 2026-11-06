@@ -29,6 +29,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -230,6 +231,29 @@ public class WebHomeActivity extends Activity {
                     }
                 } catch (Exception ex) {
                     Log.w(TAG, "launch " + pkg + ": " + ex);
+                }
+            });
+        }
+
+        /** The Chromecast's own Settings, or the Play Store (neither is in the normal app list on Google TV). */
+        @JavascriptInterface
+        public void openSystem(final String what) {
+            main.post(() -> {
+                List<Intent> tries = new ArrayList<>();
+                if ("store".equals(what)) {
+                    tries.add(new Intent(Intent.ACTION_MAIN).setClassName("com.android.vending", "com.google.android.finsky.tvmainactivity.TvMainActivity"));
+                    Intent lb = getPackageManager().getLeanbackLaunchIntentForPackage("com.android.vending");
+                    if (lb != null) tries.add(lb);
+                    Intent l = getPackageManager().getLaunchIntentForPackage("com.android.vending");
+                    if (l != null) tries.add(l);
+                    tries.add(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=apps")));
+                } else {
+                    tries.add(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                    tries.add(new Intent(Intent.ACTION_MAIN).setClassName("com.android.tv.settings", "com.android.tv.settings.MainSettings"));
+                }
+                for (Intent i : tries) {
+                    try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return; }
+                    catch (Exception ex) { Log.w(TAG, "open " + what + ": " + ex); }
                 }
             });
         }

@@ -77,6 +77,13 @@ final class ImageStore {
     }()
     init() { cache.countLimit = 700 }
 
+    func load(optional url: URL?) async -> UIImage? {
+        guard let url else { return nil }
+        return await load(url)
+    }
+
+    func cached(_ url: URL?) -> UIImage? { url.flatMap { cache.object(forKey: $0 as NSURL) } }
+
     func load(_ url: URL) async -> UIImage? {
         if let hit = cache.object(forKey: url as NSURL) { return hit }
         for attempt in 0..<3 {
@@ -99,6 +106,14 @@ struct RemoteImage<Placeholder: View>: View {
     @ViewBuilder var placeholder: () -> Placeholder
     @State private var img: UIImage?
 
+    /// A picture that's been loaded before is there from the first frame: rows don't flash in each time.
+    init(url: URL?, fit: Bool = false, @ViewBuilder placeholder: @escaping () -> Placeholder) {
+        self.url = url
+        self.fit = fit
+        self.placeholder = placeholder
+        _img = State(initialValue: ImageStore.shared.cached(url))
+    }
+
     var body: some View {
         ZStack {
             if let img {
@@ -109,7 +124,7 @@ struct RemoteImage<Placeholder: View>: View {
         }
         .task(id: url) {
             guard let url else { img = nil; return }
-            if let hit = ImageStore.shared.cache.object(forKey: url as NSURL) { img = hit; return }
+            if let hit = ImageStore.shared.cached(url) { if img !== hit { img = hit }; return }
             if let got = await ImageStore.shared.load(url) {
                 withAnimation(.easeIn(duration: 0.25)) { img = got }
             }

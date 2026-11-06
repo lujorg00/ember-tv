@@ -191,6 +191,9 @@
     return true;
   };
   window.emberTvHome = () => { go("home"); };
+  // for Back: where the focus was, and putting it back there
+  window.emberTvCurrent = () => cur;
+  window.emberTvFocus = (el) => { if (el && el.isConnected) setFocus(el); };
   window.emberTvResumed = () => { if (cur && !visible(cur)) cur = null; };
 
   // New page drawn: move the focus into it (from the sidebar too, as TV apps do) once it has settled.

@@ -40,6 +40,12 @@ struct DetailView: View {
     enum Btn: Hashable { case play, stream, trailer, watchlist, watched, more }
     @FocusState private var btn: Btn?
     @State private var showMore = false
+    @State private var ready = false
+
+    private func reveal() {
+        guard !ready else { return }
+        withAnimation(.easeOut(duration: 0.35)) { ready = true }
+    }
 
     private var caption: String {
         switch btn {
@@ -108,8 +114,24 @@ struct DetailView: View {
             }
             .scrollClipDisabled()
         }
+        // the page appears whole: picture, logo and words fade in together once the picture is ready
+        // (at most 0.6 s; straight away when it was loaded ahead while the poster was selected)
+        .opacity(ready ? 1 : 0)
+        .scaleEffect(ready ? 1 : 1.012)
         .background(Theme.bg)
-        .task { await load() }
+        .environment(\.focusMemory, nil)   // its own rows aren't the page you came from
+        .task {
+            if ImageStore.shared.cached(meta.backdropURL) != nil { reveal() }
+            Task { try? await Task.sleep(nanoseconds: 600_000_000); reveal() }
+            Task {
+                let f = await MetaCache.shared.full(meta)
+                async let b = ImageStore.shared.load(optional: f.backdropURL)
+                async let l = ImageStore.shared.load(optional: f.logoURL)
+                _ = await (b, l)
+                reveal()
+            }
+            await load()
+        }
         .defaultFocus($btn, .play)
         .confirmationDialog(mm.name, isPresented: $showMore) {
             let inSeason = episodes.filter(\.aired)

@@ -7,18 +7,21 @@ struct BrowseView: View {
     @State private var hero: [Meta] = []
     @State private var rows: [RowData] = []
     @State private var loaded = false
+    @State private var path = NavigationPath()
+    @FocusState private var focusKey: String?
+    @State private var lastKey: String?
 
     private var name: String { type == "movie" ? "Films" : "Series" }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
           ZStack {
             AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !hero.isEmpty { HeroView(items: hero, pageName: name) }
                     ForEach(rows) { r in
-                        if r.top { TopRow(row: r) } else { PosterRow(row: r) }
+                        if r.top { TopRow(row: r) } else if r.wide { WideRow(row: r) } else { PosterRow(row: r) }
                     }
                     ForEach(store.tiles(for: type)) { g in TileRow(group: g, type: type) }
                     if !loaded { ProgressView().frame(maxWidth: .infinity).padding(.top, 300) }
@@ -28,9 +31,11 @@ struct BrowseView: View {
             .scrollClipDisabled()
             .ignoresSafeArea()
           }
+            .environment(\.focusMemory, $focusKey)
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
             .navigationDestination(for: Tile.self) { t in TilePage(tile: t, type: type) }
         }
+        .rememberFocus($focusKey, last: $lastKey, depth: path.count)
         .task {
             guard !loaded else { return }
             let r = await store.browse(type)
@@ -54,6 +59,7 @@ struct TileRow: View {
                     ForEach(group.tiles) { t in
                         NavigationLink(value: t) { TileCard(tile: t) }
                             .buttonStyle(.card)
+                            .remember("tile|\(group.id)|\(t.id)")
                     }
                 }
                 .padding(.horizontal, 90)
