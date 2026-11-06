@@ -594,3 +594,11 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .wl-pair > .row + .row h2 { margin-left: 18px; }
 .wl-pair > .row + .row .strip { padding-left: 18px; }
 .wl-pair > .row:first-child .strip { padding-right: 18px; }
+
+/* the spotlight card carries the watched tick (its poster is hidden while it's open) */
+.spot .wbadge { top: 12px; right: 12px; }
+.spot.bm .wbadge { right: 52px; }
+.spot:hover .wbadge.add, .spot.open .wbadge.add, .tv .spot:has(.tvf) .wbadge.add { opacity: 1; }
+/* watchlist rows: the tick top left (ticking it takes the title off the watchlist); the release label makes way */
+.strip.wall .wbadge, .strip.wall .poster.bm .wbadge { left: 7px; right: auto; }
+.strip.wall .rel { display: none; }

@@ -115,7 +115,7 @@
     okLong = true;
     if (!cur) return;
     if (cur.matches(".cw")) return cwMenu(cur); // Continue watching: offer to remove it
-    const b = cur.querySelector(".wbadge, .ep-mark"); // a poster's tick, or an episode's
+    const b = cur.querySelector(".wbadge, .ep-mark") || (cur.closest(".spot") && cur.closest(".spot").querySelector(".wbadge")); // a poster's tick, an episode's, or the spotlight's
     if (b) b.click();
   };
 

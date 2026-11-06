@@ -100,7 +100,21 @@ document.addEventListener("click", async (e) => {
   b.classList.add("busy");
   if (await markTitle(type, id, !undo)) {
     document.querySelectorAll(`[data-wid="${id}"] .wbadge`).forEach(x => { x.className = "wbadge " + badgeClass(id); x.innerHTML = badgeHtml(id); x.title = badgeTitle(id); });
-    toast(undo ? `${name} is unwatched again.` : `Marked ${name} as watched.`);
+    // ticked on a watchlist row: watched, so it comes off the watchlist (and out of the row)
+    if (!undo && b.closest(".strip.wall")) {
+      try {
+        const r = await fetch(`${feed()}/watchlist`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imdb: id, type, add: false }) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        watchlistIds.delete(id); applyBookmarks();
+        document.querySelectorAll(`.strip.wall [data-wid="${id}"]`).forEach(p => {
+          const row = p.closest(".row"), n = row && $("h2 small", row);
+          p.style.transition = "opacity .3s, transform .3s"; p.style.opacity = "0"; p.style.transform = "scale(.9)";
+          setTimeout(() => { p.remove(); if (n) n.textContent = Math.max(0, (+n.textContent || 1) - 1); }, 300);
+        });
+        toast(`Marked ${name} as watched and took it off your watchlist.`);
+      } catch (err) { toast(`Marked ${name} as watched, but couldn't take it off your watchlist.`); }
+    } else toast(undo ? `${name} is unwatched again.` : `Marked ${name} as watched.`);
   }
   b.classList.remove("busy");
 }, true);
@@ -546,7 +560,7 @@ async function continueRow(cwCat) {
 function spotCard(m, type) {
   const t = m.type || type, p = progress[m.id];
   const sp = h(`<div class="spot" data-wid="${esc(m.id)}" data-wtype="${esc(t)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">
-    ${watchlistIds.has(m.id) ? BOOKMARK : ""}
+    ${watchlistIds.has(m.id) ? BOOKMARK : ""}${badge(m.id)}
     <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t">${esc(m.name)}</div>
       <div class="spot-m">${esc([m.releaseInfo, m.imdbRating && "★ " + m.imdbRating].filter(Boolean).join("  ·  "))}</div>
       <div class="spot-d">${esc(m.description || "")}</div>

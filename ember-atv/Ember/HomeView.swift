@@ -458,6 +458,7 @@ struct PosterCard: View {
     @EnvironmentObject var store: Store
     let meta: Meta
     var width: CGFloat = 205
+    var inWatchlist = false     // a watchlist row: the tick sits top left, and watched takes it off the list
 
     var body: some View {
         NavigationLink(value: meta) {
@@ -468,7 +469,9 @@ struct PosterCard: View {
                 .frame(width: width, height: width * 1.5)
                 .clipped()
                 if store.watchlist.contains(meta.id) { Bookmark() }
-                WatchBadge(state: store.watched[meta.id]).padding(.trailing, store.watchlist.contains(meta.id) ? 40 : 0)
+                WatchBadge(state: store.watched[meta.id])
+                    .padding(.trailing, !inWatchlist && store.watchlist.contains(meta.id) ? 40 : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: inWatchlist ? .topLeading : .topTrailing)
                 if let label = store.release[meta.id]?.label {
                     Text(label).font(.ember(15, .bold))
                         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -489,6 +492,8 @@ struct PosterCard: View {
         .contextMenu {
             if store.watched[meta.id] == "done" {
                 Button("Mark as unwatched") { Task { await store.markTitle(meta, watched: false) } }
+            } else if inWatchlist {
+                Button("Mark as watched (takes it off your watchlist)") { Task { await store.watchedFromWatchlist(meta) } }
             } else {
                 Button("Mark as watched") { Task { await store.markTitle(meta, watched: true) } }
             }
@@ -566,20 +571,30 @@ struct SpotCard: View {
                     }
                     .buttonStyle(EmberButtonStyle(primary: true))
                     .remember(key + "-play")
+                    .contextMenu { markMenu }
                     NavigationLink(value: m) { Text("Details") }
                         .buttonStyle(EmberButtonStyle())
                         .remember(key + "-details")
+                        .contextMenu { markMenu }
                 }
                 .padding(.top, 4)
             }
             .padding(.leading, 30).padding(.bottom, 26)
             if store.watchlist.contains(m.id) { Bookmark(size: 1.2).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
+            WatchBadge(state: store.watched[m.id]).padding(.trailing, store.watchlist.contains(m.id) ? 48 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
         .frame(width: 720, height: 405)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.5), radius: 16, y: 8)
         .task { if full == nil { full = await MetaCache.shared.full(meta) } }
         .onAppear { store.wantRelease(meta) }
+    }
+
+    @ViewBuilder private var markMenu: some View {
+        Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
+            Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
+        }
     }
 
     private func play() {
@@ -603,7 +618,7 @@ struct WallRow: View {
             RowHeader(title: row.title, kind: row.kind, count: row.metas.count, leading: leading)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHGrid(rows: [GridItem(.fixed(240), spacing: 30), GridItem(.fixed(240))], spacing: 26) {
-                    ForEach(row.metas) { m in PosterCard(meta: m, width: 160).remember("\(row.id)|\(m.id)") }
+                    ForEach(row.metas) { m in PosterCard(meta: m, width: 160, inWatchlist: true).remember("\(row.id)|\(m.id)") }
                 }
                 .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.vertical, 28)

@@ -6,7 +6,7 @@ struct RowData: Identifiable {
     let id: String
     let title: String
     let kind: String?      // "Films" / "Series" when the name doesn't already say
-    let metas: [Meta]
+    var metas: [Meta]
     let top: Bool          // a top-10 list: big rank numbers
     var wide = false       // watchlists: wide pictures, to stand apart from the poster rows
 }
@@ -380,6 +380,18 @@ final class Store: ObservableObject {
     }
 
     /// A whole film or show, from its poster.
+    /// From a watchlist row: watched, so it comes off the watchlist (and out of the row).
+    func watchedFromWatchlist(_ m: Meta) async {
+        await markTitle(m, watched: true)
+        guard watched[m.id] == "done" else { return }
+        do {
+            _ = try await API.post("/watchlist", ["imdb": m.id, "type": m.isSeries ? "series" : "movie", "add": false], timeout: 15)
+            watchlist.remove(m.id)
+            for i in rows.indices where rows[i].wide { rows[i].metas.removeAll { $0.id == m.id } }
+            say("Marked \(m.name) as watched and took it off your watchlist.")
+        } catch { say("Marked as watched, but couldn't take it off your watchlist: \(error.localizedDescription)") }
+    }
+
     func markTitle(_ m: Meta, watched on: Bool) async {
         var eps: [[Int]] = []
         if m.isSeries {
