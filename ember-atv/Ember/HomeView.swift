@@ -505,18 +505,7 @@ struct PosterCard: View {
         }
         .buttonStyle(.card)
         .onAppear { store.wantRelease(meta) }
-        .contextMenu {
-            if store.watched[meta.id] == "done" {
-                Button("Mark as unwatched") { Task { await store.markTitle(meta, watched: false) } }
-            } else if inWatchlist {
-                Button("Mark as watched (takes it off your watchlist)") { Task { await store.watchedFromWatchlist(meta) } }
-            } else {
-                Button("Mark as watched") { Task { await store.markTitle(meta, watched: true) } }
-            }
-            Button(store.loved.contains(meta.id) ? "Take the love off" : "Love it (steers your recommendations)") {
-                Task { await store.setLove(meta, !store.loved.contains(meta.id)) }
-            }
-        }
+        .contextMenu { PosterMenu(meta: meta, inWatchlist: inWatchlist) }
     }
 }
 
@@ -545,23 +534,147 @@ struct BookmarkShape: Shape {
 }
 
 /// The ordinary rows: the first title large (picture, logo, a line about it, Play and Details), then the posters.
+/// The ordinary rows, as on Ember PC: posters, and the one you rest on opens out into a large card (its picture,
+/// logo, a line about it) in place. Select opens it; the Play/Pause button plays it.
 struct SpotRow: View {
     let row: RowData
     var body: some View {
-        if row.metas.count < 4 { PosterRow(row: row) } else {
-            VStack(alignment: .leading, spacing: 8) {
-                RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+        VStack(alignment: .leading, spacing: 8) {
+            RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+            ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 32) {
-                        SpotCard(meta: row.metas[0], key: "\(row.id)|spot")
-                        ForEach(row.metas.dropFirst()) { m in PosterCard(meta: m).remember("\(row.id)|\(m.id)") }
+                        ForEach(row.metas) { m in
+                            SpotPoster(meta: m) {
+                                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(m.id, anchor: UnitPoint(x: 0.05, y: 0.5)) }
+                            }
+                            .id(m.id)
+                            .remember("\(row.id)|\(m.id)")
+                        }
                     }
                     .padding(.horizontal, 90)
                     .padding(.vertical, 28)
                 }
                 .scrollClipDisabled()
             }
-            .focusSection()
+        }
+        .focusSection()
+    }
+}
+
+/// Mark watched, love: the long-press menu on any poster.
+struct PosterMenu: View {
+    @EnvironmentObject var store: Store
+    let meta: Meta
+    var inWatchlist = false
+    var body: some View {
+        if store.watched[meta.id] == "done" {
+            Button("Mark as unwatched") { Task { await store.markTitle(meta, watched: false) } }
+        } else if inWatchlist {
+            Button("Mark as watched (takes it off your watchlist)") { Task { await store.watchedFromWatchlist(meta) } }
+        } else {
+            Button("Mark as watched") { Task { await store.markTitle(meta, watched: true) } }
+        }
+        Button(store.loved.contains(meta.id) ? "Take the love off" : "Love it (steers your recommendations)") {
+            Task { await store.setLove(meta, !store.loved.contains(meta.id)) }
+        }
+    }
+}
+
+/// A poster that opens out into the spotlight card when you rest on it.
+struct SpotPoster: View {
+    @EnvironmentObject var store: Store
+    let meta: Meta
+    var opened: () -> Void = {}
+
+    var body: some View {
+        NavigationLink(value: meta) {
+            SpotFace(meta: meta, opened: opened)
+        }
+        .buttonStyle(.card)
+        .onAppear { store.wantRelease(meta) }
+        .onPlayPauseCommand { play() }
+        .contextMenu { PosterMenu(meta: meta) }
+    }
+
+    private func play() {
+        let p = store.progress[meta.id]
+        if meta.isSeries {
+            store.playBest(meta, season: p?.season ?? 1, episode: p?.episode ?? 1, epTitle: p?.episodeTitle ?? "", start: p?.position ?? 0)
+        } else {
+            store.playBest(meta, start: p?.position ?? 0)
+        }
+    }
+}
+
+private struct SpotFace: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.isFocused) private var focused
+    let meta: Meta
+    let opened: () -> Void
+    @State private var open = false
+    @State private var resting = false      // still selected (read after the pause, so it's current)
+    @State private var full: Meta?
+    private var m: Meta { full ?? meta }
+    static let h: CGFloat = 308
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // the poster, crossfading to the wide picture as it opens (and back)
+            RemoteImage(url: meta.posterURL) {
+                ZStack { Theme.card; Text(meta.name).font(.ember(20)).multilineTextAlignment(.center).padding() }
+            }
+            .frame(width: 205, height: SpotFace.h).clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .opacity(open ? 0 : 1)
+            if open {
+                ZStack(alignment: .bottomLeading) {
+                    RemoteImage(url: m.backdropURL) { Theme.card }
+                        .frame(width: 720, height: SpotFace.h).clipped()
+                    LinearGradient(colors: [Theme.bg.opacity(0.94), Theme.bg.opacity(0.5), .clear], startPoint: .leading, endPoint: .trailing)
+                    LinearGradient(colors: [Theme.bg.opacity(0.6), .clear], startPoint: .bottom, endPoint: .center)
+                    VStack(alignment: .leading, spacing: 8) {
+                        TitleArt(meta: m, height: 72, width: 330, nameSize: 34)
+                        Text(store.progress[m.id]?.line ?? m.metaLine).font(.ember(18, .medium))
+                            .foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                        Text(m.description).font(.ember(17)).foregroundStyle(.white.opacity(0.85)).lineLimit(2)
+                            .frame(maxWidth: 440, alignment: .leading)
+                        HStack(spacing: 8) {
+                            Image(systemName: "playpause.fill")
+                            Text(store.progress[m.id] != nil ? "Resume" : "Play")
+                            Text("·")
+                            Text("Select for details")
+                        }
+                        .font(.ember(15, .medium)).foregroundStyle(Theme.muted)
+                    }
+                    .padding(.leading, 24).padding(.bottom, 20)
+                }
+                .transition(.opacity)
+            }
+            if store.watchlist.contains(meta.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
+            WatchBadge(state: store.badge(meta.id))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(meta.id) ? .topLeading : .topTrailing)
+            if let p = store.progress[meta.id], !open {
+                ProgressBar(fraction: p.percent / 100).padding(10).frame(width: 205)
+            }
+        }
+        .frame(width: open ? 720 : 205, height: SpotFace.h)
+        .clipped()
+        .background(Prefetch(meta: meta))
+        .onChange(of: focused) { _, on in
+            resting = on
+            if on {
+                Task {
+                    if full == nil { full = await MetaCache.shared.full(meta) }
+                    if let b = m.backdropURL { _ = await ImageStore.shared.load(b) }
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    guard resting, !open else { return }
+                    withAnimation(.easeInOut(duration: 0.3)) { open = true }
+                    opened()
+                }
+            } else if open {
+                withAnimation(.easeInOut(duration: 0.25)) { open = false }
+            }
         }
     }
 }
