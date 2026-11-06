@@ -51,7 +51,7 @@ public class WebHomeActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // no keep-screen-on here: on the home screen the Chromecast's own screensaver and sleep timer work as normal (only the player keeps it awake)
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0E0B09"));
         web.setFocusable(true);
