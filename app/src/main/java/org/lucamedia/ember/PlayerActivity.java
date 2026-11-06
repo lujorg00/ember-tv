@@ -19,6 +19,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.media3.common.C;
+import androidx.media3.common.text.Cue;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
@@ -38,7 +40,9 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -187,12 +191,25 @@ public class PlayerActivity extends Activity {
             sv.setApplyEmbeddedStyles(false);
             sv.setApplyEmbeddedFontSizes(false);
             sv.setStyle(new CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
-                    CaptionStyleCompat.EDGE_TYPE_OUTLINE, 0xE6000000, Typeface.create("sans-serif-medium", Typeface.NORMAL)));
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE, 0xE6000000, subFont()));
             sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION);
             sv.setBottomPaddingFraction(0.07f);
         }
 
         player.addListener(new Player.Listener() {
+            // runs after the player view's own listener: the same lines again, ALL-CAPS ones in sentence case
+            @Override
+            public void onCues(CueGroup cues) {
+                SubtitleView v = view.getSubtitleView();
+                if (v == null) return;
+                List<Cue> out = new ArrayList<>();
+                for (Cue c : cues.cues) {
+                    if (c.text == null) { out.add(c); continue; }
+                    out.add(c.buildUpon().setText(Subs.sentenceCase(c.text.toString())).build());
+                }
+                v.setCues(out);
+            }
+
             @Override
             public void onPlaybackStateChanged(int s) {
                 if (s == Player.STATE_READY) {
@@ -329,6 +346,11 @@ public class PlayerActivity extends Activity {
     private void hideUpNext() {
         upNextShown = false;
         upNext.setVisibility(View.GONE);
+    }
+
+    private Typeface subFont() {
+        try { return Typeface.createFromAsset(getAssets(), "fonts/Selawik-Semibold.ttf"); }
+        catch (Exception e) { return Typeface.create("sans-serif-medium", Typeface.NORMAL); }
     }
 
     /** A button that shows focus with a ring and a colour change, never by stretching. */

@@ -18,6 +18,8 @@ protocol MPVEvents: AnyObject {
     func mpvBuffering(_ b: Bool)
     func mpvStarted()
     func mpvEnded(error: Bool)
+    func mpvSubText(_ s: String)
+    func mpvSubCodec(_ c: String)
 }
 
 struct Track: Identifiable, Hashable {
@@ -120,6 +122,8 @@ final class MPVCore {
         mpv_observe_property(m, 0, "duration", MPV_FORMAT_DOUBLE)
         mpv_observe_property(m, 0, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(m, 0, "paused-for-cache", MPV_FORMAT_FLAG)
+        mpv_observe_property(m, 0, "sub-text", MPV_FORMAT_STRING)
+        mpv_observe_property(m, 0, "current-tracks/sub/codec", MPV_FORMAT_STRING)
         mpv_set_wakeup_callback(m, { ctx in
             guard let ctx else { return }
             Unmanaged<MPVCore>.fromOpaque(ctx).takeUnretainedValue().readEvents()
@@ -188,6 +192,15 @@ final class MPVCore {
         mpv_set_property_string(mpv, name, value)
     }
 
+    /// Text subtitles are drawn by Ember itself (its font, sentence case for ALL-CAPS ones): mpv still times them
+    /// but draws them invisibly. Picture subtitles (Blu-ray PGS, DVD) can only be drawn by mpv, in its own style.
+    func subtitlesDrawnByEmber(_ on: Bool) {
+        set("sub-ass-override", on ? "strip" : "scale")
+        set("sub-color", on ? "#00000000" : "#FFFFFF")
+        set("sub-border-color", on ? "#00000000" : "#E6000000")
+        set("sub-shadow-color", on ? "#00000000" : "#99000000")
+    }
+
     var paused: Bool { flag("pause") }
     func togglePause() { setFlag("pause", !paused) }
     func pause() { setFlag("pause", true) }
@@ -229,6 +242,16 @@ final class MPVCore {
                 case MPV_EVENT_PROPERTY_CHANGE:
                     guard let pp = e.data?.assumingMemoryBound(to: mpv_event_property.self).pointee, let cname = pp.name else { break }
                     let name = String(cString: cname)
+                    if name == "sub-text" || name == "current-tracks/sub/codec" {
+                        var text = ""
+                        if pp.format == MPV_FORMAT_STRING, let p = pp.data?.assumingMemoryBound(to: UnsafeMutablePointer<CChar>?.self).pointee {
+                            text = String(cString: p)
+                        }
+                        Task { @MainActor in
+                            if name == "sub-text" { self.events?.mpvSubText(text) } else { self.events?.mpvSubCodec(text) }
+                        }
+                        break
+                    }
                     if pp.format == MPV_FORMAT_DOUBLE, let v = pp.data?.assumingMemoryBound(to: Double.self).pointee {
                         Task { @MainActor in
                             if name == "time-pos" { self.events?.mpvTime(v) } else if name == "duration" { self.events?.mpvDuration(v) }

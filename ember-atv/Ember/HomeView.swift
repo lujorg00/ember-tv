@@ -15,7 +15,7 @@ struct HomeView: View {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
                     if !store.cw.isEmpty { ContinueRow(items: store.cw) }
                     ForEach(store.rows) { r in
-                        if r.top { TopRow(row: r) } else if r.wide { WideRow(row: r) } else { PosterRow(row: r) }
+                        if r.top { TopRow(row: r) } else if r.wide { WallRow(row: r) } else { SpotRow(row: r) }
                     }
                     ForEach(store.tileGroups) { g in TileRow(group: g, type: "") }
                     if !store.homeLoaded {
@@ -371,7 +371,9 @@ struct TopRow: View {
                                     LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
                                     Text(m.name).font(.ember(24, .bold)).lineLimit(2)
                                         .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
-                                    WatchBadge(state: store.watched[m.id]).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                    WatchBadge(state: store.watched[m.id]).padding(.trailing, store.watchlist.contains(m.id) ? 40 : 0)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                    if store.watchlist.contains(m.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
                                 }
                                 .frame(width: 400, height: 225)
                             }
@@ -451,7 +453,8 @@ struct PosterCard: View {
                 }
                 .frame(width: width, height: width * 1.5)
                 .clipped()
-                WatchBadge(state: store.watched[meta.id])
+                if store.watchlist.contains(meta.id) { Bookmark() }
+                WatchBadge(state: store.watched[meta.id]).padding(.trailing, store.watchlist.contains(meta.id) ? 40 : 0)
                 if let label = store.release[meta.id]?.label {
                     Text(label).font(.ember(15, .bold))
                         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -476,6 +479,121 @@ struct PosterCard: View {
                 Button("Mark as watched") { Task { await store.markTitle(meta, watched: true) } }
             }
         }
+    }
+}
+
+/// On your watchlist: an amber bookmark at the top right of the poster, on every row and page.
+struct Bookmark: View {
+    var size: CGFloat = 1
+    var body: some View {
+        BookmarkShape().fill(Theme.accent)
+            .frame(width: 26 * size, height: 36 * size)
+            .shadow(color: .black.opacity(0.55), radius: 4, y: 2)
+            .padding(.trailing, 12 * size)
+            .offset(y: -2)
+    }
+}
+struct BookmarkShape: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.midX, y: r.maxY - r.height * 0.26))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// The ordinary rows: the first title large (picture, logo, a line about it, Play and Details), then the posters.
+struct SpotRow: View {
+    let row: RowData
+    var body: some View {
+        if row.metas.count < 4 { PosterRow(row: row) } else {
+            VStack(alignment: .leading, spacing: 8) {
+                RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 32) {
+                        SpotCard(meta: row.metas[0], key: "\(row.id)|spot")
+                        ForEach(row.metas.dropFirst()) { m in PosterCard(meta: m).remember("\(row.id)|\(m.id)") }
+                    }
+                    .padding(.horizontal, 90)
+                    .padding(.vertical, 28)
+                }
+                .scrollClipDisabled()
+            }
+            .focusSection()
+        }
+    }
+}
+
+struct SpotCard: View {
+    @EnvironmentObject var store: Store
+    let meta: Meta
+    let key: String
+    @State private var full: Meta?
+    private var m: Meta { full ?? meta }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            RemoteImage(url: m.backdropURL) { Theme.card }
+                .frame(width: 720, height: 405).clipped()
+            LinearGradient(colors: [Theme.bg.opacity(0.94), Theme.bg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+            LinearGradient(colors: [Theme.bg.opacity(0.6), .clear], startPoint: .bottom, endPoint: .center)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("TOP PICK").font(.ember(15, .bold)).tracking(1.6).foregroundStyle(Theme.accent)
+                TitleArt(meta: m, height: 80, width: 360)
+                Text(store.progress[m.id]?.line ?? m.metaLine).font(.ember(19, .medium)).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                Text(m.description).font(.ember(19)).foregroundStyle(.white.opacity(0.85)).lineLimit(2).frame(maxWidth: 420, alignment: .leading)
+                HStack(spacing: 18) {
+                    Button { play() } label: {
+                        Label(store.progress[m.id].map { "Resume \(clock($0.position))" } ?? "Play", systemImage: "play.fill")
+                    }
+                    .buttonStyle(EmberButtonStyle(primary: true))
+                    .remember(key + "-play")
+                    NavigationLink(value: m) { Text("Details") }
+                        .buttonStyle(EmberButtonStyle())
+                        .remember(key + "-details")
+                }
+                .padding(.top, 4)
+            }
+            .padding(.leading, 30).padding(.bottom, 26)
+            if store.watchlist.contains(m.id) { Bookmark(size: 1.2).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
+        }
+        .frame(width: 720, height: 405)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.5), radius: 16, y: 8)
+        .task { if full == nil { full = await MetaCache.shared.full(meta) } }
+        .onAppear { store.wantRelease(meta) }
+    }
+
+    private func play() {
+        let p = store.progress[m.id]
+        if m.isSeries {
+            store.playBest(m, season: p?.season ?? 1, episode: p?.episode ?? 1, epTitle: p?.episodeTitle ?? "", start: p?.position ?? 0)
+        } else {
+            store.playBest(m, start: p?.position ?? 0)
+        }
+    }
+}
+
+/// Your watchlists: posters two rows deep, so they stand apart (each carries its bookmark).
+struct WallRow: View {
+    let row: RowData
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHGrid(rows: [GridItem(.fixed(240), spacing: 30), GridItem(.fixed(240))], spacing: 26) {
+                    ForEach(row.metas) { m in PosterCard(meta: m, width: 160).remember("\(row.id)|\(m.id)") }
+                }
+                .padding(.horizontal, 90)
+                .padding(.vertical, 28)
+            }
+            .scrollClipDisabled()
+        }
+        .focusSection()
     }
 }
 

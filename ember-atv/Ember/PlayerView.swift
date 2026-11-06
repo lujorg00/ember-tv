@@ -14,6 +14,8 @@ final class PlayerModel: ObservableObject, MPVEvents {
     @Published var buffering = true
     @Published var started = false
     @Published var controls = false
+    @Published var subText = ""           // the current subtitle, drawn by Ember (text subtitles)
+    @Published var ownSubs = false
     @Published var intro = false          // the title at the top for the first few seconds
     @Published var upNext = false
     @Published var countdown = 15
@@ -75,6 +77,19 @@ final class PlayerModel: ObservableObject, MPVEvents {
     // MARK: mpv
 
     func mpvTime(_ t: Double) { pos = t }
+    func mpvSubText(_ s: String) {
+        let t = Subtitles.tidy(s)
+        if t != subText { subText = t }
+    }
+    func mpvSubCodec(_ c: String) {
+        let picture = ["hdmv_pgs_subtitle", "pgssub", "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub", "xsub"].contains(c.lowercased())
+        let mine = !c.isEmpty && !picture
+        if mine != ownSubs || c.isEmpty {
+            ownSubs = mine
+            core.subtitlesDrawnByEmber(mine)
+        }
+        Diag.log("subs: \(c.isEmpty ? "off" : c) · drawn by \(mine ? "Ember" : "mpv")")
+    }
     func mpvDuration(_ d: Double) { dur = d }
     /// Keeps the screensaver away while a stream is playing (mpv doesn't tell tvOS, as Apple's own player does).
     /// Paused, stopped or finished: the Apple TV can sleep again as normal.
@@ -453,6 +468,13 @@ struct PlayerScreen: View {
                             && session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
             }
             if model.buffering { ProgressView().scaleEffect(1.8).tint(.white) }
+            if model.ownSubs && !model.subText.isEmpty {
+                SubtitleText(text: model.subText, scale: model.subScale)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, model.controls ? 330 : 64)
+                    .animation(.easeOut(duration: 0.25), value: model.controls)
+                    .allowsHitTesting(false)
+            }
 
             // controls hidden: this invisible button has the remote. Click shows the controls; left/right skip 10 s.
             RemotePan(allowed: { (focus == .bar || focus == .catcher) && !showSubs && !showAudio && !model.upNext },
@@ -679,5 +701,57 @@ struct Timeline: View {
             .foregroundStyle(.white.opacity(0.9))
         }
         .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
+
+// MARK: - subtitles, Netflix-style
+
+/// A subtitle line: Ember's typeface, white, a fine dark edge and a soft shadow, no box.
+struct SubtitleText: View {
+    let text: String
+    var scale: Double
+    var body: some View {
+        Text(text)
+            .font(.ember(54 * scale, .semibold))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .lineSpacing(4)
+            .shadow(color: .black.opacity(0.95), radius: 1.2, x: 0, y: 0)
+            .shadow(color: .black.opacity(0.85), radius: 1.2, x: 0, y: 1)
+            .shadow(color: .black.opacity(0.55), radius: 9, x: 0, y: 3)
+            .frame(maxWidth: 1400)
+            .padding(.horizontal, 120)
+    }
+}
+
+enum Subtitles {
+    /// Cleans a subtitle for display; ALL-CAPS subtitles (common on TV captions) become sentence case.
+    static func tidy(_ raw: String) -> String {
+        let s = raw.replacingOccurrences(of: "\\N", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return sentenceCase(s)
+    }
+
+    static func sentenceCase(_ s: String) -> String {
+        var letters = 0, upper = 0
+        for ch in s.unicodeScalars where CharacterSet.letters.contains(ch) {
+            letters += 1
+            if CharacterSet.uppercaseLetters.contains(ch) { upper += 1 }
+        }
+        guard letters >= 4, Double(upper) / Double(letters) >= 0.8 else { return s }
+        var out = ""
+        var capNext = true
+        for ch in s.lowercased() {
+            if capNext, ch.isLetter {
+                out.append(contentsOf: ch.uppercased())
+                capNext = false
+                continue
+            }
+            out.append(ch)
+            if ch == "." || ch == "!" || ch == "?" || ch == "\n" { capNext = true }
+            else if capNext, ch == "[" || ch == "(" { capNext = false }   // [door slams] stays lower case
+        }
+        // "i", "i'm", "i'll" on their own are always capitals
+        return out.replacingOccurrences(of: "(?<![\\p{L}'’])i(?=$|[^\\p{L}])", with: "I", options: .regularExpression)
     }
 }

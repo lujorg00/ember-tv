@@ -21,7 +21,7 @@ struct BrowseView: View {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !hero.isEmpty { HeroView(items: hero, pageName: name) }
                     ForEach(rows) { r in
-                        if r.top { TopRow(row: r) } else if r.wide { WideRow(row: r) } else { PosterRow(row: r) }
+                        if r.top { TopRow(row: r) } else if r.wide { WallRow(row: r) } else { SpotRow(row: r) }
                     }
                     ForEach(store.tiles(for: type)) { g in TileRow(group: g, type: type) }
                     if !loaded { ProgressView().frame(maxWidth: .infinity).padding(.top, 300) }

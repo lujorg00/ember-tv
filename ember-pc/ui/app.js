@@ -241,11 +241,26 @@ document.addEventListener("keydown", e => {
 
 // ---------------------------------------------------------------- cards and rows
 
+// Your watchlist (Trakt, through lucapi): every poster of a title on it carries an amber bookmark, on every page.
+let watchlistIds = new Set();
+const BOOKMARK = `<span class="bmk" aria-hidden="true"><svg viewBox="0 0 24 32"><path d="M0 0h24v32l-12-8-12 8z"/></svg></span>`;
+async function loadWatchlist() {
+  try { watchlistIds = new Set((await getJson(`${feed()}/watchlist`, 8000)).items || []); applyBookmarks(); } catch (e) {}
+}
+function applyBookmarks(root = document) {
+  root.querySelectorAll(".poster[data-wid], .t10-art[data-wid], .spot[data-wid]").forEach(el => {
+    const on = watchlistIds.has(el.dataset.wid), has = el.querySelector(":scope > .bmk");
+    el.classList.toggle("bm", on);
+    if (on && !has) el.insertAdjacentHTML("afterbegin", BOOKMARK); else if (!on && has) has.remove();
+  });
+}
+loadWatchlist();
+
 function card(m, type) {
   const p = progress[m.id];
   const yr = (String(m.releaseInfo || m.year || "").match(/\d{4}/) || [""])[0];
-  const el = h(`<div class="poster" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" data-year="${yr}" style="background-image:url('${esc(poster(m))}')">
-    ${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}
+  const el = h(`<div class="poster${watchlistIds.has(m.id) ? " bm" : ""}" title="${esc(m.name)}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type || type)}" data-wname="${esc(m.name)}" data-year="${yr}" style="background-image:url('${esc(poster(m))}')">
+    ${watchlistIds.has(m.id) ? BOOKMARK : ""}${poster(m) ? "" : `<div class="name">${esc(m.name)}</div>`}${badge(m.id)}
     ${p ? `<div class="bar"><i style="width:${Math.max(3, Math.min(100, p.progress))}%"></i></div>` : ""}</div>`);
   el.onclick = () => go("title", m.type || type, m.id, m);
   return el;
@@ -469,8 +484,8 @@ async function showHome() {
     })),
     Promise.all(others.map(async (c, i) => {
       const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
-      if (metas.length) otherSlots[i].replaceWith(/watchlist/i.test(c.name || "") ? wideRow(homeRowName(c.name || c.id, c.type), metas)
-        : row(homeRowName(c.name || c.id, c.type), metas, c.type, hero.pick));
+      if (metas.length) otherSlots[i].replaceWith(/watchlist/i.test(c.name || "") ? wallRow(homeRowName(c.name || c.id, c.type), metas, c.type)
+        : spotRow(homeRowName(c.name || c.id, c.type), metas, c.type));
       return metas;
     })),
   ]);
@@ -526,8 +541,49 @@ async function continueRow(cwCat) {
   return r;
 }
 
+/** The ordinary rows: the first title large (its picture, logo or name, a line about it, Watch and Details),
+ *  then the rest as posters. */
+function spotRow(title, metas, type) {
+  if (metas.length < 4) return row(title, metas, type);
+  const r = row(title, metas.slice(1), type);
+  const m = metas[0], t = m.type || type, p = progress[m.id];
+  const sp = h(`<div class="spot" data-wid="${esc(m.id)}" data-wtype="${esc(t)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">
+    ${watchlistIds.has(m.id) ? BOOKMARK : ""}
+    <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t">${esc(m.name)}</div>
+      <div class="spot-m">${esc([m.releaseInfo, m.imdbRating && "★ " + m.imdbRating].filter(Boolean).join("  ·  "))}</div>
+      <div class="spot-d">${esc(m.description || "")}</div>
+      <div class="btns"><button class="btn primary">${p ? "Resume " + fmt(p.position) : "Watch"}</button><button class="btn">Details</button></div></div></div>`);
+  if (watchlistIds.has(m.id)) sp.classList.add("bm");
+  const [watch, details] = sp.querySelectorAll("button");
+  watch.onclick = () => go("title", t, m.id, m, { autoplay: true });
+  details.onclick = () => go("title", t, m.id, m);
+  $(".strip", r).prepend(sp);
+  $(".strip", r).classList.add("spotted");
+  $("h2 small", r).textContent = metas.length;
+  // the full details (logo, description, genres) arrive a moment later
+  meta(t, m.id).then(full => {
+    if (!full || !sp.isConnected && !document.body.contains(sp)) return;
+    const mm = { ...m, ...full };
+    if (mm.logo) {
+      const img = h(`<img class="spot-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">`);
+      img.onload = () => $(".spot-t", sp).replaceWith(img);
+    }
+    if (!m.description && mm.description) $(".spot-d", sp).textContent = mm.description;
+    $(".spot-m", sp).textContent = [mm.releaseInfo || mm.year, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 2).join(", ")].filter(Boolean).join("  ·  ");
+    if (!m.background && mm.background) sp.style.backgroundImage = `url('${mm.background}')`;
+  });
+  return r;
+}
+
+/** Your watchlists: posters two rows deep, so they stand apart from the other rows (each carries its bookmark). */
+function wallRow(title, metas, type) {
+  const r = row(title, metas, type);
+  $(".strip", r).classList.add("wall");
+  return r;
+}
+
 /** Top 10: big rank numbers beside wide artwork. */
-/** Your watchlists: wide pictures with the title on them, so they stand apart from the poster rows. */
+/** Wide pictures with the title on them (no longer used for watchlists). */
 function wideRow(title, metas) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip wide"></div></section>`);
@@ -780,7 +836,7 @@ async function showBrowse(type) {
   tileRows(hiddenRows(), type).then(r => { if (r) slotTiles.replaceWith(r); });
   const results = await Promise.all(plan.map(async (p, i) => {
     const metas = (await anyCatalogRow(p.cat)).map(m => ({ ...m, type }));
-    if (metas.length) slots[i].replaceWith(p.top ? top10Row(p.name, metas) : row(p.name, metas, type));
+    if (metas.length) slots[i].replaceWith(p.top ? top10Row(p.name, metas) : /watchlist/i.test(p.name || "") ? wallRow(p.name, metas, type) : spotRow(p.name, metas, type));
     return metas;
   }));
   const own = (await Promise.all(heroCats.filter(c => c.type === type).map(c => catalogRow(c)))).flat().map(m => ({ ...m, type }));
@@ -893,6 +949,8 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
       onList = j.on; wlLabel();
+      if (onList) watchlistIds.add(id); else watchlistIds.delete(id);
+      applyBookmarks();
       toast(onList ? `Added ${mm.name} to your watchlist.` : `Took ${mm.name} off your watchlist.`);
     } catch (err) { toast("Couldn't change your watchlist: " + err.message); }
     wl.disabled = false;

@@ -532,4 +532,59 @@ mp.add_forced_key_binding("ESC", "ember_osc_esc", function()
 end)
 
 mp.register_script_message("ember-panel", function() panel = true; poke() end) -- for testing
+
+-- Subtitles: text ones are drawn by Ember (Segoe UI Semibold, white with a fine dark edge, ALL-CAPS ones in sentence
+-- case, as on Netflix); mpv still times them but draws them invisibly. Picture subtitles (Blu-ray, DVD) stay mpv's.
+local subov = mp.create_osd_overlay("ass-events")
+subov.z = -10
+local own_subs, sub_now = false, ""
+local PICTURE = { hdmv_pgs_subtitle = true, pgssub = true, dvd_subtitle = true, dvdsub = true, dvb_subtitle = true, dvbsub = true, xsub = true }
+
+local function sentence_case(s)
+    local letters, upper = 0, 0
+    for c in s:gmatch("%a") do letters = letters + 1; if c:match("%u") then upper = upper + 1 end end
+    if letters < 4 or upper < letters * 0.8 then return s end
+    local out, cap = {}, true
+    for i = 1, #s do
+        local c = s:sub(i, i):lower()
+        if cap and c:match("%a") then c = c:upper(); cap = false
+        elseif c == "." or c == "!" or c == "?" or c == "\n" then cap = true
+        elseif cap and (c == "[" or c == "(") then cap = false end -- [door slams] stays lower case
+        out[#out + 1] = c
+    end
+    return (table.concat(out):gsub("%f[%w']i%f[^%w]", "I"))
+end
+
+local function draw_sub()
+    local d = mp.get_property_native("osd-dimensions") or {}
+    local w, h = d.w or 0, d.h or 0
+    if not own_subs or sub_now == "" or w < 50 or h < 50 then subov.data = ""; subov:update(); return end
+    local k = h / 1080
+    local scale = (mp.get_property_number("sub-scale", 0.75) or 0.75) / 0.75
+    local pos = mp.get_property_number("sub-pos", 100) or 100
+    local y = h * pos / 100 - 48 * k
+    local t = sub_now:gsub("[{}]", ""):gsub("\\", "/"):gsub("\r", ""):gsub("\n", "\\N")
+    subov.res_x, subov.res_y = w, h
+    subov.data = string.format("{\\an2\\pos(%.1f,%.1f)\\fnSegoe UI Semibold\\fs%.1f\\bord%.2f\\shad%.2f\\1c&HFFFFFF&\\3c&H000000&\\3a&H18&\\4c&H000000&\\4a&H60&}%s",
+        w / 2, y, 50 * k * scale, 2.4 * k * scale, 1.4 * k * scale, t)
+    subov:update()
+end
+
+local function sub_style(on)
+    mp.set_property("sub-ass-override", on and "strip" or "scale")
+    mp.set_property("sub-color", on and "#00000000" or "#FFFFFF")
+    mp.set_property("sub-border-color", on and "#00000000" or "#E6000000")
+    mp.set_property("sub-shadow-color", on and "#00000000" or "#80000000")
+end
+
+mp.observe_property("current-tracks/sub/codec", "string", function(_, c)
+    local mine = c ~= nil and c ~= "" and not PICTURE[c:lower()]
+    if mine ~= own_subs then own_subs = mine; sub_style(mine) end
+    draw_sub()
+end)
+mp.observe_property("sub-text", "string", function(_, t) sub_now = sentence_case(t or ""); draw_sub() end)
+mp.observe_property("sub-pos", "number", function() draw_sub() end)
+mp.observe_property("sub-scale", "number", function() draw_sub() end)
+mp.observe_property("osd-dimensions", "native", function() draw_sub() end)
+
 msg.info("Ember controls loaded")
