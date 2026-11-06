@@ -27,7 +27,7 @@ targets:
       path: Ember/Info.plist
       properties:
         CFBundleDisplayName: Ember
-        CFBundleShortVersionString: "0.4.9"
+        CFBundleShortVersionString: "0.4.10"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIAppFonts: [Selawik-Light.ttf, Selawik-Semilight.ttf, Selawik-Regular.ttf, Selawik-Semibold.ttf, Selawik-Bold.ttf]

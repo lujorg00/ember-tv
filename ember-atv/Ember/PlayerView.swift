@@ -63,8 +63,15 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     func mpvTime(_ t: Double) { pos = t }
     func mpvDuration(_ d: Double) { dur = d }
+    /// Keeps the screensaver away while a stream is playing (mpv doesn't tell tvOS, as Apple's own player does).
+    /// Paused, stopped or finished: the Apple TV can sleep again as normal.
+    private func stayAwake(_ on: Bool) {
+        DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = on }
+    }
+
     func mpvPaused(_ p: Bool) {
         paused = p
+        stayAwake(!p && !done)
         if switching { return }
         if p && started && !done { report("paused") }
         if p { showControls(for: 3600) } else { showControls() }
@@ -82,6 +89,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
             setupTracks()
         }
         started = true
+        stayAwake(!paused && !done)
         buffering = false
         bufferingSince = nil
     }
@@ -270,6 +278,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     private func finish(_ how: PlayEnd) {
         done = true
+        stayAwake(false)
         Diag.log("player: closing (\(how))")
         Diag.stoppedPlaying()
         if case .next = how {} else { resetDisplay() }   // straight into the next episode: stay in this mode
