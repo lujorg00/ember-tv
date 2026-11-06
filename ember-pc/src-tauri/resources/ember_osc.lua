@@ -318,7 +318,7 @@ end
 
 -- A soft fade (top or bottom) so the controls read without dimming the whole picture.
 local function fade(y1, y2, a1, a2)
-    local steps = 32
+    local steps = 72
     for k = 0, steps - 1 do
         local f = (k + 0.5) / steps
         local a = math.floor(a1 + (a2 - a1) * f)
@@ -363,7 +363,7 @@ local function render()
         if left > 0 then
             local fa = left > 1.5 and 0 or math.floor((1 - left / 1.5) * 255)
             local function mix(a) return string.format("%02X", math.min(255, a + math.floor((255 - a) * fa / 255))) end
-            local steps = 24
+            local steps = 64
             for k = 0, steps - 1 do
                 local f = (k + 0.5) / steps
                 rrect(0, 170 * S * k / steps, W, 170 * S / steps + 1, 0, "000000", mix(math.floor(0x60 + (0xFF - 0x60) * f)))

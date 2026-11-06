@@ -18,7 +18,15 @@ struct AmbientBackground: View {
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let W = size.width, H = size.height
                     for p in parts {
-                        if mode == .night {
+                        if mode == .day {
+                            // motes of dust drifting slowly down through the light at the top right
+                            let life = (t * (0.012 + p.s * 0.014) + p.p).truncatingRemainder(dividingBy: 1)
+                            let x = (0.55 + p.x * 0.45) * W + sin(t * 0.3 + p.p) * 20 - life * W * 0.08
+                            let y = (p.y * 0.25 + life * 0.6) * H
+                            let d = 1.8 + p.r * 2.6
+                            ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: d, height: d)),
+                                     with: .color(Color(red: 1, green: 0.89, blue: 0.7).opacity(sin(life * .pi) * 0.35)))
+                        } else if mode == .night {
                             let a = 0.25 + 0.55 * (0.5 + 0.5 * sin(t * (0.4 + p.s) + p.p))
                             let d = 1.6 + p.r * 2.2
                             ctx.fill(Path(ellipseIn: CGRect(x: p.x * W, y: p.y * H * 0.7, width: d, height: d)),
@@ -54,7 +62,7 @@ struct AmbientBackground: View {
                 let now: Mode = m < rise + 20 || m > set + 45 ? .night : m > set - 75 ? .evening : .day
                 if now != mode || parts.isEmpty {
                     mode = now
-                    let n = now == .night ? 90 : now == .evening ? 34 : 16
+                    let n = now == .night ? 90 : now == .evening ? 34 : 24
                     parts = (0..<n).map { _ in Particle(x: .random(in: 0...1), y: .random(in: 0...1), r: .random(in: 0...1), s: .random(in: 0...1), p: .random(in: 0...6.28)) }
                 }
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -62,20 +70,50 @@ struct AmbientBackground: View {
         }
     }
 
+    /// A soft glow: the light falls away on an eased curve through many steps, so there are no visible rings,
+    /// with a faint grain over it to break up the banding a dark TV picture shows.
+    private func soft(_ r: Double, _ g: Double, _ b: Double, _ a: Double, at c: UnitPoint, radius: CGFloat) -> RadialGradient {
+        let stops = (0...16).map { k -> Gradient.Stop in
+            let t = Double(k) / 16
+            return .init(color: Color(red: r, green: g, blue: b).opacity(a * pow(1 - t, 2.2) * (1 - t * 0.15)), location: t)
+        }
+        return RadialGradient(gradient: Gradient(stops: stops), center: c, startRadius: 0, endRadius: radius)
+    }
+
     @ViewBuilder private var glow: some View {
-        switch mode {
-        case .day:
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.09, green: 0.067, blue: 0.05), Theme.bg], startPoint: .top, endPoint: .bottom)
-                RadialGradient(colors: [Color(red: 1, green: 0.84, blue: 0.59).opacity(0.16), .clear], center: UnitPoint(x: 0.88, y: -0.1), startRadius: 0, endRadius: 1300)
+        ZStack {
+            switch mode {
+            case .day:
+                LinearGradient(colors: [Color(red: 0.11, green: 0.08, blue: 0.055), Color(red: 0.07, green: 0.05, blue: 0.04), Theme.bg],
+                               startPoint: .top, endPoint: .bottom)
+                soft(1, 0.81, 0.55, 0.30, at: UnitPoint(x: 0.92, y: -0.12), radius: 1500)
+                soft(1, 0.9, 0.75, 0.14, at: UnitPoint(x: 1, y: 0), radius: 900)
+            case .evening:
+                soft(0.94, 0.47, 0.16, 0.24, at: UnitPoint(x: 0, y: 1.08), radius: 1200)
+                soft(1, 0.67, 0.31, 0.12, at: UnitPoint(x: 0.06, y: 1), radius: 700)
+            case .night:
+                soft(0.35, 0.41, 0.67, 0.15, at: UnitPoint(x: 0.86, y: -0.12), radius: 1200)
             }
-        case .evening:
-            ZStack {
-                RadialGradient(colors: [Color(red: 0.94, green: 0.47, blue: 0.16).opacity(0.22), .clear], center: UnitPoint(x: 0, y: 1.1), startRadius: 0, endRadius: 1100)
-                RadialGradient(colors: [Color(red: 1, green: 0.67, blue: 0.31).opacity(0.10), .clear], center: UnitPoint(x: 0.06, y: 1), startRadius: 0, endRadius: 700)
-            }
-        case .night:
-            RadialGradient(colors: [Color(red: 0.35, green: 0.41, blue: 0.67).opacity(0.14), .clear], center: UnitPoint(x: 0.85, y: -0.1), startRadius: 0, endRadius: 1100)
+            Image(uiImage: Grain.image).resizable(resizingMode: .tile).opacity(0.05).blendMode(.overlay)
         }
     }
+}
+
+/// A tile of fine random grain (made once).
+enum Grain {
+    static let image: UIImage = {
+        let n = 160
+        var px = [UInt8](repeating: 255, count: n * n * 4)
+        for i in 0..<(n * n) {
+            let v = UInt8.random(in: 0...255)
+            px[i * 4] = v; px[i * 4 + 1] = v; px[i * 4 + 2] = v; px[i * 4 + 3] = 255
+        }
+        let data = Data(px)
+        guard let provider = CGDataProvider(data: data as CFData),
+              let cg = CGImage(width: n, height: n, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: n * 4,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                               provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        else { return UIImage() }
+        return UIImage(cgImage: cg)
+    }()
 }

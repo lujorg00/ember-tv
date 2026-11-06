@@ -1372,7 +1372,7 @@ function showSettings() {
     </div>`;
   (async () => {
     const list = [{ key: "cw", name: "Continue watching" }];
-    for (const c of (await homeCats()).rows) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${c.name || c.id} (${c.type === "movie" ? "films" : "series"})` });
+    for (const c of (await homeCats()).rows) if (!/pick up|left off|continue/i.test(c.name || "")) list.push({ key: catKey(c), name: `${niceName(c.name || c.id)} (${c.type === "movie" ? "films" : "series"})` });
     list.push({ key: "out", name: "This week (top right of Home)" });
     try { for (const g of (await layout()).groups || []) list.push({ key: "tiles:" + g.title, name: g.title }); } catch (e) {}
     const hid = hiddenRows();
@@ -1436,15 +1436,33 @@ const sky = (() => {
     const d = new Date(), m = d.getHours() * 60 + d.getMinutes();
     return m < rise + 20 || m > set + 45 ? "night" : m > set - 75 ? "evening" : "day";
   };
+  // A soft glow: the light falls off smoothly (many stops on an eased curve) instead of in visible rings, and a
+  // faint grain over everything breaks up the last of the banding a dark screen shows.
+  const soft = (size, at, rgb, a, reach = 1) => {
+    const st = [];
+    for (let k = 0; k <= 16; k++) { const t = k / 16, f = Math.pow(1 - t, 2.2) * (1 - t * 0.15); st.push(`rgba(${rgb},${(a * f).toFixed(4)}) ${(t * 100 * reach).toFixed(1)}%`); }
+    return `radial-gradient(${size} at ${at}, ${st.join(", ")})`;
+  };
+  const grain = (() => {
+    try {
+      const c = document.createElement("canvas"); c.width = c.height = 160;
+      const x = c.getContext("2d"), d = x.createImageData(160, 160);
+      for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 9; }
+      x.putImageData(d, 0, 0);
+      return `url(${c.toDataURL()})`;
+    } catch (e) { return ""; }
+  })();
   const seed = () => {
     parts = [];
-    const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : 0;
+    // day: a few motes drifting in the sunlight; evening: embers; night: stars
+    const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : (TV ? 14 : 22);
     for (let i = 0; i < n; i++) parts.push({ x: Math.random(), y: Math.random(), r: Math.random(), s: Math.random(), p: Math.random() * 6.28 });
-    glow.style.background = mode === "day"
-      ? "radial-gradient(1200px 700px at 88% -10%, rgba(255,214,150,.16), transparent 60%), linear-gradient(#17110D, #0E0B09)"
+    const layers = mode === "day"
+      ? [soft("1500px 1000px", "92% -12%", "255,206,140", 0.30), soft("900px 600px", "100% 0%", "255,230,190", 0.14), "linear-gradient(#1C140E, #120D0A 55%, #0E0B09)"]
       : mode === "evening"
-        ? "radial-gradient(900px 700px at 0% 110%, rgba(240,120,40,.20), transparent 60%), radial-gradient(600px 400px at 6% 100%, rgba(255,170,80,.10), transparent 70%)"
-        : "radial-gradient(900px 600px at 85% -10%, rgba(90,105,170,.12), transparent 60%)";
+        ? [soft("1100px 800px", "0% 108%", "240,120,40", 0.24), soft("650px 450px", "6% 100%", "255,170,80", 0.12)]
+        : [soft("1100px 700px", "86% -12%", "90,105,170", 0.15)];
+    glow.style.background = [grain, ...layers].filter(Boolean).join(", ");
   };
   const draw = (t) => {
     raf = requestAnimationFrame(draw);
@@ -1453,7 +1471,14 @@ const sky = (() => {
     const W = cv.width, H = cv.height, s = t / 1000;
     g.clearRect(0, 0, W, H);
     for (const p of parts) {
-      if (mode === "night") {
+      if (mode === "day") {
+        // motes of dust drifting slowly down through the light at the top right
+        const life = (s * (0.012 + p.s * 0.014) + p.p) % 1;
+        const x = (0.55 + p.x * 0.45) * W + Math.sin(s * 0.3 + p.p) * 14 - life * W * 0.08, y = (p.y * 0.25 + life * 0.6) * H;
+        const a = Math.sin(life * Math.PI) * 0.35;
+        g.fillStyle = `rgba(255,228,180,${a})`;
+        g.beginPath(); g.arc(x, y, 0.7 + p.r * 1.1, 0, 6.28); g.fill();
+      } else if (mode === "night") {
         const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(s * (0.4 + p.s) + p.p));
         g.fillStyle = `rgba(232,236,255,${a * 0.8})`; g.fillRect(p.x * W, p.y * H * 0.7, (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1), (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1));
       } else {
