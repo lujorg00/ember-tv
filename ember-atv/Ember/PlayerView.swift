@@ -18,7 +18,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     @Published var countdown = 15
     @Published var tracks: [Track] = []
     @Published var subDelay: Double = 0
-    @Published var subScale: Double = UserDefaults.standard.object(forKey: "subScale") as? Double ?? 0.75
+    @Published var subScale: Double = UserDefaults.standard.object(forKey: "subSize") as? Double ?? 1.0
 
     let core = MPVCore()
     private(set) var session: PlaySession?
@@ -152,7 +152,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     func setSubScale(_ v: Double) {
         subScale = v
         core.set("sub-scale", String(v))
-        UserDefaults.standard.set(v, forKey: "subScale")
+        UserDefaults.standard.set(v, forKey: "subSize")
     }
     func nudgeSubs(_ by: Double) {
         if by == 0 { core.set("sub-delay", "0") } else { core.command(["add", "sub-delay", String(by)]) }
@@ -367,8 +367,8 @@ struct PlayerScreen: View {
             ForEach(subs) { t in
                 Button((t.selected ? "✓ " : "") + t.label) { model.selectSubtitle(t) }
             }
-            Button("Size: " + (model.subScale < 0.7 ? "Small" : model.subScale > 0.8 ? "Large" : "Medium") + "  (change)") {
-                model.setSubScale(model.subScale < 0.7 ? 0.75 : model.subScale > 0.8 ? 0.6 : 0.9)
+            Button("Size: " + (model.subScale < 0.95 ? "Small" : model.subScale > 1.05 ? "Large" : "Medium") + "  (change)") {
+                model.setSubScale(model.subScale < 0.95 ? 1.0 : model.subScale > 1.05 ? 0.85 : 1.2)
                 reopenSubs()
             }
             Button("Timing: show earlier (−0.5 s)") { model.nudgeSubs(-0.5); reopenSubs() }

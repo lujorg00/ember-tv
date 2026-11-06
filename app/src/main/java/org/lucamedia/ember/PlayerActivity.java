@@ -29,6 +29,7 @@ import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.DefaultTimeBar;
 import androidx.media3.ui.TimeBar;
 import androidx.media3.ui.PlayerView;
+import androidx.media3.ui.CaptionStyleCompat;
 import androidx.media3.ui.SubtitleView;
 
 import org.json.JSONObject;
@@ -178,7 +179,16 @@ public class PlayerActivity extends Activity {
             if (tbv instanceof DefaultTimeBar) tbv.setOnFocusChangeListener((v, f) -> ((DefaultTimeBar) v).setScrubberColor(f ? Color.WHITE : ACCENT));
         }
         SubtitleView sv = view.getSubtitleView();
-        if (sv != null) sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 0.9f);
+        if (sv != null) {
+            // like Netflix: white text with a dark outline, no black box (the TV's own caption style has one),
+            // and the stream's own boxes and colours ignored
+            sv.setApplyEmbeddedStyles(false);
+            sv.setApplyEmbeddedFontSizes(false);
+            sv.setStyle(new CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_OUTLINE, 0xE6000000, Typeface.create("sans-serif-medium", Typeface.NORMAL)));
+            sv.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION);
+            sv.setBottomPaddingFraction(0.07f);
+        }
 
         player.addListener(new Player.Listener() {
             @Override
