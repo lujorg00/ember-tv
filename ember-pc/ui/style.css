@@ -575,3 +575,15 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 /* ---- watchlists: posters two rows deep */
 .strip.wall { display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; grid-auto-columns: 140px; gap: 14px; }
 .strip.wall .poster { width: 140px; }
+
+/* ---- Ember PC: the poster under the mouse opens out into a large card, in place, the row's height unchanged */
+.strip.hoverspot .spot { height: auto; aspect-ratio: auto; align-self: stretch; width: 180px; cursor: pointer;
+  transition: width .26s cubic-bezier(.2,.7,.2,1), box-shadow .18s; }
+.strip.hoverspot .spot.open { width: 470px; box-shadow: 0 0 0 2px var(--accent), 0 14px 32px #000b; }
+.strip.hoverspot .spot-in { left: 18px; right: 22%; bottom: 16px; gap: 6px; opacity: 0; transition: opacity .18s; }
+.strip.hoverspot .spot.open .spot-in { opacity: 1; transition-delay: .16s; }
+.strip.hoverspot .spot-t { font-size: 22px; }
+.strip.hoverspot .spot-logo { max-width: 200px; max-height: 56px; }
+.strip.hoverspot .spot-d { font-size: 13px; }
+.strip.hoverspot .spot .btn { padding: 6px 14px; font-size: 13px; }
+.strip.hoverspot .spot .bmk { right: 12px; width: 22px; height: 30px; }

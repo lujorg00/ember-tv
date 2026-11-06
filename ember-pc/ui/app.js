@@ -541,12 +541,9 @@ async function continueRow(cwCat) {
   return r;
 }
 
-/** The ordinary rows: the first title large (its picture, logo or name, a line about it, Watch and Details),
- *  then the rest as posters. */
-function spotRow(title, metas, type) {
-  if (metas.length < 4) return row(title, metas, type);
-  const r = row(title, metas.slice(1), type);
-  const m = metas[0], t = m.type || type, p = progress[m.id];
+/** A title shown large: its picture, logo or name, a line about it, Watch and Details. */
+function spotCard(m, type) {
+  const t = m.type || type, p = progress[m.id];
   const sp = h(`<div class="spot" data-wid="${esc(m.id)}" data-wtype="${esc(t)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">
     ${watchlistIds.has(m.id) ? BOOKMARK : ""}
     <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t">${esc(m.name)}</div>
@@ -555,23 +552,75 @@ function spotRow(title, metas, type) {
       <div class="btns"><button class="btn primary">${p ? "Resume " + fmt(p.position) : "Watch"}</button><button class="btn">Details</button></div></div></div>`);
   if (watchlistIds.has(m.id)) sp.classList.add("bm");
   const [watch, details] = sp.querySelectorAll("button");
-  watch.onclick = () => go("title", t, m.id, m, { autoplay: true });
-  details.onclick = () => go("title", t, m.id, m);
-  $(".strip", r).prepend(sp);
-  $(".strip", r).classList.add("spotted");
-  $("h2 small", r).textContent = metas.length;
+  watch.onclick = (e) => { e.stopPropagation(); go("title", t, m.id, m, { autoplay: true }); };
+  details.onclick = (e) => { e.stopPropagation(); go("title", t, m.id, m); };
+  sp.onclick = () => go("title", t, m.id, m);
   // the full details (logo, description, genres) arrive a moment later
   meta(t, m.id).then(full => {
-    if (!full || !sp.isConnected && !document.body.contains(sp)) return;
+    if (!full) return;
     const mm = { ...m, ...full };
     if (mm.logo) {
       const img = h(`<img class="spot-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">`);
-      img.onload = () => $(".spot-t", sp).replaceWith(img);
+      img.onload = () => { const tt = $(".spot-t", sp); if (tt) tt.replaceWith(img); };
     }
     if (!m.description && mm.description) $(".spot-d", sp).textContent = mm.description;
     $(".spot-m", sp).textContent = [mm.releaseInfo || mm.year, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 2).join(", ")].filter(Boolean).join("  ·  ");
     if (!m.background && mm.background) sp.style.backgroundImage = `url('${mm.background}')`;
   });
+  return sp;
+}
+
+/** The ordinary rows. On the TVs: the first title large, then the posters. On the PC: plain posters, and the one
+ *  the mouse rests on opens out into that large card in place (and folds back when the mouse moves on). */
+function spotRow(title, metas, type) {
+  if (!TV) return hoverRow(title, metas, type);
+  if (metas.length < 4) return row(title, metas, type);
+  const r = row(title, metas.slice(1), type);
+  const sp = spotCard(metas[0], type);
+  sp.querySelector(".spot-k").textContent = "Top pick";
+  $(".strip", r).prepend(sp);
+  $(".strip", r).classList.add("spotted");
+  $("h2 small", r).textContent = metas.length;
+  return r;
+}
+
+function hoverRow(title, metas, type) {
+  const r = row(title, metas, type);
+  const strip = $(".strip", r);
+  strip.classList.add("hoverspot");
+  const byId = new Map(metas.map(m => [m.id, m]));
+  let timer = 0, open = null;
+  const close = () => {
+    if (!open) return;
+    const { sp, poster } = open; open = null;
+    sp.classList.remove("open");
+    setTimeout(() => { sp.remove(); poster.hidden = false; }, 260);
+  };
+  strip.addEventListener("mouseover", (e) => {
+    const poster = e.target.closest(".poster");
+    if (!poster || !strip.contains(poster) || e.target.closest(".wbadge")) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (open && open.poster === poster) return;
+      close();
+      const m = byId.get(poster.dataset.wid);
+      if (!m) return;
+      const sp = spotCard(m, type);
+      sp.querySelector(".spot-k").remove();
+      poster.hidden = true;
+      poster.before(sp);
+      open = { sp, poster };
+      sp.addEventListener("mouseleave", () => { clearTimeout(timer); timer = setTimeout(close, 180); });
+      sp.addEventListener("mouseenter", () => clearTimeout(timer));
+      requestAnimationFrame(() => requestAnimationFrame(() => sp.classList.add("open")));
+      // keep the opened card in view at the right-hand end of the row
+      setTimeout(() => {
+        const a = sp.getBoundingClientRect(), b = strip.getBoundingClientRect();
+        if (a.right > b.right - 20) strip.scrollBy({ left: a.right - b.right + 40, behavior: "smooth" });
+      }, 300);
+    }, 380);
+  });
+  strip.addEventListener("mouseleave", () => { clearTimeout(timer); timer = setTimeout(close, 180); });
   return r;
 }
 
