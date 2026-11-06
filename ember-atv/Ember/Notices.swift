@@ -169,35 +169,38 @@ struct NoticeOverlay: View {
     }
 }
 
-/// Top right of Home, small: the cats (in or out) and what's next today or tomorrow.
+/// Top right of Home, small, beside the tab bar: the cats on one line (green paw in, grey out), what's next below.
 struct GlanceView: View {
     @EnvironmentObject var notices: Notices
     var body: some View {
         let cats = notices.glance.arr("cats")
         let next = notices.glance["next"] as? JSON
         if !cats.isEmpty || next != nil {
-            HStack(spacing: 18) {
-                ForEach(cats.indices, id: \.self) { i in
-                    let c = cats[i], home = (c["home"] as? Bool) ?? false
-                    HStack(spacing: 7) {
-                        Image(systemName: "pawprint.fill").foregroundStyle(home ? Color(red: 0.5, green: 0.83, blue: 0.54) : Theme.muted)
-                        Text(c.str("name") ?? "").font(.ember(19, .semibold))
-                        Text(home ? "in" : "out").font(.ember(19)).foregroundStyle(Theme.muted)
+            VStack(alignment: .trailing, spacing: 4) {
+                if !cats.isEmpty {
+                    HStack(spacing: 14) {
+                        ForEach(cats.indices, id: \.self) { i in
+                            let c = cats[i], home = (c["home"] as? Bool) ?? false
+                            HStack(spacing: 5) {
+                                Image(systemName: "pawprint.fill").font(.system(size: 13))
+                                    .foregroundStyle(home ? Color(red: 0.5, green: 0.83, blue: 0.54) : Theme.muted)
+                                Text(c.str("name") ?? "").font(.ember(16, .semibold))
+                                    .foregroundStyle(home ? .white : Theme.muted)
+                            }
+                        }
                     }
                 }
                 if let n = next {
-                    if !cats.isEmpty { Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 20) }
-                    HStack(spacing: 7) {
-                        Text(n.str("title") ?? "").font(.ember(19, .semibold)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(n.str("title") ?? "").font(.ember(15, .semibold)).lineLimit(1)
                             .foregroundStyle((n["shift"] as? Bool) == true ? Theme.accent : .white)
                         Text((n.str("day") == "Today" ? "" : (n.str("day") ?? "") + " ") + (n.str("time") ?? ""))
-                            .font(.ember(19)).foregroundStyle(Theme.muted)
+                            .font(.ember(15)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                     }
-                    .frame(maxWidth: 420, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 20).padding(.vertical, 10)
-            .background(Theme.bg.opacity(0.5), in: Capsule())
+            .frame(maxWidth: 300, alignment: .trailing)
+            .shadow(color: .black.opacity(0.6), radius: 8)
             .transition(.opacity)
         }
     }
