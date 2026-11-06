@@ -792,6 +792,37 @@ def shared_settings(body=None):
     return cur
 
 
+def reviews(typ, imdb):
+    """What people have written about a film or show (TMDB's reviews), short and tidy, with TMDB's score."""
+    def get():
+        f = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+        res = (f.get("movie_results") if typ == "movie" else f.get("tv_results")) or f.get("movie_results") or f.get("tv_results") or []
+        if not res:
+            return {"items": []}
+        hit = res[0]
+        kind = "tv" if hit.get("media_type") == "tv" or (typ == "series" and f.get("tv_results")) else "movie"
+        r = _tmdb(f"/{kind}/{hit['id']}/reviews", language="en-US", page=1)
+        items = []
+        for x in sorted(r.get("results", []), key=lambda x: x.get("created_at") or "", reverse=True)[:8]:
+            a = x.get("author_details") or {}
+            text = x.get("content") or ""
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)           # markdown links: keep the words
+            text = re.sub(r"(\*\*|__|\*|_{1,2}(?=\w)|(?<=\w)_{1,2}|^#+\s*)", "", text, flags=re.M)
+            text = re.sub(r"[ \t]+", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
+            if len(text) < 40:
+                continue
+            items.append({"author": (x.get("author") or a.get("username") or "Someone").strip(), "rating": a.get("rating"),
+                          "date": (x.get("created_at") or "")[:10], "text": text[:3000]})
+        return {"items": items[:6], "score": hit.get("vote_average"), "votes": hit.get("vote_count")}
+    if not re.fullmatch(r"tt\d+", imdb or ""):
+        return {"items": []}
+    try:
+        return cached(f"reviews:{typ}:{imdb}", 24 * 3600, get)
+    except Exception:
+        return {"items": []}
+
+
 TOPS_PATH = HERE / "toplists.json"
 _tops_lock = threading.Lock()
 TOP_LEN = 25
@@ -2905,6 +2936,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/next/"):
                 imdb = path[len("/next/"):]
                 self._json(next_episode(imdb) if imdb.startswith("tt") and imdb[2:].isdigit() else {})
+            elif re.fullmatch(r"/reviews/(movie|series)/tt\d+", path):
+                parts = path.split("/")
+                self._json(reviews(parts[2], parts[3]))
             elif re.fullmatch(r"/toplist/(movie|series)/[^/]+\.json", path):
                 parts = path.split("/")
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)

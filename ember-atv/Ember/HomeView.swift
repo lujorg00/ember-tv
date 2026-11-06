@@ -298,13 +298,15 @@ struct TitleArt: View {
     let meta: Meta
     var height: CGFloat
     var width: CGFloat
+    var nameSize: CGFloat = 60
     @State private var img: UIImage?
     @State private var failed = false
 
-    init(meta: Meta, height: CGFloat, width: CGFloat) {
+    init(meta: Meta, height: CGFloat, width: CGFloat, nameSize: CGFloat = 60) {
         self.meta = meta
         self.height = height
         self.width = width
+        self.nameSize = nameSize
         _img = State(initialValue: meta.logoURL.flatMap { ImageStore.shared.cache.object(forKey: $0 as NSURL) })
     }
 
@@ -313,9 +315,11 @@ struct TitleArt: View {
             if let img {
                 Image(uiImage: img).resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
+                    .transition(.opacity)
             } else if meta.logoURL == nil || failed {
-                Text(meta.name).font(.ember(60, .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
+                Text(meta.name).font(.ember(nameSize, .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
+                    .transition(.opacity)
             } else {
                 Color.clear
             }
@@ -324,7 +328,8 @@ struct TitleArt: View {
         .frame(height: height, alignment: .bottomLeading)
         .task(id: meta.logoURL) {
             guard img == nil, let u = meta.logoURL else { return }
-            if let got = await ImageStore.shared.load(u) { withAnimation(.easeIn(duration: 0.3)) { img = got } } else { failed = true }
+            if let got = await ImageStore.shared.load(u) { withAnimation(.easeIn(duration: 0.35)) { img = got } }
+            else { withAnimation(.easeIn(duration: 0.35)) { failed = true } }
         }
     }
 }
@@ -383,8 +388,9 @@ struct TopRow: View {
                                         .frame(width: 400, height: 225)
                                         .clipped()
                                     LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
-                                    Text(m.name).font(.ember(24, .bold)).lineLimit(2)
-                                        .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
+                                    // the title as its logo (the name when it has none)
+                                    TitleArt(meta: m, height: 70, width: 250, nameSize: 26)
+                                        .padding(.horizontal, 16).padding(.bottom, 14)
                                     WatchBadge(state: store.watched[m.id])
                                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
                                     if store.watchlist.contains(m.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }

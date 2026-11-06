@@ -270,6 +270,48 @@ function applyBookmarks(root = document) {
 }
 loadWatchlist();
 
+// Titles as their logos (the film's or show's own lettering), loaded once and remembered; the name only when
+// there's no logo. Either fades in, never pops.
+const logoP = new Map(), logoReady = new Map();
+function logoFor(m, type) {
+  if (!m || !m.id) return Promise.resolve("");
+  if (logoP.has(m.id)) return logoP.get(m.id);
+  const tryUrl = (u) => new Promise(res => {
+    if (!u) return res("");
+    const i = new Image();
+    i.onload = () => res(i.naturalWidth > 4 ? u : "");
+    i.onerror = () => res("");
+    i.src = u;
+  });
+  const p = (async () => {
+    if (m.logo) { const u = await tryUrl(m.logo); if (u) return u; }
+    if (m.id.startsWith("tt")) { const u = await tryUrl(`https://images.metahub.space/logo/medium/${m.id}/img`); if (u) return u; }
+    const full = await meta(m.type || type, m.id).catch(() => ({}));
+    return full && full.logo ? tryUrl(full.logo) : "";
+  })().then(u => { logoReady.set(m.id, u); return u; });
+  logoP.set(m.id, p);
+  return p;
+}
+/** The title for a card: <div class="ttl"> holding the logo, or the name if there isn't one. */
+function titleArt(m, type) {
+  const box = h(`<div class="ttl"></div>`);
+  const name = () => h(`<span class="ttl-name">${esc(m.name || "")}</span>`);
+  const logo = (u) => h(`<img class="ttl-logo" src="${esc(u)}" alt="${esc(m.name || "")}">`);
+  if (logoReady.has(m.id)) { // known already: straight in, no fade
+    const u = logoReady.get(m.id), el = u ? logo(u) : name();
+    el.classList.add("on", "now"); box.appendChild(el); return box;
+  }
+  let shown = null;
+  const show = (el) => {
+    if (shown) shown.remove();
+    shown = el; box.appendChild(el);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("on")));
+  };
+  const late = setTimeout(() => { if (!shown) show(name()); }, 1200);
+  logoFor(m, type).then(u => { clearTimeout(late); if (u) show(logo(u)); else if (!shown) show(name()); });
+  return box;
+}
+
 function card(m, type) {
   const p = progress[m.id];
   const yr = (String(m.releaseInfo || m.year || "").match(/\d{4}/) || [""])[0];
@@ -562,7 +604,7 @@ function spotCard(m, type) {
   const t = m.type || type, p = progress[m.id];
   const sp = h(`<div class="spot" data-wid="${esc(m.id)}" data-wtype="${esc(t)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">
     ${watchlistIds.has(m.id) ? BOOKMARK : ""}${badge(m.id)}
-    <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t">${esc(m.name)}</div>
+    <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t"></div>
       <div class="spot-m">${esc([m.releaseInfo, m.imdbRating && "★ " + m.imdbRating].filter(Boolean).join("  ·  "))}</div>
       <div class="spot-d">${esc(m.description || "")}</div>
       <div class="btns"><button class="btn primary">${p ? "Resume " + fmt(p.position) : "Watch"}</button><button class="btn">Details</button></div></div></div>`);
@@ -573,24 +615,11 @@ function spotCard(m, type) {
   sp.onclick = () => go("title", t, m.id, m);
   // The title's logo in place of its name: the name waits hidden while the logo loads (at most 0.8 s), so it
   // doesn't flash up first; if there's no logo, the name shows.
-  const tt = $(".spot-t", sp);
-  tt.style.visibility = "hidden";
-  let logoDone = false;
-  const showName = () => { if (!logoDone) { logoDone = true; tt.style.visibility = ""; } };
-  const tryLogo = (url) => {
-    if (!url || logoDone) return;
-    const img = h(`<img class="spot-logo" alt="${esc(m.name)}">`);
-    img.onload = () => { if (logoDone && !tt.isConnected) return; logoDone = true; if (tt.isConnected) tt.replaceWith(img); };
-    img.onerror = () => {};
-    img.src = url;
-  };
-  if (m.id && m.id.startsWith("tt")) tryLogo(`https://images.metahub.space/logo/medium/${m.id}/img`);
-  setTimeout(showName, 800);
+  $(".spot-t", sp).replaceWith(titleArt(m, t));
   // the full details (logo, description, genres) arrive a moment later
   meta(t, m.id).then(full => {
     if (!full) return;
     const mm = { ...m, ...full };
-    if (mm.logo && !logoDone) tryLogo(mm.logo);
     if (!m.description && mm.description) $(".spot-d", sp).textContent = mm.description;
     $(".spot-m", sp).textContent = [mm.releaseInfo || mm.year, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 2).join(", ")].filter(Boolean).join("  ·  ");
     if (!m.background && mm.background) sp.style.backgroundImage = `url('${mm.background}')`;
@@ -627,6 +656,7 @@ function hoverRow(title, metas, type) {
   strip.addEventListener("mouseover", (e) => {
     const poster = e.target.closest(".poster");
     if (!poster || !strip.contains(poster) || e.target.closest(".wbadge")) return;
+    logoFor(byId.get(poster.dataset.wid), type);   // ready by the time the card opens
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (open && open.poster === poster) return;
@@ -686,7 +716,8 @@ function top10Row(title, metas, onPick) {
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 25).forEach((m, i) => {
     const bm = watchlistIds.has(m.id);
-    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art${bm ? " bm" : ""}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">${bm ? BOOKMARK : ""}<span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
+    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art${bm ? " bm" : ""}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">${bm ? BOOKMARK : ""}${badge(m.id)}</div></div>`);
+    $(".t10-art", el).appendChild(titleArt(m, m.type));
     el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });
@@ -955,6 +986,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <button class="back">‹ Back</button>
     <header class="tp-head fade-in"></header>
     <div class="tp-body"><section class="tp-eps"></section></div>
+    <section class="tp-reviews" hidden></section>
     <section class="tp-more"></section>
     <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
   v.appendChild(page);
@@ -1032,6 +1064,22 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   const onKey = (ev) => { if (!document.body.contains(page)) return document.removeEventListener("keydown", onKey, true);
     if (ev.key === "Escape" && isOpen()) { ev.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
+
+  // Reviews: a quiet row of short cards (TMDB), each opening to the whole review.
+  getJson(`${feed()}/reviews/${type}/${id}`, 20000).then(r => {
+    const items = r.items || [], box = $(".tp-reviews", page);
+    if (!items.length || !box) return;
+    const score = r.score ? `★ ${(+r.score).toFixed(1)} on TMDB${r.votes ? ` · ${(+r.votes).toLocaleString("en-GB")} ratings` : ""}` : "";
+    box.innerHTML = `<h2>Reviews ${score ? `<small>${esc(score)}</small>` : ""}</h2><div class="strip rv-strip"></div>`;
+    const when = (d) => { try { return new Date(d + "T12:00:00").toLocaleDateString("en-GB", { month: "short", year: "numeric" }); } catch (e) { return ""; } };
+    for (const it of items) {
+      const c = h(`<button class="rv"><span class="rv-top"><b>${esc(it.author)}</b>${it.rating ? `<span class="rv-score">★ ${esc(String(it.rating))}</span>` : ""}</span>
+        <span class="rv-text">${esc(it.text)}</span><span class="rv-date">${esc(when(it.date))}</span></button>`);
+      c.onclick = () => c.classList.toggle("open");
+      $(".rv-strip", box).appendChild(c);
+    }
+    box.hidden = false;
+  }).catch(() => {});
 
   // You may also like: under the episodes (or the buttons, for a film); scroll down to it on long series.
   getJson(`${feed()}/similar/${type}/${id}`, 30000).then(r => {

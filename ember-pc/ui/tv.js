@@ -5,7 +5,7 @@
 (() => {
   if (!window.EmberTV) return;
 
-  const SEL = [".nav", ".btn", ".btn-chip", ".poster", ".t10", ".cw", ".tile", ".epc", ".wk-ep", ".hn", ".stream",
+  const SEL = [".nav", ".btn", ".btn-chip", ".poster", ".t10", ".cw", ".tile", ".epc", ".wk-ep", ".hn", ".stream", ".rv",
     ".apptile", ".tp-dr-x", ".back", "input[type=text]", "input:not([type])", "select", "label.check", "label.toggle",
     ".ep-mark", ".match button", ".tvm-b"].join(",");
   let cur = null;
