@@ -13,3 +13,4 @@ ember-atv/Ember.xcodeproj/
 ember-atv/build/
 ember-atv/Payload/
 ember-atv/*.ipa
+lucapi/ember-feed/client.log

@@ -16,6 +16,7 @@ struct EmberApp: App {
     init() {
         // posters and backdrops: keep plenty on disk so rows come back instantly
         URLCache.shared = URLCache(memoryCapacity: 96 << 20, diskCapacity: 768 << 20)
+        Diag.installCrashHandlers()
         // films and shows: full surround to the TV or soundbar (5.1 / 7.1), not stereo
         let audio = AVAudioSession.sharedInstance()
         try? audio.setCategory(.playback, mode: .moviePlayback)
@@ -61,7 +62,7 @@ struct RootView: View {
                 VStack {
                     Spacer()
                     Text(t)
-                        .font(.callout)
+                        .font(.ember(22))
                         .padding(.horizontal, 28).padding(.vertical, 16)
                         .background(.regularMaterial, in: Capsule())
                         .padding(.bottom, 50)
@@ -76,7 +77,11 @@ struct RootView: View {
         .fullScreenCover(item: $store.playing) { s in
             PlayerScreen(session: s).environmentObject(store)
         }
-        .task { await store.loadHome() }
+        .task {
+            Diag.reportLastRun()
+            Diag.log("app: started, version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            await store.loadHome()
+        }
         .onChange(of: phase) { _, p in
             // back from another app or the screensaver: you may have watched something on the PC meanwhile
             if p == .active, store.homeLoaded, store.playing == nil { store.refreshAfterPlay() }

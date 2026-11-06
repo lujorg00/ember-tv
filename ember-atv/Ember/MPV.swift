@@ -8,6 +8,16 @@ final class MetalLayer: CAMetalLayer {
         get { super.drawableSize }
         set { if Int(newValue.width) > 1 && Int(newValue.height) > 1 { super.drawableSize = newValue } }
     }
+
+    /// HDR: MoltenVK switches the layer to extended range from mpv's drawing thread, but the switch has to happen on
+    /// the main thread (off it, the app is killed). Same fix as MPVKit's iOS demo.
+    override var wantsExtendedDynamicRangeContent: Bool {
+        get { super.wantsExtendedDynamicRangeContent }
+        set {
+            if Thread.isMainThread { super.wantsExtendedDynamicRangeContent = newValue }
+            else { DispatchQueue.main.sync { super.wantsExtendedDynamicRangeContent = newValue } }
+        }
+    }
 }
 
 @MainActor
@@ -35,6 +45,7 @@ final class MPVHostController: UIViewController {
     let core: MPVCore
     var url: URL?
     var start: Double = 0
+    var hdr = false
 
     init(core: MPVCore) {
         self.core = core
@@ -50,7 +61,9 @@ final class MPVHostController: UIViewController {
         metalLayer.framebufferOnly = true
         metalLayer.backgroundColor = UIColor.black.cgColor
         view.layer.addSublayer(metalLayer)
-        core.setup(layer: &metalLayer)
+        Diag.log("mpv: creating (hdr output \(hdr ? "on" : "off"))")
+        core.setup(layer: &metalLayer, hdr: hdr)
+        Diag.log("mpv: ready")
         if let url { core.load(url, start: start) }
     }
 
@@ -71,7 +84,7 @@ final class MPVCore {
         mpv_set_option_string(mpv, name, value)
     }
 
-    func setup(layer: inout MetalLayer) {
+    func setup(layer: inout MetalLayer, hdr: Bool) {
         guard mpv == nil, let m = mpv_create() else { return }
         mpv = m
         mpv_request_log_messages(m, "no")
@@ -84,7 +97,8 @@ final class MPVCore {
         // letterbox bars jet black; HDR passed to the TV as HDR when the Apple TV is outputting HDR, and when it
         // isn't, a tone-mapping that keeps contrast (not the flat, washed-out look)
         opt("background-color", "#000000")
-        opt("target-colorspace-hint", "yes")
+        // only for HDR streams (it can't be changed once playing; SDR ones don't need it)
+        opt("target-colorspace-hint", hdr ? "yes" : "no")
         opt("tone-mapping", "bt.2446a")
         opt("hdr-contrast-recovery", "0.30")
         // English audio and subtitles first, as on the PC; forced subtitles (foreign bits) still show
@@ -111,7 +125,17 @@ final class MPVCore {
     func load(_ url: URL, start: Double) {
         guard let mpv else { return }
         mpv_set_property_string(mpv, "start", start > 1 ? String(Int(start)) : "none")
+        Diag.log("mpv: loading from \(Int(start))s")
         command(["loadfile", url.absoluteString, "replace"])
+    }
+
+    /// Without waiting (subtitles from the internet: a slow download mustn't freeze the app).
+    func commandAsync(_ args: [String]) {
+        guard let mpv else { return }
+        var cargs: [UnsafePointer<CChar>?] = args.map { UnsafePointer(strdup($0)) }
+        cargs.append(nil)
+        defer { for p in cargs { if let p { free(UnsafeMutablePointer(mutating: p)) } } }
+        mpv_command_async(mpv, 0, &cargs)
     }
 
     func command(_ args: [String]) {
@@ -216,6 +240,7 @@ final class MPVCore {
                 case MPV_EVENT_END_FILE:
                     guard let ef = e.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee else { break }
                     let err = ef.reason == MPV_END_FILE_REASON_ERROR
+                    Diag.log("mpv: file ended (\(err ? "error \(ef.error)" : "reason \(ef.reason.rawValue)"))")
                     if err || ef.reason == MPV_END_FILE_REASON_EOF {
                         Task { @MainActor in self.events?.mpvEnded(error: err) }
                     }

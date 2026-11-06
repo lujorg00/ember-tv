@@ -91,14 +91,14 @@ struct TileCard: View {
             Image("award-\(a.art)").resizable().scaledToFit().frame(height: TileCard.size.height * a.scale).opacity(0.9)
                 .overlay {
                     if a.art == "tomato" {
-                        Text("100%").font(.system(size: 22, weight: .heavy)).foregroundStyle(Color(red: 0.55, green: 0.06, blue: 0.03).opacity(0.85))
+                        Text("100%").font(.ember(22, .heavy)).foregroundStyle(Color(red: 0.55, green: 0.06, blue: 0.03).opacity(0.85))
                             .offset(y: 8)
                     }
                 }
             VStack {
-                Text(a.small).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.78)).padding(.top, 12)
+                Text(a.small).font(.ember(13, .medium)).foregroundStyle(.white.opacity(0.78)).padding(.top, 12)
                 Spacer()
-                Text(a.big).font(.system(size: a.big.count > 9 ? 24 : 34, weight: .light)).tracking(a.big.count > 9 ? 3 : 5)
+                Text(a.big).font(.ember(a.big.count > 9 ? 24 : 34, .light)).tracking(a.big.count > 9 ? 3 : 5)
                     .foregroundStyle(.white).shadow(color: .black.opacity(0.6), radius: 8).lineLimit(1).minimumScaleFactor(0.6).padding(.bottom, 14)
             }
         }
@@ -117,7 +117,7 @@ struct TileCard: View {
                         else { name(30) }
                     }
                 } else { name(30) }
-                if let sub = b.sub { Text(sub).font(.system(size: 15, weight: .semibold)).tracking(4).foregroundStyle(.white.opacity(0.9)) }
+                if let sub = b.sub { Text(sub).font(.ember(15, .semibold)).tracking(4).foregroundStyle(.white.opacity(0.9)) }
             }
             .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
         }
@@ -133,9 +133,7 @@ struct TileCard: View {
 
     private var person: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: tile.image) { ph in
-                if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-            }
+            RemoteImage(url: tile.image) { Theme.card }
             .frame(width: TileCard.size.width, height: TileCard.size.height)
             .clipped()
             LinearGradient(colors: [.black.opacity(0.85), .clear], startPoint: .bottom, endPoint: .center)
@@ -145,13 +143,11 @@ struct TileCard: View {
 
     private var bond: some View {
         ZStack {
-            AsyncImage(url: tile.image) { ph in
-                if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-            }
+            RemoteImage(url: tile.image) { Theme.card }
             Color.black.opacity(0.55)
             VStack(spacing: 2) {
-                Text("007").font(.system(size: 56, weight: .heavy)).tracking(2)
-                Text("JAMES BOND").font(.system(size: 14, weight: .medium)).tracking(7).foregroundStyle(Color(red: 0.91, green: 0.86, blue: 0.8))
+                Text("007").font(.ember(56, .heavy)).tracking(2)
+                Text("JAMES BOND").font(.ember(14, .medium)).tracking(7).foregroundStyle(Color(red: 0.91, green: 0.86, blue: 0.8))
             }
             .shadow(color: .black, radius: 14)
         }
@@ -171,9 +167,7 @@ struct TileCard: View {
 
     private var art: some View {
         ZStack {
-            AsyncImage(url: tile.image) { ph in
-                if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-            }
+            RemoteImage(url: tile.image) { Theme.card }
             .frame(width: TileCard.size.width, height: TileCard.size.height)
             .clipped()
             LinearGradient(colors: [Theme.bg.opacity(tile.logo == nil ? 0.3 : 0.55), Theme.bg.opacity(0.85)], startPoint: .top, endPoint: .bottom)
@@ -194,7 +188,7 @@ struct TileCard: View {
     }
 
     private func name(_ size: CGFloat) -> some View {
-        Text(tile.title.uppercased()).font(.system(size: size, weight: .bold)).tracking(0.5).multilineTextAlignment(.center)
+        Text(tile.title.uppercased()).font(.ember(size, .bold)).tracking(0.5).multilineTextAlignment(.center)
             .foregroundStyle(.white).shadow(color: .black.opacity(0.8), radius: 10).padding(.horizontal, 12).lineLimit(2).minimumScaleFactor(0.6)
     }
 }
@@ -223,7 +217,7 @@ struct TilePage: View {
                     Backdrop(url: tile.style == "person" ? nil : tile.image, height: 420, kenBurns: true)
                     LinearGradient(colors: [Theme.bg, Theme.bg.opacity(0.3)], startPoint: .bottom, endPoint: .top)
                     VStack(alignment: .leading, spacing: 22) {
-                        Text(tile.title).font(.system(size: 64, weight: .bold)).shadow(color: .black.opacity(0.6), radius: 16)
+                        Text(tile.title).font(.ember(64, .bold)).shadow(color: .black.opacity(0.6), radius: 16)
                         HStack(spacing: 18) {
                             if both {
                                 chip("Films", on: typ == "movie") { typ = "movie"; reload() }
@@ -266,7 +260,7 @@ struct TilePage: View {
 
     private func chip(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(label).font(.system(size: 22, weight: on ? .bold : .medium))
+            Text(label).font(.ember(22, on ? .bold : .medium))
                 .foregroundStyle(on ? Theme.ink : .white)
                 .padding(.horizontal, 6)
         }

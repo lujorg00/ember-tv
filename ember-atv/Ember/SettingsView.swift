@@ -9,9 +9,9 @@ struct SettingsView: View {
             HStack(alignment: .top, spacing: 80) {
                 VStack(spacing: 24) {
                     Flame().frame(width: 120, height: 155)
-                    Text("Ember").font(.system(size: 60, weight: .bold)).foregroundStyle(Theme.accent)
+                    Text("Ember").font(.ember(60, .bold)).foregroundStyle(Theme.accent)
                     Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-                        .font(.caption).foregroundStyle(Theme.muted)
+                        .font(.ember(19)).foregroundStyle(Theme.muted)
                 }
                 .frame(width: 520)
                 .padding(.top, 60)
@@ -33,7 +33,7 @@ struct SettingsView: View {
                                 .foregroundStyle(store.aio.isEmpty ? .yellow : Theme.accent)
                         }
                         if store.aio.isEmpty {
-                            Text("Open Ember PC once: it shares the link with your TVs through lucapi.").font(.caption).foregroundStyle(Theme.muted)
+                            Text("Open Ember PC once: it shares the link with your TVs through lucapi.").font(.ember(19)).foregroundStyle(Theme.muted)
                         }
                     }
                     Section {

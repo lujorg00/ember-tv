@@ -13,10 +13,10 @@ struct LoadingView: View {
             VStack(spacing: 30) {
                 AsyncImage(url: state.logo) { ph in
                     if let img = ph.image { img.resizable().scaledToFit().frame(maxWidth: 620, maxHeight: 200) }
-                    else { Text(state.title).font(.system(size: 64, weight: .bold)) }
+                    else { Text(state.title).font(.ember(64, .bold)) }
                 }
                 .frame(maxHeight: 200)
-                if !state.sub.isEmpty { Text(state.sub).font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.accent) }
+                if !state.sub.isEmpty { Text(state.sub).font(.ember(24, .medium)).foregroundStyle(Theme.accent) }
                 Flame().frame(width: 70, height: 90).scaleEffect(pulse ? 1.06 : 0.94)
                     .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
                 VStack(alignment: .leading, spacing: 16) {
@@ -26,11 +26,11 @@ struct LoadingView: View {
                                 .strokeBorder(Theme.accent, lineWidth: 3)
                                 .background(Circle().fill(i < state.step ? Theme.accent : .clear))
                                 .frame(width: 22, height: 22)
-                            Text(state.steps[i]).font(.system(size: 24, weight: i == state.step ? .semibold : .regular))
+                            Text(state.steps[i]).font(.ember(24, i == state.step ? .semibold : .regular))
                                 .foregroundStyle(i <= state.step ? .white : .white.opacity(0.5))
                             if i == state.step && i == state.steps.count - 1 {
                                 ForEach(state.badges, id: \.self) { b in
-                                    Text(b).font(.system(size: 19, weight: .bold)).padding(.horizontal, 10).padding(.vertical, 4)
+                                    Text(b).font(.ember(19, .bold)).padding(.horizontal, 10).padding(.vertical, 4)
                                         .background(Theme.accent.opacity(0.85), in: RoundedRectangle(cornerRadius: 6)).foregroundStyle(Theme.ink)
                                 }
                             }
@@ -38,7 +38,7 @@ struct LoadingView: View {
                     }
                 }
                 if !state.note.isEmpty {
-                    Text(state.note).font(.system(size: 20)).foregroundStyle(.white.opacity(0.75)).lineLimit(1).frame(maxWidth: 1100)
+                    Text(state.note).font(.ember(20)).foregroundStyle(.white.opacity(0.75)).lineLimit(1).frame(maxWidth: 1100)
                 }
             }
         }

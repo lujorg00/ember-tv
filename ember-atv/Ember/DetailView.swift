@@ -65,11 +65,11 @@ struct DetailView: View {
                         Text(mm.metaLine).foregroundStyle(.white.opacity(0.75))
                         if let line = store.release[mm.id]?.line { Text(line).foregroundStyle(Theme.accent) }
                     }
-                    .font(.system(size: 21, weight: .medium))
+                    .font(.ember(21, .medium))
                     if let p = store.progress[mm.id] {
-                        Text(p.line).font(.system(size: 21, weight: .semibold)).foregroundStyle(Theme.accent)
+                        Text(p.line).font(.ember(21, .semibold)).foregroundStyle(Theme.accent)
                     }
-                    Text(mm.description).font(.system(size: 22)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
+                    Text(mm.description).font(.ember(22)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
                         .frame(maxWidth: 860, alignment: .leading)
                     HStack(spacing: 20) {
                         Button { play() } label: { Label(playLabel, systemImage: "play.fill") }
@@ -96,7 +96,7 @@ struct DetailView: View {
                         }
                     }
                     .padding(.top, 14)
-                    Text(caption).font(.system(size: 19)).foregroundStyle(Theme.muted).animation(nil, value: btn)
+                    Text(caption).font(.ember(19)).foregroundStyle(Theme.muted).animation(nil, value: btn)
                     if mm.isSeries && !mm.videos.isEmpty { episodesSection }
                 }
                 .padding(.horizontal, 90)
@@ -141,7 +141,7 @@ struct DetailView: View {
                         Button { season = s } label: { Text("Season \(s)") }
                             .buttonStyle(TabTextStyle(selected: s == season))
                     }
-                    Text("\(episodes.count) episodes").font(.system(size: 19)).foregroundStyle(Theme.muted).padding(.leading, 20).padding(.bottom, 12)
+                    Text("\(episodes.count) episodes").font(.ember(19)).foregroundStyle(Theme.muted).padding(.leading, 20).padding(.bottom, 12)
                 }
                 .padding(.vertical, 14)
             }
@@ -165,9 +165,7 @@ struct DetailView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Button { playEpisode(v) } label: {
                 ZStack(alignment: .bottomLeading) {
-                    AsyncImage(url: v.thumbnail ?? mm.backdropURL) { ph in
-                        if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-                    }
+                    RemoteImage(url: v.thumbnail ?? mm.backdropURL) { Theme.card }
                     .frame(width: 320, height: 180)
                     .clipped()
                     if sp?.finished == true {
@@ -176,7 +174,7 @@ struct DetailView: View {
                         ProgressBar(fraction: sp.percent / 100).padding(10)
                     }
                     if !v.aired {
-                        Text("Not out yet").font(.system(size: 16, weight: .bold)).padding(.horizontal, 10).padding(.vertical, 5)
+                        Text("Not out yet").font(.ember(16, .bold)).padding(.horizontal, 10).padding(.vertical, 5)
                             .background(.black.opacity(0.65), in: Capsule()).padding(10)
                     }
                 }
@@ -193,12 +191,12 @@ struct DetailView: View {
                 }
             }
             HStack(spacing: 8) {
-                Text("\(v.episode)").font(.system(size: 19, weight: .bold)).foregroundStyle(isCurrent ? Theme.accent : Theme.muted)
-                Text(v.title).font(.system(size: 20, weight: .semibold)).lineLimit(1)
+                Text("\(v.episode)").font(.ember(19, .bold)).foregroundStyle(isCurrent ? Theme.accent : Theme.muted)
+                Text(v.title).font(.ember(20, .semibold)).lineLimit(1)
             }
             .frame(width: 320, alignment: .leading)
             if let d = v.released {
-                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.system(size: 17)).foregroundStyle(Theme.muted)
+                Text(d.formatted(date: .abbreviated, time: .omitted)).font(.ember(17)).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -261,7 +259,7 @@ struct StreamPicker: View {
     let pick: (Ranked) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Choose stream").font(.system(size: 40, weight: .bold))
+            Text("Choose stream").font(.ember(40, .bold))
             if let streams {
                 if streams.isEmpty { Text("No streams found.").foregroundStyle(Theme.muted) }
                 ScrollView {
@@ -272,13 +270,13 @@ struct StreamPicker: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack(spacing: 8) {
                                         ForEach(r.badges, id: \.self) { b in
-                                            Text(b).font(.system(size: 17, weight: .bold)).padding(.horizontal, 9).padding(.vertical, 3)
+                                            Text(b).font(.ember(17, .bold)).padding(.horizontal, 9).padding(.vertical, 3)
                                                 .background(Theme.accent.opacity(0.85), in: RoundedRectangle(cornerRadius: 6)).foregroundStyle(Theme.ink)
                                         }
-                                        if let mb = r.mbps { Text("\(Int(mb)) Mbit/s").font(.system(size: 17)).foregroundStyle(Theme.muted) }
-                                        if !r.ok { Text("failed speed test").font(.system(size: 17)).foregroundStyle(.red.opacity(0.8)) }
+                                        if let mb = r.mbps { Text("\(Int(mb)) Mbit/s").font(.ember(17)).foregroundStyle(Theme.muted) }
+                                        if !r.ok { Text("failed speed test").font(.ember(17)).foregroundStyle(.red.opacity(0.8)) }
                                     }
-                                    Text(r.label).font(.system(size: 21)).lineLimit(2)
+                                    Text(r.label).font(.ember(21)).lineLimit(2)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 6)

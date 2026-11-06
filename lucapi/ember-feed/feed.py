@@ -2565,6 +2565,27 @@ def trailer_play(typ, imdb):
         return {"yt": yt, "url": "", "error": str(e)}
 
 
+CLIENT_LOG = HERE / "client.log"
+
+
+def client_log_add(body):
+    """What the apps were doing (Ember for Apple TV sends its steps and any crash here), for working out what went wrong."""
+    dev = str(body.get("device", "?"))[:30]
+    lines = [str(x)[:2000] for x in (body.get("lines") or [])][:400]
+    if not lines:
+        return {"ok": True}
+    stamp = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+    with _db_lock:
+        old = CLIENT_LOG.read_text(errors="replace").splitlines()[-3000:] if CLIENT_LOG.exists() else []
+        CLIENT_LOG.write_text("\n".join(old + [f"{stamp} [{dev}] {l}" for l in lines]) + "\n")
+    return {"ok": True}
+
+
+def client_log():
+    lines = CLIENT_LOG.read_text(errors="replace").splitlines()[-400:] if CLIENT_LOG.exists() else []
+    return {"lines": lines}
+
+
 def in_cinemas():
     """Films showing in UK cinemas now (TMDB 'now playing', GB): {"items": [imdb, ...]}. Refreshed every 6 hours."""
     def build():
@@ -2681,6 +2702,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(shared_settings(body))
             elif path == "/progress/watched":
                 self._json(mark_watched(body))
+            elif path == "/client/log":
+                self._json(client_log_add(body))
             elif path == "/pick/failed":
                 self._json(stream_failed(body))
             elif path == "/match/new":
@@ -2755,6 +2778,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(in_cinemas())
             elif path == "/watched":
                 self._json(watched_status())
+            elif path == "/client/log":
+                self._json(client_log())
             elif path == "/progress/dismissed":
                 self._json({"dismissed": _dismissed()})
             elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):

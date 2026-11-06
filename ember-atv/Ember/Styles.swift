@@ -22,7 +22,7 @@ private struct EmberButtonBody<L: View>: View {
 
     var body: some View {
         label
-            .font(.system(size: 22, weight: .semibold))
+            .font(.ember(22, .semibold))
             .labelStyle(.titleAndIcon)
             .foregroundStyle(ink)
             .padding(.horizontal, round ? 0 : 28)
@@ -48,7 +48,7 @@ private struct TabTextBody<L: View>: View {
     var body: some View {
         VStack(spacing: 8) {
             label
-                .font(.system(size: 24, weight: selected ? .bold : .medium))
+                .font(.ember(24, selected ? .bold : .medium))
                 .foregroundStyle(focused ? Theme.ink : selected ? .white : Theme.muted)
                 .padding(.horizontal, 18).padding(.vertical, 8)
                 .background(Capsule().fill(focused ? .white : .clear))

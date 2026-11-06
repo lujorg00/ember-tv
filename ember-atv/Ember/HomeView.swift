@@ -55,8 +55,8 @@ struct HeroView: View {
                 .transition(.opacity)
             if let pageName {
                 // the page's name, big and faint at the top, blending into the picture (as on Ember PC)
-                Text(pageName).font(.system(size: 120, weight: .heavy)).foregroundStyle(.white.opacity(0.10))
-                    .padding(.leading, 80).padding(.top, 40)
+                Text(pageName).font(.ember(120, .heavy)).foregroundStyle(.white.opacity(0.10))
+                    .padding(.leading, 80).padding(.top, 150)   // below the tab bar
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .allowsHitTesting(false)
             }
@@ -65,11 +65,11 @@ struct HeroView: View {
             VStack(alignment: .leading, spacing: 20) {
                 TitleArt(meta: m, height: 160, width: 620)
                 if let p = store.progress[m.id] {
-                    Text(p.line).font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.accent)
+                    Text(p.line).font(.ember(24, .medium)).foregroundStyle(Theme.accent)
                 } else {
-                    Text(m.metaLine).font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.accent)
+                    Text(m.metaLine).font(.ember(24, .medium)).foregroundStyle(Theme.accent)
                 }
-                Text(m.description).font(.system(size: 24)).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 900, alignment: .leading)
+                Text(m.description).font(.ember(24)).foregroundStyle(.white.opacity(0.9)).lineLimit(3).frame(maxWidth: 900, alignment: .leading)
                 HStack(spacing: 24) {
                     Button {
                         play()
@@ -142,9 +142,7 @@ struct Backdrop: View {
             .frame(maxWidth: .infinity, maxHeight: height == nil ? .infinity : nil)
             .frame(height: height)
             .overlay {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeIn(duration: 0.8))) { ph in
-                    if let img = ph.image { img.resizable().scaledToFill() } else { Color.clear }
-                }
+                RemoteImage(url: url) { Color.clear }
                 .scaleEffect(zoom ? 1.08 : 1.0, anchor: .topTrailing)
             }
             .clipped()
@@ -161,18 +159,16 @@ struct WeekPanel: View {
     let eps: [Upcoming]
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("NEW THIS WEEK").font(.system(size: 15, weight: .bold)).tracking(1.4).foregroundStyle(Theme.muted).padding(.leading, 8)
+            Text("NEW THIS WEEK").font(.ember(15, .bold)).tracking(1.4).foregroundStyle(Theme.muted).padding(.leading, 8)
             ForEach(eps.prefix(4)) { e in
                 NavigationLink(value: Meta(["id": e.imdb, "type": "series", "name": e.show])) {
                     HStack(spacing: 14) {
-                        AsyncImage(url: URL(string: "https://images.metahub.space/background/small/\(e.imdb)/img")) { ph in
-                            if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-                        }
+                        RemoteImage(url: URL(string: "https://images.metahub.space/background/small/\(e.imdb)/img")) { Theme.card }
                         .frame(width: 84, height: 47)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(e.show).font(.system(size: 20, weight: .semibold)).lineLimit(1)
-                            Text("\(e.when) · S\(e.season) E\(e.episode)").font(.system(size: 17))
+                            Text(e.show).font(.ember(20, .semibold)).lineLimit(1)
+                            Text("\(e.when) · S\(e.season) E\(e.episode)").font(.ember(17))
                                 .foregroundStyle(e.out ? Theme.accent : Theme.muted).lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -182,7 +178,7 @@ struct WeekPanel: View {
                 .buttonStyle(.plain)
             }
             if eps.count > 4 {
-                Text("and \(eps.count - 4) more").font(.system(size: 15)).foregroundStyle(Theme.muted).padding(.leading, 8)
+                Text("and \(eps.count - 4) more").font(.ember(15)).foregroundStyle(Theme.muted).padding(.leading, 8)
             }
         }
         .padding(14)
@@ -203,7 +199,7 @@ struct TitleArt: View {
                 img.resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
             } else {
-                Text(meta.name).font(.system(size: 60, weight: .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
+                Text(meta.name).font(.ember(60, .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
             }
         }
@@ -219,9 +215,9 @@ struct RowHeader: View {
     var count: Int? = nil
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(title).font(.system(size: 34, weight: .bold))
-            if let kind { Text(kind).font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.accent) }
-            if let count { Text("\(count)").font(.system(size: 20)).foregroundStyle(Theme.muted) }
+            Text(title).font(.ember(34, .bold))
+            if let kind { Text(kind).font(.ember(24, .semibold)).foregroundStyle(Theme.accent) }
+            if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }
         .padding(.leading, 90)
     }
@@ -245,21 +241,38 @@ struct PosterRow: View {
     }
 }
 
-/// Top 10: big rank numbers beside the posters.
+/// Top 10, as on Ember PC: big outlined orange numbers, each beside a wide picture with the title on it.
 struct TopRow: View {
+    @EnvironmentObject var store: Store
     let row: RowData
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             RowHeader(title: row.title, kind: row.kind)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 30) {
+                LazyHStack(alignment: .bottom, spacing: 34) {
                     ForEach(0..<min(10, row.metas.count), id: \.self) { i in
-                        HStack(alignment: .bottom, spacing: -18) {
-                            Text("\(i + 1)")
-                                .font(.system(size: 150, weight: .heavy, design: .rounded))
-                                .foregroundStyle(LinearGradient(colors: [Theme.accent, Theme.accent.opacity(0.35)], startPoint: .top, endPoint: .bottom))
-                                .offset(y: 20)
-                            PosterCard(meta: row.metas[i])
+                        let m = row.metas[i]
+                        HStack(alignment: .bottom, spacing: -6) {
+                            OutlinedText(text: "\(i + 1)", size: 190).offset(y: 6)
+                            NavigationLink(value: m) {
+                                ZStack(alignment: .bottomLeading) {
+                                    RemoteImage(url: m.backdropURL) { Theme.card }
+                                        .frame(width: 400, height: 225)
+                                        .clipped()
+                                    LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+                                    Text(m.name).font(.ember(24, .bold)).lineLimit(2)
+                                        .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
+                                    WatchBadge(state: store.watched[m.id]).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                }
+                                .frame(width: 400, height: 225)
+                            }
+                            .buttonStyle(.card)
+                            .onAppear { store.wantRelease(m) }
+                            .contextMenu {
+                                Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
+                                    Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
+                                }
+                            }
                         }
                     }
                 }
@@ -281,15 +294,14 @@ struct PosterCard: View {
     var body: some View {
         NavigationLink(value: meta) {
             ZStack(alignment: .topTrailing) {
-                AsyncImage(url: meta.posterURL) { ph in
-                    if let img = ph.image { img.resizable().scaledToFill() }
-                    else { ZStack { Theme.card; Text(meta.name).font(.system(size: 20)).multilineTextAlignment(.center).padding() } }
+                RemoteImage(url: meta.posterURL) {
+                    ZStack { Theme.card; Text(meta.name).font(.ember(20)).multilineTextAlignment(.center).padding() }
                 }
                 .frame(width: width, height: width * 1.5)
                 .clipped()
                 WatchBadge(state: store.watched[meta.id])
                 if let label = store.release[meta.id]?.label {
-                    Text(label).font(.system(size: 15, weight: .bold))
+                    Text(label).font(.ember(15, .bold))
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background((store.release[meta.id]?.s == "cinema" ? Theme.accent : Color.black.opacity(0.7)), in: Capsule())
                         .foregroundStyle(store.release[meta.id]?.s == "cinema" ? Theme.ink : .white)
@@ -318,10 +330,10 @@ struct WatchBadge: View {
     let state: String?
     var body: some View {
         if state == "done" {
-            Image(systemName: "checkmark").font(.system(size: 18, weight: .heavy)).foregroundStyle(Theme.accent)
+            Image(systemName: "checkmark").font(.ember(18, .heavy)).foregroundStyle(Theme.accent)
                 .frame(width: 38, height: 38).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10)).padding(10)
         } else if state == "partial" {
-            Image(systemName: "circle.lefthalf.filled").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.accent)
+            Image(systemName: "circle.lefthalf.filled").font(.ember(18, .bold)).foregroundStyle(Theme.accent)
                 .frame(width: 38, height: 38).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10)).padding(10)
         }
     }
@@ -354,14 +366,12 @@ struct ContinueRow: View {
                         VStack(alignment: .leading, spacing: 14) {
                             NavigationLink(value: it.meta) {
                                 ZStack(alignment: .bottomLeading) {
-                                    AsyncImage(url: it.art) { ph in
-                                        if let img = ph.image { img.resizable().scaledToFill() } else { Theme.card }
-                                    }
+                                    RemoteImage(url: it.art) { Theme.card }
                                     .frame(width: 430, height: 242)
                                     .clipped()
                                     LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .bottom, endPoint: .center)
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(it.label).font(.system(size: 24, weight: .bold))
+                                        Text(it.label).font(.ember(24, .bold))
                                         if let p = it.percent { ProgressBar(fraction: p / 100) }
                                     }
                                     .padding(18)
@@ -372,7 +382,7 @@ struct ContinueRow: View {
                             .contextMenu {
                                 Button("Remove from Continue watching", role: .destructive) { store.dismiss(it.id) }
                             }
-                            Text(it.meta.name).font(.system(size: 24, weight: .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)
+                            Text(it.meta.name).font(.ember(24, .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)
                         }
                     }
                 }

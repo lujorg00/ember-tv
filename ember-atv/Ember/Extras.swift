@@ -17,8 +17,8 @@ struct MatchView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 34) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("What shall we watch?").font(.system(size: 52, weight: .bold))
-                        Text("Everyone swipes on their phone. Anything you all like appears here.").font(.system(size: 22)).foregroundStyle(Theme.muted)
+                        Text("What shall we watch?").font(.ember(52, .bold))
+                        Text("Everyone swipes on their phone. Anything you all like appears here.").font(.ember(22)).foregroundStyle(Theme.muted)
                     }
                     HStack(alignment: .top, spacing: 60) {
                         VStack(spacing: 18) {
@@ -31,9 +31,9 @@ struct MatchView: View {
                                 .frame(width: 300, height: 300)
                                 .padding(14)
                                 .background(.white, in: RoundedRectangle(cornerRadius: 22))
-                                Text(code).font(.system(size: 54, weight: .heavy, design: .monospaced)).tracking(10).foregroundStyle(Theme.accent)
+                                Text(code).font(.ember(54, .bold)).tracking(10).foregroundStyle(Theme.accent)
                                 Text("Scan with your phone's camera, or go to\n\(API.feed.replacingOccurrences(of: "http://", with: ""))/m/\(code)")
-                                    .font(.system(size: 19)).multilineTextAlignment(.center).foregroundStyle(Theme.muted)
+                                    .font(.ember(19)).multilineTextAlignment(.center).foregroundStyle(Theme.muted)
                             }
                             Button { Task { await start() } } label: { Label("New deck", systemImage: "shuffle") }
                                 .buttonStyle(EmberButtonStyle())
@@ -43,11 +43,11 @@ struct MatchView: View {
                             HStack(spacing: 12) {
                                 if people.isEmpty { Text("Waiting for people to join…").foregroundStyle(Theme.muted) }
                                 ForEach(people.indices, id: \.self) { i in
-                                    Text("\(people[i].0) · \(people[i].1)/\(deck)").font(.system(size: 19, weight: .semibold))
+                                    Text("\(people[i].0) · \(people[i].1)/\(deck)").font(.ember(19, .semibold))
                                         .padding(.horizontal, 14).padding(.vertical, 6).background(Theme.card, in: Capsule())
                                 }
                             }
-                            Text("Matches").font(.system(size: 30, weight: .bold))
+                            Text("Matches").font(.ember(30, .bold))
                             if matches.isEmpty {
                                 Text(people.count < 2 ? "None yet. Needs at least two people." : "None yet.").foregroundStyle(Theme.muted)
                             } else {
@@ -109,7 +109,7 @@ struct YearView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 36) {
                     HStack(alignment: .firstTextBaseline, spacing: 30) {
-                        Text("Your \(String(year)) in watching").font(.system(size: 52, weight: .bold))
+                        Text("Your \(String(year)) in watching").font(.ember(52, .bold))
                         let now = Calendar.current.component(.year, from: Date())
                         ForEach([now - 1, now], id: \.self) { y in
                             Button { year = y } label: { Text(String(y)) }.buttonStyle(TabTextStyle(selected: y == year))
@@ -149,7 +149,7 @@ struct YearView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(LinearGradient(colors: [Theme.accent, Theme.accent.opacity(0.45)], startPoint: .top, endPoint: .bottom))
                                 .frame(width: 34, height: max(4, 200 * months[i] / top))
-                            Text(String("JFMAMJJASOND".map(String.init)[i])).font(.system(size: 17)).foregroundStyle(Theme.muted)
+                            Text(String("JFMAMJJASOND".map(String.init)[i])).font(.ember(17)).foregroundStyle(Theme.muted)
                         }
                     }
                 }
@@ -168,7 +168,7 @@ struct YearView: View {
                         Text("You couldn't stop rewatching **\(r.str("title") ?? "")** (\(r.int("plays") ?? 0) times).")
                     }
                 }
-                .font(.system(size: 22))
+                .font(.ember(22))
                 .frame(maxWidth: 520, alignment: .leading)
             }
         }
@@ -182,8 +182,8 @@ struct YearView: View {
     private func big(_ n: Int, _ label: String) -> some View { bigText(n.formatted(), label) }
     private func bigText(_ n: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(n).font(.system(size: 64, weight: .heavy, design: .rounded)).foregroundStyle(Theme.accent)
-            Text(label).font(.system(size: 20)).foregroundStyle(Theme.muted)
+            Text(n).font(.ember(64, .heavy)).foregroundStyle(Theme.accent)
+            Text(label).font(.ember(20)).foregroundStyle(Theme.muted)
         }
         .padding(28)
         .frame(width: 400, alignment: .leading)
@@ -192,7 +192,7 @@ struct YearView: View {
 
     private func card<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(.system(size: 26, weight: .bold))
+            Text(title).font(.ember(26, .bold))
             c()
         }
         .padding(28)
@@ -206,10 +206,10 @@ struct YearView: View {
                 let x = items[i]
                 NavigationLink(value: Meta(["id": x.str("imdb") ?? "", "type": type, "name": x.str("title") ?? ""])) {
                     HStack(spacing: 14) {
-                        Text("\(i + 1)").font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.accent).frame(width: 30, alignment: .trailing)
-                        Text(x.str("title") ?? "").font(.system(size: 21, weight: .semibold)).lineLimit(1)
+                        Text("\(i + 1)").font(.ember(20, .bold)).foregroundStyle(Theme.accent).frame(width: 30, alignment: .trailing)
+                        Text(x.str("title") ?? "").font(.ember(21, .semibold)).lineLimit(1)
                         Spacer(minLength: 10)
-                        Text(detail(x)).font(.system(size: 18)).foregroundStyle(Theme.muted)
+                        Text(detail(x)).font(.ember(18)).foregroundStyle(Theme.muted)
                     }
                     .padding(.vertical, 6).padding(.horizontal, 10)
                 }

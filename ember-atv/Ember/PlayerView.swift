@@ -35,6 +35,8 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     func begin(_ s: PlaySession, store: Store) {
         guard session == nil else { return }
+        Diag.log("player: \(s.title) · stream \(s.n + 1) of \(s.ranked.count) · \(s.stream.badges.joined(separator: " ")) · \(s.stream.label)")
+        Diag.startedPlaying(s.title)
         session = s
         self.store = store
         core.events = self
@@ -71,6 +73,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     }
     func mpvStarted() {
         if !started {
+            Diag.log("playing: \(core.int("video-params/w"))x\(core.int("video-params/h")) \(core.string("video-params/gamma") ?? "?") \(String(format: "%.3f", core.double("container-fps")))fps \(core.string("audio-codec-name") ?? "") \(core.string("audio-params/channel-count") ?? "")ch")
             tracks = core.tracks()
             matchDisplay()
             setupTracks()
@@ -186,9 +189,11 @@ final class PlayerModel: ObservableObject, MPVEvents {
             Task {
                 guard let j = try? await API.get("https://opensubtitles-v3.strem.io/subtitles/\(type)/\(id).json", timeout: 12) else { return }
                 let eng = j.arr("subtitles").filter { ["eng", "en"].contains(($0.str("lang") ?? "").lowercased()) }.compactMap { $0.str("url") }
+                Diag.log("subs: adding \(min(3, eng.count)) from OpenSubtitles")
                 for (i, u) in eng.prefix(3).enumerated() {
-                    core.command(["sub-add", u, i == 0 && wantNow ? "select" : "auto", "OpenSubtitles \(i + 1)", "eng"])
+                    core.commandAsync(["sub-add", u, i == 0 && wantNow ? "select" : "auto", "OpenSubtitles \(i + 1)", "eng"])
                 }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 refreshTracks()
             }
         }
@@ -202,7 +207,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     }
 
     private func matchDisplay() {
-        guard let dm = displayManager, dm.isDisplayCriteriaMatchingEnabled else { return }
+        guard let dm = displayManager, dm.isDisplayCriteriaMatchingEnabled else { Diag.log("tv mode: Match Content is off"); return }
         let gamma = core.string("video-params/gamma") ?? ""
         let w = core.int("video-params/w"), h = core.int("video-params/h")
         let fps = core.double("container-fps")
@@ -220,6 +225,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCMVideoCodecType_HEVC,
                                        width: Int32(w), height: Int32(h), extensions: ext as CFDictionary, formatDescriptionOut: &fd)
         guard let fd else { return }
+        Diag.log("tv mode: asking for \(String(format: "%.3f", fps))Hz \(hdr ? gamma : "SDR")")
         dm.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(fps), formatDescription: fd)
         // hold playback while the TV changes mode, so nothing is missed in the blank second or two
         switching = true
@@ -247,12 +253,15 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     private func fail(_ why: String) {
         guard !done else { return }
+        Diag.log("player: stream \(why)")
         if started && pos > 60 { report("stopped") }
         finish(.failed(why, started ? pos : (session?.start ?? 0)))
     }
 
     private func finish(_ how: PlayEnd) {
         done = true
+        Diag.log("player: closing (\(how))")
+        Diag.stoppedPlaying()
         if case .next = how {} else { resetDisplay() }   // straight into the next episode: stay in this mode
         ticker?.cancel()
         for o in observers { NotificationCenter.default.removeObserver(o) }
@@ -278,10 +287,12 @@ struct MPVView: UIViewControllerRepresentable {
     let model: PlayerModel
     let url: URL
     let start: Double
+    var hdr = false
     func makeUIViewController(context: Context) -> MPVHostController {
         let c = MPVHostController(core: model.core)
         c.url = url
         c.start = start
+        c.hdr = hdr
         return c
     }
     func updateUIViewController(_ c: MPVHostController, context: Context) {}
@@ -306,7 +317,9 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let url = URL(string: session.stream.url) {
-                MPVView(model: model, url: url, start: session.start).ignoresSafeArea()
+                // HDR output only for streams named HDR / Dolby Vision (and only if the TV can show HDR)
+                MPVView(model: model, url: url, start: session.start,
+                        hdr: session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
             }
             if model.buffering { ProgressView().scaleEffect(1.8).tint(.white) }
 
@@ -375,7 +388,7 @@ struct PlayerScreen: View {
             LinearGradient(colors: [.black.opacity(0.7), .clear], startPoint: .top, endPoint: .bottom)
                 .frame(height: 220)
                 .overlay(alignment: .topLeading) {
-                    Text(model.title).font(.title3.weight(.semibold)).padding(.leading, 90).padding(.top, 60)
+                    Text(model.title).font(.ember(30, .semibold)).padding(.leading, 90).padding(.top, 60)
                 }
             Spacer()
             VStack(alignment: .leading, spacing: 26) {
@@ -417,9 +430,9 @@ struct PlayerScreen: View {
             HStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Next episode in \(model.countdown)").font(.headline)
+                    Text("Next episode in \(model.countdown)").font(.ember(26, .semibold))
                     if let n = session.next {
-                        Text("S\(n.season) E\(n.episode)\(n.title.isEmpty ? "" : " · " + n.title)").font(.callout).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text("S\(n.season) E\(n.episode)\(n.title.isEmpty ? "" : " · " + n.title)").font(.ember(22)).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     HStack(spacing: 20) {
                         Button { model.playNext() } label: { Label("Play now", systemImage: "play.fill") }
@@ -463,7 +476,7 @@ struct Timeline: View {
                 Spacer()
                 Text("-" + clock(max(0, model.dur - model.pos)))
             }
-            .font(.callout.monospacedDigit())
+            .font(.ember(22).monospacedDigit())
             .foregroundStyle(.white.opacity(0.9))
         }
         .animation(.easeOut(duration: 0.15), value: focused)
