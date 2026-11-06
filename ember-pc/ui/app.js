@@ -931,6 +931,15 @@ function aioCatalogs() {
     .then(m => (m.catalogs || []).filter(c => !(c.extra || []).some(x => x.isRequired)).map(c => ({ ...c, aio: true }))).catch(() => []);
   return aioCatalogsP;
 }
+/** One score, small: IMDb 7.8, the tomato and 92%, Metacritic's coloured square, TMDB, Trakt. */
+function scoreChip(r) {
+  const v = esc(String(r.value || ""));
+  if (r.src === "imdb") return `<span class="sc" title="IMDb"><img class="sc-imdb" src="brands/imdb.svg" alt="IMDb">${v}</span>`;
+  if (r.src === "rt") { const n = parseInt(r.value, 10); return `<span class="sc" title="Rotten Tomatoes (critics)"><img class="sc-rt${n < 60 ? " rotten" : ""}" src="awards/tomato.svg" alt="Rotten Tomatoes">${v}</span>`; }
+  if (r.src === "mc") { const n = parseInt(r.value, 10); return `<span class="sc" title="Metacritic"><b class="sc-mc ${n >= 61 ? "hi" : n >= 40 ? "mid" : "lo"}">${v}</b>Metacritic</span>`; }
+  return `<span class="sc" title="${esc(r.label)}"><em>${esc(r.label)}</em>${v}</span>`;
+}
+
 /** A Top list, 25 long: the service's own Top 10, then what was in it on recent days (kept by lucapi). */
 async function topList(c) {
   try {
@@ -986,7 +995,6 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <button class="back">‹ Back</button>
     <header class="tp-head fade-in"></header>
     <div class="tp-body"><section class="tp-eps"></section></div>
-    <section class="tp-reviews" hidden></section>
     <section class="tp-more"></section>
     <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
   v.appendChild(page);
@@ -1018,7 +1026,8 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     return sp && !sp.finished && sp.position > 20 ? "Resume · " + fmt(sp.position) : "Play";
   };
   head.innerHTML = `${mm.logo ? `<img class="tp-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">` : `<h1>${esc(mm.name)}</h1>`}
-    <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
+    <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
+    <div class="tp-scores">${mm.imdbRating ? scoreChip({ src: "imdb", label: "IMDb", value: mm.imdbRating }) : ""}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
     <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}</div>`;
@@ -1065,20 +1074,14 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     if (ev.key === "Escape" && isOpen()) { ev.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
 
-  // Reviews: a quiet row of short cards (TMDB), each opening to the whole review.
-  getJson(`${feed()}/reviews/${type}/${id}`, 20000).then(r => {
-    const items = r.items || [], box = $(".tp-reviews", page);
+  // Scores (IMDb, Rotten Tomatoes, Metacritic, TMDB, Trakt), small, under the line about it
+  getJson(`${feed()}/ratings/${type}/${id}`, 15000).then(r => {
+    const items = r.items || [], box = $(".tp-scores", head);
     if (!items.length || !box) return;
-    const score = r.score ? `★ ${(+r.score).toFixed(1)} on TMDB${r.votes ? ` · ${(+r.votes).toLocaleString("en-GB")} ratings` : ""}` : "";
-    box.innerHTML = `<h2>Reviews ${score ? `<small>${esc(score)}</small>` : ""}</h2><div class="strip rv-strip"></div>`;
-    const when = (d) => { try { return new Date(d + "T12:00:00").toLocaleDateString("en-GB", { month: "short", year: "numeric" }); } catch (e) { return ""; } };
-    for (const it of items) {
-      const c = h(`<button class="rv"><span class="rv-top"><b>${esc(it.author)}</b>${it.rating ? `<span class="rv-score">★ ${esc(String(it.rating))}</span>` : ""}</span>
-        <span class="rv-text">${esc(it.text)}</span><span class="rv-date">${esc(when(it.date))}</span></button>`);
-      c.onclick = () => c.classList.toggle("open");
-      $(".rv-strip", box).appendChild(c);
-    }
-    box.hidden = false;
+    const order = ["imdb", "rt", "mc", "tmdb", "trakt"];
+    items.sort((a, b) => order.indexOf(a.src) - order.indexOf(b.src));
+    box.innerHTML = items.map(scoreChip).join("");
+    box.classList.add("fade-in");
   }).catch(() => {});
 
   // You may also like: under the episodes (or the buttons, for a film); scroll down to it on long series.

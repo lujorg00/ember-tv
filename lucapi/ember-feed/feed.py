@@ -823,6 +823,60 @@ def reviews(typ, imdb):
         return {"items": []}
 
 
+def _omdb_key():
+    """OMDb's key (IMDb, Rotten Tomatoes and Metacritic scores): config.json "omdb_key", else the addon's .env."""
+    k = CFG.get("omdb_key") or os.environ.get("OMDB_API_KEY", "")
+    if k:
+        return k
+    root = Path(CFG.get("trakt", {}).get("addon_dir", str(Path.home() / "lucaddon")))
+    for env in [root / ".env"] + list(root.glob("*/.env")):
+        if env.exists():
+            for line in env.read_text(errors="ignore").splitlines():
+                n, _, v = line.partition("=")
+                if "OMDB" in n.upper() and v.strip().strip("'\""):
+                    return v.strip().strip("'\"")
+    return ""
+
+
+def ratings(typ, imdb):
+    """The scores for a film or show, small: IMDb, Rotten Tomatoes, Metacritic (OMDb), TMDB and Trakt."""
+    def get():
+        out = []
+        key = _omdb_key()
+        if key:
+            try:
+                j = json.loads(http_get(f"https://www.omdbapi.com/?i={imdb}&apikey={urllib.parse.quote(key)}", timeout=10))
+                if j.get("imdbRating") not in (None, "", "N/A"):
+                    out.append({"src": "imdb", "label": "IMDb", "value": j["imdbRating"]})
+                for r in j.get("Ratings", []):
+                    if r.get("Source") == "Rotten Tomatoes":
+                        out.append({"src": "rt", "label": "Rotten Tomatoes", "value": r.get("Value", "")})
+                    elif r.get("Source") == "Metacritic":
+                        out.append({"src": "mc", "label": "Metacritic", "value": r.get("Value", "").split("/")[0]})
+            except Exception as e:
+                print(f"[ember-feed] omdb {imdb}: {e}", flush=True)
+        try:
+            f = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+            hit = ((f.get("movie_results") if typ == "movie" else f.get("tv_results")) or f.get("movie_results") or f.get("tv_results") or [None])[0]
+            if hit and hit.get("vote_count", 0) >= 20:
+                out.append({"src": "tmdb", "label": "TMDB", "value": f"{hit['vote_average']:.1f}"})
+        except Exception:
+            pass
+        try:
+            r = _trakt(f"/{'movies' if typ == 'movie' else 'shows'}/{imdb}/ratings")
+            if r.get("votes", 0) >= 20:
+                out.append({"src": "trakt", "label": "Trakt", "value": f"{round(r['rating'] * 10)}%"})
+        except Exception:
+            pass
+        return {"items": out}
+    if not re.fullmatch(r"tt\d+", imdb or ""):
+        return {"items": []}
+    try:
+        return cached(f"ratings:{typ}:{imdb}", 24 * 3600, get)
+    except Exception:
+        return {"items": []}
+
+
 TOPS_PATH = HERE / "toplists.json"
 _tops_lock = threading.Lock()
 TOP_LEN = 25
@@ -2936,6 +2990,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/next/"):
                 imdb = path[len("/next/"):]
                 self._json(next_episode(imdb) if imdb.startswith("tt") and imdb[2:].isdigit() else {})
+            elif re.fullmatch(r"/ratings/(movie|series)/tt\d+", path):
+                parts = path.split("/")
+                self._json(ratings(parts[2], parts[3]))
             elif re.fullmatch(r"/reviews/(movie|series)/tt\d+", path):
                 parts = path.split("/")
                 self._json(reviews(parts[2], parts[3]))

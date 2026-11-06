@@ -9,9 +9,7 @@ struct DetailView: View {
     @State private var season = 1
     @State private var nextUp: (Int, Int)?
     @State private var similar: [Meta] = []
-    @State private var reviews: [Review] = []
-    @State private var reviewScore = ""
-    @State private var reading: Review?
+    @State private var scores: [Score] = []
     @State private var hasTrailer = false
     @State private var picking = false
     @State private var streamList: [Ranked]?
@@ -71,10 +69,11 @@ struct DetailView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     TitleArt(meta: mm, height: 130, width: 560).padding(.top, 70)
                     HStack(spacing: 18) {
-                        Text(mm.metaLine).foregroundStyle(.white.opacity(0.75))
+                        Text(scores.isEmpty ? mm.metaLine : mm.metaLinePlain).foregroundStyle(.white.opacity(0.75))
                         if let line = store.release[mm.id]?.line { Text(line).foregroundStyle(Theme.accent) }
                     }
                     .font(.ember(21, .medium))
+                    if !scores.isEmpty { ScoreChips(items: scores).transition(.opacity) }
                     if let p = store.progress[mm.id] {
                         Text(p.line).font(.ember(21, .semibold)).foregroundStyle(Theme.accent)
                     }
@@ -109,7 +108,6 @@ struct DetailView: View {
                     if mm.isSeries && !mm.videos.isEmpty { episodesSection }
                 }
                 .padding(.horizontal, 90)
-                if !reviews.isEmpty { ReviewsRow(items: reviews, score: reviewScore) { reading = $0 } }
                 if !similar.isEmpty {
                     PosterRow(row: RowData(id: "similar", title: "You may also like", kind: nil, metas: similar, top: false))
                 }
@@ -147,7 +145,6 @@ struct DetailView: View {
                 Task { await store.markTitle(mm, watched: store.watched[mm.id] != "done"); await loadSaved() }
             }
         }
-        .sheet(item: $reading) { r in ReviewSheet(review: r) }
         .sheet(isPresented: $picking) {
             StreamPicker(streams: streamList) { r in
                 picking = false
@@ -239,12 +236,10 @@ struct DetailView: View {
             }
         }
         Task {
-            if let r = try? await API.feedGet("/reviews/\(kind)/\(full.id)", timeout: 20) {
-                reviews = r.arr("items").map(Review.init)
-                if let sc = r.dbl("score"), sc > 0 {
-                    let votes = r.int("votes").map { " · \($0.formatted()) ratings" } ?? ""
-                    reviewScore = "★ " + String(format: "%.1f", sc) + " on TMDB" + votes
-                }
+            if let r = try? await API.feedGet("/ratings/\(kind)/\(full.id)", timeout: 15) {
+                let order = ["imdb", "rt", "mc", "tmdb", "trakt"]
+                let got = r.arr("items").map(Score.init).sorted { (order.firstIndex(of: $0.src) ?? 9) < (order.firstIndex(of: $1.src) ?? 9) }
+                withAnimation(.easeIn(duration: 0.3)) { scores = got }
             }
         }
         Task {
@@ -333,87 +328,40 @@ struct StreamPicker: View {
 }
 
 
-// MARK: - reviews
+// MARK: - scores
 
-struct Review: Identifiable {
-    let id = UUID()
-    let author: String, text: String, date: String
-    let rating: Double?
-    init(_ j: JSON) {
-        author = j.str("author") ?? "Someone"
-        text = j.str("text") ?? ""
-        rating = j.dbl("rating")
-        let d = j.str("date") ?? ""
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-        if let dt = f.date(from: d) { let o = DateFormatter(); o.dateFormat = "MMM yyyy"; date = o.string(from: dt) } else { date = "" }
-    }
-    var stars: String? { rating.map { "★ " + ($0 == $0.rounded() ? String(Int($0)) : String(format: "%.1f", $0)) } }
+struct Score: Identifiable {
+    let src: String, label: String, value: String
+    var id: String { src }
+    init(_ j: JSON) { src = j.str("src") ?? ""; label = j.str("label") ?? ""; value = j.str("value") ?? "" }
 }
 
-/// A quiet row of short review cards; selecting one opens the whole review.
-struct ReviewsRow: View {
-    let items: [Review]
-    let score: String
-    let open: (Review) -> Void
+/// IMDb 7.8 · the tomato 92% · Metacritic's coloured square · TMDB · Trakt: small, under the line about it.
+struct ScoreChips: View {
+    let items: [Score]
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text("Reviews").font(.ember(30, .bold))
-                if !score.isEmpty { Text(score).font(.ember(20)).foregroundStyle(Theme.muted) }
-            }
-            .padding(.leading, 90)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 28) {
-                    ForEach(items) { r in
-                        Button { open(r) } label: {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Text(r.author).font(.ember(21, .semibold)).lineLimit(1)
-                                    Spacer(minLength: 8)
-                                    if let st = r.stars { Text(st).font(.ember(19, .bold)).foregroundStyle(Theme.accent) }
-                                }
-                                Text(r.text).font(.ember(19)).foregroundStyle(.white.opacity(0.82)).lineLimit(4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Spacer(minLength: 0)
-                                Text(r.date).font(.ember(16)).foregroundStyle(Theme.muted)
-                            }
-                            .padding(22)
-                            .frame(width: 500, height: 230, alignment: .topLeading)
-                            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
-                        }
-                        .buttonStyle(.card)
+        HStack(spacing: 26) {
+            ForEach(items) { r in
+                HStack(spacing: 9) {
+                    switch r.src {
+                    case "imdb":
+                        Image("brand-imdb").resizable().scaledToFit().frame(height: 24)
+                    case "rt":
+                        Image("award-tomato").resizable().scaledToFit().frame(height: 26)
+                            .hueRotation(.degrees((Int(r.value.filter(\.isNumber)) ?? 100) < 60 ? 70 : 0))
+                    case "mc":
+                        let n = Int(r.value) ?? 0
+                        Text(r.value).font(.ember(18, .bold)).foregroundStyle(n >= 40 && n < 61 ? Color.black : .white)
+                            .frame(minWidth: 34, minHeight: 30)
+                            .background(n >= 61 ? Color(red: 0.23, green: 0.71, blue: 0.29) : n >= 40 ? Color(red: 0.89, green: 0.66, blue: 0) : Color(red: 0.88, green: 0.21, blue: 0.17),
+                                        in: RoundedRectangle(cornerRadius: 5))
+                    default:
+                        Text(r.label.uppercased()).font(.ember(15, .bold)).tracking(0.8).foregroundStyle(Theme.muted)
                     }
-                }
-                .padding(.horizontal, 90)
-                .padding(.vertical, 24)
-            }
-            .scrollClipDisabled()
-        }
-        .focusSection()
-    }
-}
-
-struct ReviewSheet: View {
-    let review: Review
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(review.author).font(.ember(34, .bold))
-                    if let st = review.stars { Text(st).font(.ember(26, .bold)).foregroundStyle(Theme.accent) }
-                    Spacer()
-                    Text(review.date).font(.ember(20)).foregroundStyle(Theme.muted)
-                }
-                // a paragraph at a time, each one selectable, so the remote can scroll a long review
-                let paras = review.text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                ForEach(paras.indices, id: \.self) { i in
-                    Text(paras[i]).font(.ember(24)).lineSpacing(6).foregroundStyle(.white.opacity(0.9))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .focusable()
+                    if r.src != "mc" { Text(r.value).font(.ember(21, .semibold)) }
+                    else { Text("Metacritic").font(.ember(17, .semibold)).foregroundStyle(Theme.muted) }
                 }
             }
-            .frame(maxWidth: 1100, alignment: .leading)
-            .padding(60)
         }
     }
 }

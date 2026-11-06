@@ -123,6 +123,11 @@ struct Meta: Identifiable, Hashable {
     var runtimeMinutes: Int? { runtime.flatMap { Int($0.filter(\.isNumber)) } }
 
     /// "2023– · 51 min · ★ 8.1 · Adventure, Drama"
+    /// The line without the score (the details page shows the scores on their own).
+    var metaLinePlain: String {
+        [releaseInfo.isEmpty ? nil : releaseInfo, runtime, genres.isEmpty ? nil : genres.prefix(3).joined(separator: ", ")]
+            .compactMap { $0 }.joined(separator: "  ·  ")
+    }
     var metaLine: String {
         [releaseInfo.isEmpty ? nil : releaseInfo, runtime, rating.map { "★ \($0)" },
          genres.isEmpty ? nil : genres.prefix(3).joined(separator: ", ")].compactMap { $0 }.joined(separator: "  ·  ")
