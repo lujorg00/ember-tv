@@ -213,7 +213,7 @@ struct YearView: View {
                     }
                     .padding(.vertical, 6).padding(.horizontal, 10)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButtonStyle())
                 .disabled((x.str("imdb") ?? "").isEmpty)
             }
         }

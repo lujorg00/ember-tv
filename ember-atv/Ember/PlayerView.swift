@@ -408,11 +408,14 @@ struct PlayerScreen: View {
                     .onTapGesture { model.togglePause(); model.showControls() }
                 HStack(spacing: 24) {
                     Button { showSubs = true; model.refreshTracks() } label: { Label("Subtitles", systemImage: "captions.bubble") }
+                            .buttonStyle(EmberButtonStyle(primary: false))
                         .focused($focus, equals: .subs)
                     Button { showAudio = true; model.refreshTracks() } label: { Label("Audio", systemImage: "speaker.wave.2") }
+                            .buttonStyle(EmberButtonStyle(primary: false))
                         .focused($focus, equals: .audio)
                     if model.hasNext {
                         Button { model.playNext() } label: { Label("Next episode", systemImage: "forward.end.fill") }
+                            .buttonStyle(EmberButtonStyle(primary: false))
                             .focused($focus, equals: .next)
                     }
                 }
@@ -438,8 +441,10 @@ struct PlayerScreen: View {
                     }
                     HStack(spacing: 20) {
                         Button { model.playNext() } label: { Label("Play now", systemImage: "play.fill") }
+                            .buttonStyle(EmberButtonStyle(primary: true))
                             .focused($focus, equals: .upPlay)
                         Button { model.watchCredits(); focus = .catcher } label: { Text("Watch credits") }
+                            .buttonStyle(EmberButtonStyle(primary: false))
                             .focused($focus, equals: .upStay)
                     }
                 }

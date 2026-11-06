@@ -136,7 +136,7 @@ struct DetailView: View {
     @ViewBuilder private var episodesSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: 16) {
                     ForEach(seasons, id: \.self) { s in
                         Button { season = s } label: { Text("Season \(s)") }
                             .buttonStyle(TabTextStyle(selected: s == season))
@@ -279,8 +279,9 @@ struct StreamPicker: View {
                                     Text(r.label).font(.ember(21)).lineLimit(2)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
+                                .padding(.vertical, 12).padding(.horizontal, 18)
                             }
+                            .buttonStyle(RowButtonStyle())
                         }
                     }
                     .padding(.vertical, 10)

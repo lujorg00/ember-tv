@@ -259,13 +259,8 @@ struct TilePage: View {
     }
 
     private func chip(_ label: String, on: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).font(.ember(22, on ? .bold : .medium))
-                .foregroundStyle(on ? Theme.ink : .white)
-                .padding(.horizontal, 6)
-        }
-        .tint(on ? Theme.accent : nil)
-        .buttonStyle(.bordered)
+        Button(action: action) { Text(label) }
+            .buttonStyle(EmberButtonStyle(primary: on))
     }
 
     private func reload() {

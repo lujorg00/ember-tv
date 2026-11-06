@@ -29,7 +29,7 @@ private struct EmberButtonBody<L: View>: View {
             .frame(width: round ? 60 : nil, height: 60)
             .background { if round { Circle().fill(fill) } else { Capsule().fill(fill) } }
             .overlay { if !focused && !primary { (round ? AnyShape(Circle()) : AnyShape(Capsule())).stroke(.white.opacity(0.12), lineWidth: 1) } }
-            .scaleEffect(pressed ? 0.95 : focused ? 1.08 : 1)
+            .scaleEffect(pressed ? 0.95 : focused ? (round ? 1.1 : 1.05) : 1)
             .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 16, y: 8)
             .animation(.easeOut(duration: 0.16), value: focused)
     }
@@ -54,7 +54,26 @@ private struct TabTextBody<L: View>: View {
                 .background(Capsule().fill(focused ? .white : .clear))
             Capsule().fill(selected ? Theme.accent : .clear).frame(width: 36, height: 4)
         }
-        .scaleEffect(focused ? 1.06 : 1)
+        .scaleEffect(focused ? 1.03 : 1)
         .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
+/// Rows in a list (New This Week, Your year's top shows): lit up in place when selected, never grown,
+/// so they can't overlap the rows above and below.
+struct RowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { RowButtonBody(label: configuration.label, pressed: configuration.isPressed) }
+}
+
+private struct RowButtonBody<L: View>: View {
+    let label: L
+    let pressed: Bool
+    @Environment(\.isFocused) private var focused
+    var body: some View {
+        label
+            .background(RoundedRectangle(cornerRadius: 10).fill(focused ? Color.white.opacity(0.18) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(focused ? Theme.accent : .clear, lineWidth: 2))
+            .opacity(pressed ? 0.8 : 1)
+            .animation(.easeOut(duration: 0.12), value: focused)
     }
 }

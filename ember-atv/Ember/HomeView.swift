@@ -175,7 +175,7 @@ struct WeekPanel: View {
                     }
                     .padding(.vertical, 4).padding(.horizontal, 8)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButtonStyle())
             }
             if eps.count > 4 {
                 Text("and \(eps.count - 4) more").font(.ember(15)).foregroundStyle(Theme.muted).padding(.leading, 8)
