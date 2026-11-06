@@ -553,7 +553,8 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 /* ---- bookmarks: a title on your watchlist carries an amber bookmark wherever its poster shows */
 .bmk { position: absolute; z-index: 2; top: -2px; right: 10px; width: 22px; height: 30px; pointer-events: none; filter: drop-shadow(0 2px 4px #0009); }
 .bmk svg { width: 100%; height: 100%; display: block; fill: var(--accent); }
-.poster.bm .wbadge, .t10-art.bm .wbadge { right: 38px; }
+.poster.bm .wbadge, .t10-art.bm .wbadge { left: 7px; right: auto; }   /* bookmarked: the tick moves top left */
+.poster.bm .rel { left: 38px; max-width: calc(100% - 76px); }
 .spot .bmk { right: 18px; width: 28px; height: 38px; }
 
 /* ---- the ordinary rows: the first title large, then the posters */
@@ -597,7 +598,7 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 
 /* the spotlight card carries the watched tick (its poster is hidden while it's open) */
 .spot .wbadge { top: 12px; right: 12px; }
-.spot.bm .wbadge { right: 52px; }
+.spot.bm .wbadge { left: 12px; right: auto; }
 .spot:hover .wbadge.add, .spot.open .wbadge.add, .tv .spot:has(.tvf) .wbadge.add { opacity: 1; }
 /* watchlist rows: the tick top left (ticking it takes the title off the watchlist); the release label makes way */
 .strip.wall .wbadge, .strip.wall .poster.bm .wbadge { left: 7px; right: auto; }

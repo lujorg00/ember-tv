@@ -385,8 +385,8 @@ struct TopRow: View {
                                     LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
                                     Text(m.name).font(.ember(24, .bold)).lineLimit(2)
                                         .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
-                                    WatchBadge(state: store.watched[m.id]).padding(.trailing, store.watchlist.contains(m.id) ? 40 : 0)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                    WatchBadge(state: store.watched[m.id])
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
                                     if store.watchlist.contains(m.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
                                 }
                                 .frame(width: 400, height: 225)
@@ -469,15 +469,18 @@ struct PosterCard: View {
                 .frame(width: width, height: width * 1.5)
                 .clipped()
                 if store.watchlist.contains(meta.id) { Bookmark() }
+                // bookmarked (or a watchlist row): the tick sits top left, clear of the bookmark
                 WatchBadge(state: store.watched[meta.id])
-                    .padding(.trailing, !inWatchlist && store.watchlist.contains(meta.id) ? 40 : 0)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: inWatchlist ? .topLeading : .topTrailing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: inWatchlist || store.watchlist.contains(meta.id) ? .topLeading : .topTrailing)
                 if let label = store.release[meta.id]?.label {
                     Text(label).font(.ember(15, .bold))
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background((store.release[meta.id]?.s == "cinema" ? Theme.accent : Color.black.opacity(0.7)), in: Capsule())
                         .foregroundStyle(store.release[meta.id]?.s == "cinema" ? Theme.ink : .white)
                         .padding(10)
+                        // the tick is top left on bookmarked posters: the label sits beside it
+                        .padding(.leading, store.watched[meta.id] != nil && (inWatchlist || store.watchlist.contains(meta.id)) ? 48 : 0)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 if let p = store.progress[meta.id] {
@@ -581,8 +584,8 @@ struct SpotCard: View {
             }
             .padding(.leading, 30).padding(.bottom, 26)
             if store.watchlist.contains(m.id) { Bookmark(size: 1.2).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
-            WatchBadge(state: store.watched[m.id]).padding(.trailing, store.watchlist.contains(m.id) ? 48 : 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            WatchBadge(state: store.watched[m.id])
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
         }
         .frame(width: 720, height: 405)
         .clipShape(RoundedRectangle(cornerRadius: 16))
