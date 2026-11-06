@@ -77,3 +77,23 @@ private struct RowButtonBody<L: View>: View {
             .animation(.easeOut(duration: 0.12), value: focused)
     }
 }
+
+
+/// For the poster that opens out into the spotlight: lifts and casts a soft shadow that follows the card as it
+/// widens (the system's card style keeps its sheen and shadow at the poster's size, which broke away from it).
+struct LiftCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { LiftBody(configuration: configuration) }
+    private struct LiftBody: View {
+        let configuration: Configuration
+        @Environment(\.isFocused) private var focused
+        var body: some View {
+            configuration.label
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white.opacity(focused ? 0.55 : 0), lineWidth: 2))
+                .scaleEffect(configuration.isPressed ? 1.0 : focused ? 1.06 : 1)
+                .shadow(color: .black.opacity(focused ? 0.55 : 0.3), radius: focused ? 22 : 8, y: focused ? 14 : 4)
+                .animation(.easeOut(duration: 0.2), value: focused)
+                .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        }
+    }
+}

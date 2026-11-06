@@ -591,7 +591,7 @@ struct SpotPoster: View {
         NavigationLink(value: meta) {
             SpotFace(meta: meta, opened: opened)
         }
-        .buttonStyle(.card)
+        .buttonStyle(LiftCardStyle())
         .onAppear { store.wantRelease(meta) }
         .onPlayPauseCommand { play() }
         .contextMenu { PosterMenu(meta: meta) }
