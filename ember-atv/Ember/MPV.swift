@@ -8,8 +8,6 @@ final class MetalLayer: CAMetalLayer {
         get { super.drawableSize }
         set { if Int(newValue.width) > 1 && Int(newValue.height) > 1 { super.drawableSize = newValue } }
     }
-
-    }
 }
 
 @MainActor
