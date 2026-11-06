@@ -64,6 +64,18 @@ enum API {
     }
 
     /// One row's titles, from your addon through lucapi.
+    /// A Top list, 25 long: the service's own Top 10, then what was in it on recent days (kept by lucapi).
+    static func toplist(_ c: JSON) async -> [Meta] {
+        guard let type = c.str("type"), let id = c.str("id") else { return [] }
+        let aio = c.str("aio") != nil
+        if let j = try? await feedGet("/toplist/\(type)/\(q(id)).json\(aio ? "?aio=1" : "")", timeout: 30) {
+            let metas = j.arr("metas").map { Meta($0, type: type) }.filter { !$0.id.isEmpty }
+            if !metas.isEmpty { return metas }
+        }
+        if aio { return await Store.anyCatalog(c) }
+        return await catalog(c)
+    }
+
     static func catalog(_ c: JSON) async -> [Meta] {
         guard let type = c.str("type"), let id = c.str("id") else { return [] }
         let j = try? await feedGet("/addon/catalog/\(type)/\(q(id)).json", timeout: 30)

@@ -792,6 +792,59 @@ def shared_settings(body=None):
     return cur
 
 
+TOPS_PATH = HERE / "toplists.json"
+_tops_lock = threading.Lock()
+TOP_LEN = 25
+
+
+def toplist(typ, cid, aio):
+    """A Top list stretched to 25 (as the Omni addon does for Netflix): today's order first, which is the
+    service's own Top 10, then the titles that were in this list on recent days, the most recent days first.
+    Every day's list is kept on the Pi (45 days), so a list that only gives 10 fills up over the following days."""
+    def fetch():
+        if aio:
+            base = re.sub(r"/manifest\.json.*$", "", shared_settings().get("aio", ""))
+            if not base:
+                return []
+        else:
+            base = CFG["addon_upstream"].rstrip("/")
+        return json.loads(http_get(f"{base}/catalog/{typ}/{urllib.parse.quote(cid)}.json", timeout=20)).get("metas", [])
+    try:
+        metas = [m for m in cached(f"top:{int(bool(aio))}:{typ}:{cid}", 1800, fetch) if m.get("id")]
+    except Exception:
+        metas = []
+    key = f"{'aio' if aio else 'addon'}:{typ}:{cid}"
+    today = date.today().isoformat()
+    keepkeys = ("id", "type", "name", "poster", "background", "logo", "releaseInfo", "imdbRating", "description")
+    with _tops_lock:
+        try:
+            db = json.loads(TOPS_PATH.read_text()) if TOPS_PATH.exists() else {}
+        except Exception:
+            db = {}
+        days = db.get(key, {})
+        if metas:
+            days[today] = [{k: m[k] for k in keepkeys if m.get(k) is not None} for m in metas[:TOP_LEN]]
+        for d in sorted(days)[:-45]:
+            del days[d]
+        db[key] = days
+        try:
+            TOPS_PATH.write_text(json.dumps(db))
+        except Exception:
+            pass
+    out = metas[:TOP_LEN]
+    seen = {m["id"] for m in out}
+    for d in sorted(days, reverse=True):
+        if len(out) >= TOP_LEN:
+            break
+        if d == today:
+            continue
+        for m in days[d]:
+            if m["id"] not in seen and len(out) < TOP_LEN:
+                out.append(m)
+                seen.add(m["id"])
+    return {"metas": out, "official": min(len(metas), 10)}
+
+
 def _watchlist_ids():
     ids = set()
     for kind in ("movies", "shows"):
@@ -2852,6 +2905,10 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/next/"):
                 imdb = path[len("/next/"):]
                 self._json(next_episode(imdb) if imdb.startswith("tt") and imdb[2:].isdigit() else {})
+            elif re.fullmatch(r"/toplist/(movie|series)/[^/]+\.json", path):
+                parts = path.split("/")
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(toplist(parts[2], urllib.parse.unquote(parts[3][:-5]), (q.get("aio") or ["0"])[0] == "1"))
             elif path == "/screensaver":
                 self._json(screensaver(self._base()))
             elif path == "/addon" or path.startswith("/addon/"):

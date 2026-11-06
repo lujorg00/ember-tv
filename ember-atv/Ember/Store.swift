@@ -151,7 +151,8 @@ final class Store: ObservableObject {
         let built = await withTaskGroup(of: (Int, RowData?).self, returning: [RowData].self) { g in
             for (i, (c, top)) in ordered.enumerated() {
                 g.addTask {
-                    let metas = await API.catalog(c)
+                    var metas: [Meta] = []
+                    if top { metas = await API.toplist(c) } else { metas = await API.catalog(c) }
                     guard !metas.isEmpty else { return (i, nil) }
                     let raw = c.str("name") ?? c.str("id") ?? ""
                     let name = niceName(raw)
@@ -280,7 +281,9 @@ final class Store: ObservableObject {
         let built = await withTaskGroup(of: (Int, RowData?).self, returning: [RowData].self) { g in
             for (i, (name, c, top)) in wanted.enumerated() {
                 g.addTask {
-                    let metas = await Store.anyCatalog(c).map { m -> Meta in
+                    var got: [Meta] = []
+                    if top { got = await API.toplist(c) } else { got = await Store.anyCatalog(c) }
+                    let metas = got.map { m -> Meta in
                         m.type == type ? m : Meta(["id": m.id, "type": type, "name": m.name, "poster": m.poster as Any, "background": m.background as Any], type: type)
                     }
                     return (i, metas.isEmpty ? nil : RowData(id: "\(type):\(name)", title: name, kind: nil, metas: metas, top: top))

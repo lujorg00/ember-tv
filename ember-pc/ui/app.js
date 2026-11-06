@@ -493,7 +493,7 @@ async function showHome() {
   tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
   const [topLists, otherLists] = await Promise.all([
     Promise.all(tops.map(async (c, i) => {
-      const metas = (await catalogRow(c)).map(m => ({ ...m, type: m.type || c.type }));
+      const metas = (await topList(c)).map(m => ({ ...m, type: m.type || c.type }));
       if (metas.length) topSlots[i].replaceWith(top10Row(homeRowName(c.name || c.id, c.type), metas, hero.pick));
       return metas;
     })),
@@ -684,7 +684,7 @@ function wideRow(title, metas) {
 function top10Row(title, metas, onPick) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
-  metas.slice(0, 10).forEach((m, i) => {
+  metas.slice(0, 25).forEach((m, i) => {
     const bm = watchlistIds.has(m.id);
     const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art${bm ? " bm" : ""}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">${bm ? BOOKMARK : ""}<span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
     el.onclick = () => go("title", m.type, m.id, m);
@@ -900,6 +900,14 @@ function aioCatalogs() {
     .then(m => (m.catalogs || []).filter(c => !(c.extra || []).some(x => x.isRequired)).map(c => ({ ...c, aio: true }))).catch(() => []);
   return aioCatalogsP;
 }
+/** A Top list, 25 long: the service's own Top 10, then what was in it on recent days (kept by lucapi). */
+async function topList(c) {
+  try {
+    const j = await getJson(`${feed()}/toplist/${c.type}/${encodeURIComponent(c.id)}.json${c.aio ? "?aio=1" : ""}`, 20000);
+    if (j.metas && j.metas.length) return j.metas;
+  } catch (e) {}
+  return anyCatalogRow(c);
+}
 async function anyCatalogRow(c) {
   if (!c.aio) return catalogRow(c);
   try { return (await getJson(`${aioBase()}/catalog/${c.type}/${c.id}.json`, 20000)).metas || []; } catch (e) { return []; }
@@ -930,7 +938,7 @@ async function showBrowse(type) {
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
   tileRows(hiddenRows(), type).then(r => { if (r) slotTiles.replaceWith(r); });
   const results = await Promise.all(plan.map(async (p, i) => {
-    const metas = (await anyCatalogRow(p.cat)).map(m => ({ ...m, type }));
+    const metas = (await (p.top ? topList(p.cat) : anyCatalogRow(p.cat))).map(m => ({ ...m, type }));
     if (metas.length) slots[i].replaceWith(p.top ? top10Row(p.name, metas) : /watchlist/i.test(p.name || "") ? wallRow(p.name, metas, type) : spotRow(p.name, metas, type));
     return metas;
   }));
