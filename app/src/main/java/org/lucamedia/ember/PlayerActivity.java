@@ -64,6 +64,7 @@ public class PlayerActivity extends Activity {
     private final Handler h = new Handler(Looper.getMainLooper());
     private final Map<String, String> o = new HashMap<>();
     private boolean started = false, done = false, hasNext = false;
+    private long introUntil = 0;   // the title stays at the top for the first 13 s of a stream
     private long bufferingSince = 0;
 
     @Override
@@ -148,7 +149,8 @@ public class PlayerActivity extends Activity {
         setContentView(root);
 
         view.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility -> {
-            titleView.setVisibility(visibility);
+            if (visibility == View.VISIBLE) { titleView.animate().cancel(); titleView.setAlpha(1f); titleView.setVisibility(View.VISIBLE); }
+            else if (System.currentTimeMillis() >= introUntil) titleView.setVisibility(View.GONE);
             nextButton.setVisibility(hasNext && !upNextShown ? visibility : View.GONE);
             // controls up: the timeline has the focus, so left/right skip straight away (10 s a press, faster held)
             // (a moment later: the player puts the focus on play/pause itself as the controls appear)
@@ -194,6 +196,19 @@ public class PlayerActivity extends Activity {
             @Override
             public void onPlaybackStateChanged(int s) {
                 if (s == Player.STATE_READY) {
+                    if (!started) {
+                        // when a stream begins: the title lingers, then fades away (unless the controls are up)
+                        introUntil = System.currentTimeMillis() + 13_000;
+                        titleView.setAlpha(1f);
+                        titleView.setVisibility(View.VISIBLE);
+                        h.postDelayed(() -> {
+                            if (view.isControllerFullyVisible()) return;
+                            titleView.animate().alpha(0f).setDuration(1200).withEndAction(() -> {
+                                if (!view.isControllerFullyVisible()) titleView.setVisibility(View.GONE);
+                                titleView.setAlpha(1f);
+                            }).start();
+                        }, 13_000);
+                    }
                     started = true;
                     bufferingSince = 0;
                 } else if (s == Player.STATE_BUFFERING && started) {

@@ -16,6 +16,7 @@ local ov = mp.create_osd_overlay("ass-events")
 local W, H, S = 1920, 1080, 1
 local visible, last_move = true, mp.get_time()
 local panel = false
+local intro_until = nil   -- when a stream begins, its title stays at the top for 13 s, then fades
 local scroll = { audio = 0, sub = 0 }
 local hits, out = {}, {}
 local mx, my = -1, -1
@@ -357,7 +358,27 @@ local function render()
     out, hits = {}, {}
     ov.res_x, ov.res_y = W, H
     lift_subs(visible or panel)
-    if not (visible or panel) then ov.data = ""; ov:update(); return end
+    if not (visible or panel) then
+        local left = intro_until and (intro_until - mp.get_time()) or -1
+        if left > 0 then
+            local fa = left > 1.5 and 0 or math.floor((1 - left / 1.5) * 255)
+            local function mix(a) return string.format("%02X", math.min(255, a + math.floor((255 - a) * fa / 255))) end
+            local steps = 24
+            for k = 0, steps - 1 do
+                local f = (k + 0.5) / steps
+                rrect(0, 170 * S * k / steps, W, 170 * S / steps + 1, 0, "000000", mix(math.floor(0x60 + (0xFF - 0x60) * f)))
+            end
+            local show, ep = titles()
+            add(string.format("{\\an7\\pos(%.1f,%.1f)\\fn%s\\fs%.1f\\bord0\\shad1\\4c&H000000&\\4a&H%s&\\1c&HFFFFFF&\\1a&H%s&\\b1}%s",
+                56 * S, 40 * S, FONT, 34 * S, mix(0x70), mix(0), clean(show)))
+            if ep ~= "" then
+                add(string.format("{\\an7\\pos(%.1f,%.1f)\\fn%s\\fs%.1f\\bord0\\shad1\\4c&H000000&\\4a&H%s&\\1c&HDDDDDD&\\1a&H%s&\\b0}%s",
+                    56 * S, 84 * S, FONT, 22 * S, mix(0x70), mix(0), clean(ep)))
+            end
+            ov.data = table.concat(out, "\n"); ov:update(); return
+        end
+        ov.data = ""; ov:update(); return
+    end
 
     fade(0, 130 * S, 0x70, 0xFF)
     fade(H - 210 * S, H, 0xFF, 0x48)
@@ -499,6 +520,9 @@ mp.add_periodic_timer(0.25, function()
     render()
 end)
 mp.observe_property("pause", "bool", function() poke() end)
+mp.register_event("playback-restart", function()
+    if not intro_until then intro_until = mp.get_time() + 13 end
+end)
 mp.observe_property("osd-dimensions", "native", function() render() end)
 mp.observe_property("track-list", "native", function() if panel then render() end end)
 

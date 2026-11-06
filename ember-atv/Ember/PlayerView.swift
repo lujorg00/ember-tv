@@ -14,6 +14,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     @Published var buffering = true
     @Published var started = false
     @Published var controls = false
+    @Published var intro = false          // the title at the top for the first few seconds
     @Published var upNext = false
     @Published var countdown = 15
     @Published var tracks: [Track] = []
@@ -27,6 +28,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var bufferingSince: Date?
     private var openedAt = Date()
     private var controlsUntil = Date.distantPast
+    private var introUntil = Date.distantPast
     private var creditsWanted = false
     private var done = false
     private var ticker: Task<Void, Never>?
@@ -75,6 +77,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if !started {
             Diag.log("playing: \(core.int("video-params/w"))x\(core.int("video-params/h")) \(core.string("video-params/gamma") ?? "?") \(String(format: "%.3f", core.double("container-fps")))fps \(core.string("audio-codec-name") ?? "") \(core.string("audio-params/channel-count") ?? "")ch")
             tracks = core.tracks()
+            if session?.trailer != true { intro = true; introUntil = Date().addingTimeInterval(13) }
             matchDisplay()
             setupTracks()
         }
@@ -102,6 +105,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if let b = bufferingSince, now.timeIntervalSince(b) > 12 { return fail("kept stalling") }
         if started && !paused && now.timeIntervalSince(lastReport) > 15 { report("playing") }
         if controls && now > controlsUntil && !paused { controls = false }
+        if intro && now > introUntil { intro = false }
         creditsTick()
     }
 
@@ -344,10 +348,12 @@ struct PlayerScreen: View {
                     }
                 }
 
+            if model.intro && !model.controls { introTitle.transition(.opacity) }
             if model.controls { controls.transition(.opacity) }
             if model.upNext { upNextCard.transition(.move(edge: .trailing).combined(with: .opacity)) }
         }
         .animation(.easeInOut(duration: 0.25), value: model.controls)
+        .animation(.easeInOut(duration: 1.2), value: model.intro)
         .animation(.easeInOut(duration: 0.3), value: model.upNext)
         .onAppear {
             model.begin(session, store: store)
@@ -387,6 +393,29 @@ struct PlayerScreen: View {
     /// Size and timing changes keep the menu open (it closes itself after each choice), so you can see the effect and go again.
     private func reopenSubs() {
         Task { try? await Task.sleep(nanoseconds: 450_000_000); showSubs = true }
+    }
+
+    // MARK: the title when a stream starts: stays about 13 s, then fades away
+
+    private var introTitle: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: 260)
+                .overlay(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(session.meta.name).font(.ember(40, .semibold)).lineLimit(1)
+                        if let se = session.season, let ep = session.episode {
+                            Text("S\(se) E\(ep)" + (session.epTitle.isEmpty ? "" : "  ·  " + session.epTitle))
+                                .font(.ember(26, .medium)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.5), radius: 10)
+                    .padding(.leading, 90).padding(.top, 60)
+                }
+            Spacer()
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 
     // MARK: the controls: title, timeline, subtitles, audio, next episode
