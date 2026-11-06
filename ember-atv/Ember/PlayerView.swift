@@ -30,6 +30,12 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var controlsUntil = Date.distantPast
     private var introUntil = Date.distantPast
     private var creditsWanted = false
+    private var creditsChapter: Double?        // when the file marks where the credits start
+    @Published var autoNext = false            // counting down to the next episode (only when the credits are marked)
+    private var lastSkip = Date.distantPast
+    private var skipStreak = 0
+    private var skipTarget: Double?
+    private var skipDir: Double = 0
     private var done = false
     private var ticker: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -84,6 +90,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if !started {
             Diag.log("playing: \(core.int("video-params/w"))x\(core.int("video-params/h")) \(core.string("video-params/gamma") ?? "?") \(String(format: "%.3f", core.double("container-fps")))fps \(core.string("audio-codec-name") ?? "") \(core.string("audio-params/channel-count") ?? "")ch")
             tracks = core.tracks()
+            creditsChapter = findCreditsChapter()
             if session?.trailer != true { intro = true; introUntil = Date().addingTimeInterval(13) }
             matchDisplay()
             setupTracks()
@@ -117,11 +124,28 @@ final class PlayerModel: ObservableObject, MPVEvents {
         creditsTick()
     }
 
-    /// Where the credits roughly start. Streams don't say, so it's an estimate: the last 4% of the episode,
-    /// at least 25 s and at most 100 s (about 50 s on a half-hour show, 100 s on an hour-long one).
+    /// Where the credits start, when the file's chapters say so ("Credits", "End Credits", "Outro"...).
+    private func findCreditsChapter() -> Double? {
+        let n = core.int("chapter-list/count")
+        guard n > 1 else { return nil }
+        for i in (0..<n).reversed() {
+            let t = (core.string("chapter-list/\(i)/title") ?? "").lowercased()
+            if t.contains("credit") || t.contains("outro") || t == "ending" || t == "end" {
+                let at = core.double("chapter-list/\(i)/time")
+                if at > 0 { return at }
+            }
+        }
+        return nil
+    }
+
+    /// Next episode. If the file marks its credits, the card appears there and counts down from 15.
+    /// Streams mostly don't say, and guessing cut the end off shows that play right to the last seconds
+    /// (Law & Order: SVU), so otherwise the card only appears for the last 20 seconds and the next episode
+    /// starts when this one has actually finished.
     private func creditsTick() {
         guard hasNext, started, dur > 300 else { return }
-        let creditsAt = dur - max(25, min(100, dur / 25))
+        let marked = creditsChapter
+        let creditsAt = marked ?? (dur - 20)
         if pos < creditsAt {
             if upNext { upNext = false }
             creditsWanted = false
@@ -130,12 +154,13 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if creditsWanted { return }
         if !upNext {
             upNext = true
+            autoNext = marked != nil
             countdown = 15
             controls = false
-        } else if !paused {
+        } else if autoNext && !paused {
             countdown -= 1
+            if countdown <= 0 { playNext() }
         }
-        if countdown <= 0 { playNext() }
     }
 
     // MARK: actions
@@ -144,10 +169,26 @@ final class PlayerModel: ObservableObject, MPVEvents {
         controls = true
         controlsUntil = Date().addingTimeInterval(seconds)
     }
+    /// Left/right on the timeline. Pressing (or holding) quickly speeds up: 10 s, then 30 s, then 1 and 2 minutes a press.
     func skip(_ s: Double) {
-        core.seek(by: s)
-        pos = max(0, min(dur > 0 ? dur - 1 : pos + s, pos + s))
+        let now = Date()
+        let dir: Double = s < 0 ? -1 : 1
+        if now.timeIntervalSince(lastSkip) < 0.7 && dir == skipDir { skipStreak += 1 } else { skipStreak = 0; skipTarget = nil }
+        lastSkip = now
+        skipDir = dir
+        let step = skipStreak < 3 ? 10.0 : skipStreak < 7 ? 30.0 : skipStreak < 12 ? 60.0 : 120.0
+        let from = skipTarget ?? pos
+        let to = max(0, min(dur > 0 ? dur - 2 : from + step, from + (s < 0 ? -step : step)))
+        skipTarget = to
+        core.command(["seek", String(format: "%.1f", to), "absolute+keyframes"])
+        pos = to
         showControls()
+        let mine = now
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self, self.lastSkip == mine else { return }
+            self.skipTarget = nil
+            self.skipStreak = 0
+        }
     }
     func togglePause() { core.togglePause() }
     func refreshTracks() { tracks = core.tracks(); subDelay = core.double("sub-delay") }
@@ -479,7 +520,7 @@ struct PlayerScreen: View {
             HStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Next episode in \(model.countdown)").font(.ember(26, .semibold))
+                    Text(model.autoNext ? "Next episode in \(model.countdown)" : "Next episode").font(.ember(26, .semibold))
                     if let n = session.next {
                         Text("S\(n.season) E\(n.episode)\(n.title.isEmpty ? "" : " · " + n.title)").font(.ember(22)).foregroundStyle(Theme.muted).lineLimit(1)
                     }

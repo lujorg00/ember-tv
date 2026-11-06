@@ -289,7 +289,9 @@ public class PlayerActivity extends Activity {
     /** Where the credits roughly start. Streams don't say, so it's an estimate: the last 4% of the episode,
      *  at least 25 s and at most 100 s (about 50 s on a half-hour show, 100 s on an hour-long one). */
     private long creditsAt(long dur) {
-        return dur - Math.max(25_000, Math.min(100_000, dur / 25));
+        // guessing earlier cut the end off shows that run to the last seconds (Law & Order: SVU): the card now
+        // appears for the last 20 s only, and the next episode starts when this one has actually finished
+        return dur - 20_000;
     }
 
     private void upNextTick() {
@@ -310,15 +312,8 @@ public class PlayerActivity extends Activity {
             nextButton.setVisibility(View.GONE);
             upNext.setVisibility(View.VISIBLE);
             upNextPlay.requestFocus();
-        } else if (player.isPlaying()) {
-            countdown--;
         }
-        if (countdown <= 0) {
-            report("stopped", true);
-            finishWith(EXIT_NEXT);
-            return;
-        }
-        upNextText.setText("Next episode in " + countdown);
+        upNextText.setText("Next episode");
     }
 
     private View timeline() { return view.findViewById(androidx.media3.ui.R.id.exo_progress); }
