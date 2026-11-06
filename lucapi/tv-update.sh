@@ -4,8 +4,22 @@
 set -uo pipefail
 TV_IP="${1:-192.168.4.29}"
 DEV=$(adb devices | awk -v ip="$TV_IP" 'index($1, ip":")==1 && $2=="device"{print $1; exit}')
+# The TV's debugging port changes now and then. It announces it on the network, so look it up first
+# (adb's own lookup, then the Pi's avahi); only ask if neither finds it.
+find_port() {
+  adb mdns services 2>/dev/null | awk -v ip="$TV_IP" '$2 ~ /_adb-tls-connect/ && index($3, ip":")==1 {split($3,a,":"); print a[2]; exit}'
+  command -v avahi-browse >/dev/null || sudo apt-get -y -qq install avahi-utils >/dev/null 2>&1
+  command -v avahi-browse >/dev/null && timeout 8 avahi-browse -rpt _adb-tls-connect._tcp 2>/dev/null \
+    | awk -F';' -v ip="$TV_IP" '$1=="=" && $8==ip {print $9; exit}'
+}
 if [ -z "$DEV" ]; then
-  read -rp "Port shown under 'IP address & port' on the TV's Wireless debugging screen: " PORT
+  PORT=$(find_port | head -1)
+  if [ -n "$PORT" ]; then
+    echo "Found the TV at $TV_IP:$PORT"
+  else
+    echo "Couldn't find the TV's debugging port by itself (is Wireless debugging still on?)."
+    read -rp "Port shown under 'IP address & port' on the TV's Wireless debugging screen: " PORT
+  fi
   DEV="$TV_IP:$PORT"; adb connect "$DEV" >/dev/null; sleep 2
 fi
 [ "$(adb -s "$DEV" get-state 2>/dev/null)" = "device" ] || { echo "Couldn't reach the TV at $DEV"; exit 1; }
