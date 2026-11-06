@@ -385,10 +385,10 @@ struct TopRow: View {
             RowHeader(title: row.title, kind: row.kind)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .bottom, spacing: 34) {
-                    ForEach(0..<min(25, row.metas.count), id: \.self) { i in
+                    ForEach(0..<min(row.numbered ? 25 : 30, row.metas.count), id: \.self) { i in
                         let m = row.metas[i]
                         HStack(alignment: .bottom, spacing: -6) {
-                            OutlinedText(text: "\(i + 1)", size: 190).offset(y: 6)
+                            if row.numbered { OutlinedText(text: "\(i + 1)", size: 190).offset(y: 6) }
                             NavigationLink(value: m) {
                                 ZStack(alignment: .bottomLeading) {
                                     RemoteImage(url: m.backdropURL) { Theme.card }

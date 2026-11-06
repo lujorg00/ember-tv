@@ -49,7 +49,7 @@ struct SettingsView: View {
                             notices.showCat("Test: Winnie came in")
                         }
                     } header: { Text("Notifications") } footer: {
-                        Text("Calendar alerts show top right and the cats bottom left, while Ember is open (including over the player). tvOS doesn't let apps show anything over other apps.")
+                        Text("Calendar alerts show top right and the cats top left, while Ember is open (including over the player). tvOS doesn't let apps show anything over other apps.")
                     }
                     Section("What Ember last did") {
                         let steps = Array(Diag.lastSteps(25).reversed())

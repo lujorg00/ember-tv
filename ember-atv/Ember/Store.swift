@@ -9,6 +9,7 @@ struct RowData: Identifiable {
     var metas: [Meta]
     let top: Bool          // a top-10 list: big rank numbers
     var wide = false       // watchlists: wide pictures, to stand apart from the poster rows
+    var numbered = true    // a top list's big rank numbers (Trending Today has none)
 }
 
 /// Friendlier names for the addon's lists: "Top 20 Trending Films" is "Trending Today", "All-Time" loses its hyphen.
@@ -147,7 +148,10 @@ final class Store: ObservableObject {
         let isTop = { (c: JSON) in named(c, "\\btop\\b") }
         cwCats = homeList.filter(isCont)
         let allTime = { (c: JSON) in named(c, "all.?time") }    // those live on Films and Series instead
-        let ordered: [(JSON, Bool)] = homeList.filter { isTop($0) && !isCont($0) && !allTime($0) }.map { ($0, true) }
+        // Trending Today first (wide pictures, no numbers), then the Top 10s, then the rest
+        let trend = { (c: JSON) in named(c, "trending") }
+        let tops = homeList.filter { isTop($0) && !isCont($0) && !allTime($0) }
+        let ordered: [(JSON, Bool)] = (tops.filter(trend) + tops.filter { !trend($0) }).map { ($0, true) }
             + homeList.filter { !isTop($0) && !isCont($0) && !allTime($0) }.map { ($0, false) }
 
         // every row at once; shown in their order
@@ -155,7 +159,8 @@ final class Store: ObservableObject {
             for (i, (c, top)) in ordered.enumerated() {
                 g.addTask {
                     var metas: [Meta] = []
-                    if top { metas = await API.toplist(c) } else { metas = await API.catalog(c) }
+                    let trending = (c.str("name") ?? "").range(of: "trending", options: .caseInsensitive) != nil
+                    if top && !trending { metas = await API.toplist(c) } else { metas = await API.catalog(c) }
                     guard !metas.isEmpty else { return (i, nil) }
                     let raw = c.str("name") ?? c.str("id") ?? ""
                     let name = niceName(raw)
@@ -163,6 +168,7 @@ final class Store: ObservableObject {
                     let kind: String? = says ? nil : (c.str("type") == "movie" ? "Films" : "Series")
                     var r = RowData(id: "\(c.str("type") ?? ""):\(c.str("id") ?? "")", title: name, kind: kind, metas: metas, top: top)
                     r.wide = raw.range(of: "watchlist", options: .caseInsensitive) != nil
+                    r.numbered = !trending
                     return (i, r)
                 }
             }

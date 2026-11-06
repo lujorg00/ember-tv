@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Calendar and reminder alerts, new episodes, and the cats coming and going - the same pop-ups as Ember TV, from
 /// lucapi. tvOS doesn't let an app put anything over other apps, so these show while Ember is open (including
-/// over the player): calendar ones top right for 10 s, the cats bottom left for 8 s.
+/// over the player): calendar ones top right for 10 s, the cats as a small drop-down top left for 5 s.
 @MainActor
 final class Notices: ObservableObject {
     struct Alert { let id: String; let at: Date; let until: Date; let start: Date; let wake: Date?
@@ -100,7 +100,7 @@ final class Notices: ObservableObject {
     func showCat(_ text: String) {
         withAnimation(.easeOut(duration: 0.35)) { cat = text }
         Task {
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             withAnimation(.easeIn(duration: 0.35)) { if cat == text { cat = nil } }
         }
     }
@@ -151,15 +151,17 @@ struct NoticeOverlay: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
             if let c = notices.cat {
-                HStack(spacing: 12) {
-                    Image(systemName: "pawprint.fill").foregroundStyle(Theme.accent)
-                    Text(c).font(.ember(22, .semibold))
+                // the cats: a small drop-down, top left (calendar ones are top right), 5 seconds
+                HStack(spacing: 10) {
+                    Image(systemName: "pawprint.fill").font(.system(size: 18)).foregroundStyle(Theme.accent)
+                    Text(c).font(.ember(20, .semibold))
                 }
-                .padding(.horizontal, 22).padding(.vertical, 14)
-                .background(Theme.bg.opacity(0.88), in: Capsule())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .padding(.bottom, 50).padding(.leading, 70)
-                .transition(.move(edge: .leading).combined(with: .opacity))
+                .padding(.horizontal, 20).padding(.vertical, 11)
+                .background(Theme.bg.opacity(0.85), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.08)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 40).padding(.leading, 70)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .allowsHitTesting(false)

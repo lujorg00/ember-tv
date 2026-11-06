@@ -52,7 +52,7 @@ public class DimService extends AccessibilityService {
     private static final int EARLY_SHIFT_BEFORE = 10 * 60; // a shift before 10am counts as early
     private static final int EARLY_BY = 60;                // and brings the dimming forward an hour
     private static final long CAT_POLL_MS = 20_000, NIGHT_POLL_MS = 15 * 60_000;
-    private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 8_000, ALERT_NOTE_MS = 10_000;
+    private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 5_000, ALERT_NOTE_MS = 10_000;
     private static final long ALERT_POLL_MS = 5 * 60_000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -536,16 +536,19 @@ public class DimService extends AccessibilityService {
         if (catNote == null) return;
         catNote.setText(s);
         catNote.animate().cancel();
-        catNote.setAlpha(0f);
         final TextView c = catNote;
-        c.animate().alpha(0.92f).setStartDelay(0).setDuration(400).withEndAction(new Runnable() {
+        final float rise = -40 * getResources().getDisplayMetrics().density;
+        c.setAlpha(0f);
+        c.setTranslationY(rise);
+        // drops down, stays 5 seconds, slides back up
+        c.animate().alpha(0.95f).translationY(0).setStartDelay(0).setDuration(350).withEndAction(new Runnable() {
             @Override
             public void run() {
-                c.animate().alpha(0f).setStartDelay(CAT_NOTE_MS).setDuration(800).start();
+                c.animate().alpha(0f).translationY(rise).setStartDelay(CAT_NOTE_MS).setDuration(350).start();
             }
         }).start();
-        catUntil = System.currentTimeMillis() + CAT_NOTE_MS + 1300;
-        scheduleDrop(CAT_NOTE_MS + 1500);
+        catUntil = System.currentTimeMillis() + CAT_NOTE_MS + 800;
+        scheduleDrop(CAT_NOTE_MS + 1000);
     }
 
     private void styleNote(TextView t, int level) {
@@ -612,18 +615,18 @@ public class DimService extends AccessibilityService {
         layer.addView(note, np);
 
         catNote = pill(d);
-        catNote.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        catNote.setTextColor(0xFFE6D6C4);
-        catNote.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        catNote.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        catNote.setTextColor(0xFFF0E4D6);
+        catNote.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         catNote.setPadding(Math.round(14 * d), Math.round(6 * d), Math.round(14 * d), Math.round(6 * d));
         GradientDrawable cb = new GradientDrawable();
         cb.setColor(0xB31A1410);
         cb.setCornerRadius(99 * d);
         catNote.setBackground(cb);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        cp.gravity = Gravity.BOTTOM | Gravity.START;
+        cp.gravity = Gravity.TOP | Gravity.START;     // the cats: a small drop-down, top left (calendar ones are top right)
         cp.leftMargin = Math.round(40 * d);
-        cp.bottomMargin = Math.round(32 * d);
+        cp.topMargin = Math.round(28 * d);
         layer.addView(catNote, cp);
 
         WindowManager.LayoutParams wp = new WindowManager.LayoutParams(

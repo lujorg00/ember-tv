@@ -577,7 +577,9 @@ async function showHome() {
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
   const hidden = hiddenRows();
   const shown = cats.filter(c => !hidden.has(catKey(c)) && !/all.?time/i.test(c.name || "")); // all-time picks live on Films and Series
-  const tops = shown.filter(isTop), others = shown.filter(c => !isTop(c) && !isContinue(c));
+  // Trending Today first (wide pictures, no numbers), then the Top 10s
+  const isTrend = (c) => /trending/i.test(c.name || "");
+  const tops = shown.filter(isTop).sort((a, b) => isTrend(b) - isTrend(a)), others = shown.filter(c => !isTop(c) && !isContinue(c));
   const topSlots = tops.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const otherSlots = others.map(() => { const d = document.createElement("div"); rows.appendChild(d); return d; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);
@@ -588,8 +590,9 @@ async function showHome() {
   tileRows(hidden).then(r => { if (r) slotTiles.replaceWith(r); });
   const [topLists, otherLists] = await Promise.all([
     Promise.all(tops.map(async (c, i) => {
-      const metas = (await topList(c)).map(m => ({ ...m, type: m.type || c.type }));
-      if (metas.length) topSlots[i].replaceWith(top10Row(homeRowName(c.name || c.id, c.type), metas, hero.pick));
+      const metas = (await (isTrend(c) ? catalogRow(c) : topList(c))).map(m => ({ ...m, type: m.type || c.type }));
+      if (metas.length) topSlots[i].replaceWith(isTrend(c) ? wideRow(homeRowName(c.name || c.id, c.type), metas)
+        : top10Row(homeRowName(c.name || c.id, c.type), metas, hero.pick));
       return metas;
     })),
     Promise.all(others.map(async (c, i) => {
@@ -760,7 +763,9 @@ function wideRow(title, metas) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip wide"></div></section>`);
   metas.forEach((m) => {
-    const el = h(`<div class="t10"><div class="t10-art" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
+    const bm = watchlistIds.has(m.id);
+    const el = h(`<div class="t10"><div class="t10-art${bm ? " bm" : ""}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">${bm ? BOOKMARK : ""}${badge(m.id)}</div></div>`);
+    $(".t10-art", el).appendChild(titleArt(m, m.type));
     el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });
