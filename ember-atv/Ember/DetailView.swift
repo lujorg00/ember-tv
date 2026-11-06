@@ -38,7 +38,7 @@ struct DetailView: View {
         return sp?.resumable == true ? "Resume · \(clock(sp!.position))" : "Play"
     }
 
-    enum Btn: Hashable { case play, stream, trailer, watchlist, watched, more }
+    enum Btn: Hashable { case play, stream, trailer, watchlist, love, watched, more }
     @FocusState private var btn: Btn?
     @State private var showMore = false
     @State private var ready = false
@@ -53,6 +53,7 @@ struct DetailView: View {
         case .stream: return "Choose stream"
         case .trailer: return "Watch trailer"
         case .watchlist: return store.watchlist.contains(mm.id) ? "On your watchlist" : "Add to watchlist"
+        case .love: return store.loved.contains(mm.id) ? "Loved · select to take the love off" : "Love it: your recommendations lean towards what you love"
         case .watched: return store.watched[mm.id] == "done" ? "Watched · select to undo" : "Mark as watched"
         case .more: return "Mark seasons or the whole show"
         default: return " "
@@ -98,6 +99,11 @@ struct DetailView: View {
                             Image(systemName: store.watchlist.contains(mm.id) ? "checkmark" : "plus")
                         }
                         .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .watchlist)
+                        Button { Task { await store.setLove(mm, !store.loved.contains(mm.id)) } } label: {
+                            Image(systemName: store.loved.contains(mm.id) ? "heart.fill" : "heart")
+                                .foregroundStyle(store.loved.contains(mm.id) ? Color(red: 1, green: 0.36, blue: 0.42) : Color.primary)
+                        }
+                        .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .love)
                         if mm.isSeries {
                             Button { showMore = true } label: { Image(systemName: "ellipsis") }
                                 .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .more)

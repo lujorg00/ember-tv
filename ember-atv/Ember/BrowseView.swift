@@ -147,16 +147,9 @@ struct TileCard: View {
         }
     }
 
+    /// The 007 logo on the gun barrel.
     private var bond: some View {
-        ZStack {
-            RemoteImage(url: tile.image) { Theme.card }
-            Color.black.opacity(0.55)
-            VStack(spacing: 2) {
-                Text("007").font(.ember(56, .heavy)).tracking(2)
-                Text("JAMES BOND").font(.ember(14, .medium)).tracking(7).foregroundStyle(Color(red: 0.91, green: 0.86, blue: 0.8))
-            }
-            .shadow(color: .black, radius: 14)
-        }
+        Image("brand-007").resizable().scaledToFill()
     }
 
     private var serviceLogo: some View {

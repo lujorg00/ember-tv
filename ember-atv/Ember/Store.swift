@@ -67,6 +67,9 @@ final class Store: ObservableObject {
     @Published var aio = UserDefaults.standard.string(forKey: "aio") ?? ""
     @Published var progress: [String: Progress] = [:]
     @Published var watched: [String: String] = [:]      // imdb -> "done" | "partial"
+    @Published var loved: Set<String> = []                // watched isn't the same as liked: these steer the recommendations
+    /// What a poster's corner shows: loved, watched, started, or nothing.
+    func badge(_ id: String) -> String? { loved.contains(id) ? "loved" : watched[id] }
     @Published var hero: [Meta] = []
     @Published var rows: [RowData] = []
     @Published var cw: [CWItem] = []
@@ -230,6 +233,17 @@ final class Store: ObservableObject {
             upcoming = u.arr("episodes").compactMap(Upcoming.init).filter { $0.airs >= start }.sorted { $0.airs < $1.airs }
         }
         if let wj = await w { watchlist = Set((wj["items"] as? [String]) ?? []) }
+        if let lj = try? await API.feedGet("/loves", timeout: 10) { loved = Set((lj["items"] as? [String]) ?? []) }
+    }
+
+    /// Love a title (or take the love off): on the Pi and Trakt (a 10/10); loving it also marks it watched.
+    func setLove(_ m: Meta, _ on: Bool) async {
+        do {
+            _ = try await API.post("/love", ["imdb": m.id, "type": m.isSeries ? "series" : "movie", "on": on], timeout: 15)
+            if on { loved.insert(m.id) } else { loved.remove(m.id) }
+            if on && watched[m.id] != "done" { await markTitle(m, watched: true) }
+            say(on ? "Loved \(m.name). Your recommendations will lean towards it." : "Took the love off \(m.name).")
+        } catch { say("Couldn't save that: \(error.localizedDescription)") }
     }
 
     // MARK: - films and series pages

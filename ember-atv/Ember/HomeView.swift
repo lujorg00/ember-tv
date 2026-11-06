@@ -391,7 +391,7 @@ struct TopRow: View {
                                     // the title as its logo (the name when it has none)
                                     TitleArt(meta: m, height: 70, width: 250, nameSize: 26)
                                         .padding(.horizontal, 16).padding(.bottom, 14)
-                                    WatchBadge(state: store.watched[m.id])
+                                    WatchBadge(state: store.badge(m.id))
                                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
                                     if store.watchlist.contains(m.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
                                 }
@@ -435,7 +435,7 @@ struct WideRow: View {
                                 LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
                                 Text(m.name).font(.ember(24, .bold)).lineLimit(2)
                                     .shadow(color: .black, radius: 10).padding(.horizontal, 16).padding(.bottom, 14)
-                                WatchBadge(state: store.watched[m.id]).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                                WatchBadge(state: store.badge(m.id)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             }
                             .frame(width: 400, height: 225)
                             .background(Prefetch(meta: m))
@@ -476,7 +476,7 @@ struct PosterCard: View {
                 .clipped()
                 if store.watchlist.contains(meta.id) { Bookmark() }
                 // bookmarked (or a watchlist row): the tick sits top left, clear of the bookmark
-                WatchBadge(state: store.watched[meta.id])
+                WatchBadge(state: store.badge(meta.id))
                     .frame(maxWidth: .infinity, maxHeight: .infinity,
                            alignment: inWatchlist || store.watchlist.contains(meta.id) ? .topLeading : .topTrailing)
                 if let label = store.release[meta.id]?.label {
@@ -505,6 +505,9 @@ struct PosterCard: View {
                 Button("Mark as watched (takes it off your watchlist)") { Task { await store.watchedFromWatchlist(meta) } }
             } else {
                 Button("Mark as watched") { Task { await store.markTitle(meta, watched: true) } }
+            }
+            Button(store.loved.contains(meta.id) ? "Take the love off" : "Love it (steers your recommendations)") {
+                Task { await store.setLove(meta, !store.loved.contains(meta.id)) }
             }
         }
     }
@@ -590,7 +593,7 @@ struct SpotCard: View {
             }
             .padding(.leading, 30).padding(.bottom, 26)
             if store.watchlist.contains(m.id) { Bookmark(size: 1.2).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
-            WatchBadge(state: store.watched[m.id])
+            WatchBadge(state: store.badge(m.id))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
         }
         .frame(width: 720, height: 405)
@@ -603,6 +606,9 @@ struct SpotCard: View {
     @ViewBuilder private var markMenu: some View {
         Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
             Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
+        }
+        Button(store.loved.contains(m.id) ? "Take the love off" : "Love it (steers your recommendations)") {
+            Task { await store.setLove(m, !store.loved.contains(m.id)) }
         }
     }
 
@@ -641,7 +647,10 @@ struct WallRow: View {
 struct WatchBadge: View {
     let state: String?
     var body: some View {
-        if state == "done" {
+        if state == "loved" {
+            Image(systemName: "heart.fill").font(.ember(18, .heavy)).foregroundStyle(Color(red: 1, green: 0.36, blue: 0.42))
+                .frame(width: 38, height: 38).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10)).padding(10)
+        } else if state == "done" {
             Image(systemName: "checkmark").font(.ember(18, .heavy)).foregroundStyle(Theme.accent)
                 .frame(width: 38, height: 38).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10)).padding(10)
         } else if state == "partial" {

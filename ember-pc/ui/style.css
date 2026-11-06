@@ -637,3 +637,24 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .sc-m em { font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--faint); text-transform: uppercase; }
 .sc-n { display: none; }
 .sc-v:empty::before { content: "Metacritic"; font-size: 12px; font-weight: 500; color: var(--faint); }
+
+/* tiles: one full-size cell, so a logo's size (a % of the tile) works out and it sits in the middle */
+.tile.logo, .tile.art, .tile.brand { grid-template: 100% / 100%; }
+.tile.art.bondimg { background-size: cover; background-position: center; }
+.tile.art.bondimg::after, .tile.art.bondimg span { display: none; }
+
+/* loves: a heart in place of the tick, and the details page's Love button */
+.wbadge.loved { opacity: 1; color: #ff5d6c; }
+.wbadge.loved svg, .wbadge svg { width: 14px; height: 14px; fill: currentColor; display: block; }
+.wbadge.loved:hover { background: rgba(255,93,108,.9); color: #fff; }
+#loveBtn { display: inline-flex; align-items: center; gap: 8px; }
+#loveBtn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+#loveBtn.loved { color: #ff7d89; border-color: rgba(255,93,108,.5); }
+#loveBtn.loved svg { fill: #ff5d6c; stroke: #ff5d6c; }
+
+/* PC: the poster turns into the spotlight card (and back) with a quick crossfade, not a jump */
+.spot-pimg { display: none; }
+.strip.hoverspot .spot .spot-pimg { display: block; position: absolute; inset: 0; z-index: 2; background: var(--card) center/cover;
+  opacity: 1; transition: opacity .3s ease; pointer-events: none; }
+.strip.hoverspot .spot.open .spot-pimg { opacity: 0; transition-delay: .05s; }
+.strip.hoverspot .spot .wbadge, .strip.hoverspot .spot .bmk { z-index: 3; }

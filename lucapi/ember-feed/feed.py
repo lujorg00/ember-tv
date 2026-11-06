@@ -1018,6 +1018,109 @@ def watched_status():
         return {"items": {}, "error": str(e)}
 
 
+# ---- loves: watched isn't the same as liked. A love (double-click the tick) is kept here and on Trakt (a 10/10
+# rating), and steers the recommendation rows: titles like the ones you love move up, and a few new ones join.
+LOVES_PATH = HERE / "loves.json"
+_loves_lock = threading.Lock()
+
+
+def _local_loves():
+    try:
+        return json.loads(LOVES_PATH.read_text()).get("items", []) if LOVES_PATH.exists() else []
+    except Exception:
+        return []
+
+
+def loved_list():
+    """Everything you love, most recent first: Ember's own, plus anything you rated 9 or 10 on Trakt."""
+    items = {x["imdb"]: x for x in _local_loves()}
+    try:
+        def get():
+            out = []
+            for kind, typ in (("movies", "movie"), ("shows", "series")):
+                for r in _trakt(f"/sync/ratings/{kind}/9,10"):
+                    i = (((r.get("movie") or r.get("show")) or {}).get("ids") or {}).get("imdb")
+                    if i:
+                        out.append({"imdb": i, "type": typ, "at": r.get("rated_at", "")})
+            return out
+        for x in cached("trakt-loves", 900, get):
+            items.setdefault(x["imdb"], x)
+    except Exception:
+        pass
+    unloved = {x["imdb"] for x in _local_loves() if x.get("off")}
+    return sorted([x for x in items.values() if x["imdb"] not in unloved and not x.get("off")],
+                  key=lambda x: x.get("at", ""), reverse=True)
+
+
+def loves():
+    return {"items": [x["imdb"] for x in loved_list()]}
+
+
+def set_love(body):
+    imdb = str(body.get("imdb", ""))
+    if not re.fullmatch(r"tt\d+", imdb):
+        raise ValueError("imdb must look like tt1234567")
+    typ = "series" if body.get("type") == "series" else "movie"
+    on = body.get("on", True) is not False
+    with _loves_lock:
+        cur = [x for x in _local_loves() if x["imdb"] != imdb]
+        cur.insert(0, {"imdb": imdb, "type": typ, "at": datetime.utcnow().isoformat() + "Z", **({} if on else {"off": True})})
+        LOVES_PATH.write_text(json.dumps({"items": cur[:2000]}))
+    try:   # on Trakt too: a 10, or the rating taken off
+        kind = "shows" if typ == "series" else "movies"
+        item = {"ids": {"imdb": imdb}}
+        if on:
+            item["rating"] = 10
+        _trakt("/sync/ratings" if on else "/sync/ratings/remove", {kind: [item]})
+    except Exception as e:
+        print(f"[ember-feed] love on Trakt failed: {e}", flush=True)
+    with _cache_lock:
+        _cache.pop("trakt-loves", None)
+    return {"on": on, "items": loves()["items"]}
+
+
+def _love_boost(typ):
+    """From what you love: how strongly each title is recommended alongside them (TMDB), and those titles."""
+    mine = [x for x in loved_list() if x["type"] == typ][:25]
+    if not mine:
+        return {}, {}
+    def build():
+        score, found = {}, {}
+        with concurrent.futures.ThreadPoolExecutor(6) as ex:
+            lists = list(ex.map(lambda x: similar(typ, x["imdb"]).get("metas", []), mine))
+        for n, metas in enumerate(lists):
+            recent = 1.0 if n < 8 else 0.6          # the newest loves count most
+            for rank, m in enumerate(metas[:20]):
+                score[m["id"]] = score.get(m["id"], 0) + recent * (20 - rank) / 20
+                found.setdefault(m["id"], m)
+        return score, found
+    return cached(f"loveboost:{typ}:" + ",".join(x["imdb"] for x in mine), 6 * 3600, build)
+
+
+def love_rerank(metas, typ, new_only):
+    """A recommendation row, steered by your loves: like-them titles move up; up to 8 new ones join (unwatched,
+    and for the New ... For You rows, out in the last two years)."""
+    try:
+        score, found = _love_boost(typ)
+    except Exception:
+        return metas
+    if not score:
+        return metas
+    try:
+        seen = set(watched_status().get("items", {}).keys())
+    except Exception:
+        seen = set()
+    loved = {x["imdb"] for x in loved_list()}
+    have = {m.get("id") for m in metas}
+    year = date.today().year
+    extra = [m for i, m in sorted(found.items(), key=lambda kv: -score[kv[0]])
+             if i not in have and i not in seen and i not in loved
+             and (not new_only or (m.get("releaseInfo", "")[:4].isdigit() and int(m["releaseInfo"][:4]) >= year - 1))][:8]
+    ranked = [(i - 8 * score.get(m.get("id"), 0), m) for i, m in enumerate(metas)]
+    ranked += [(2 * k + 1.5, m) for k, m in enumerate(extra)]
+    return [m for _, m in sorted(ranked, key=lambda x: x[0])]
+
+
 def mark_watched(body):
     """Mark a film, or any episodes of a show (one, a season, the lot), as watched or not - for things you saw
     before Ember. Saved on the Pi (so Ember skips them) and in your Trakt history (so Omni, Odin and Up Next agree).
@@ -2557,7 +2660,7 @@ def browse_cat(tid, typ="movie", skip=0, sort=""):
                     for m in fresh:
                         seen.add(m.get("id"))
                         out.append({**m, "type": m.get("type") or c["type"]})
-                    if not c["skip"] or not fresh:
+                    if not fresh or len(page) < 10:
                         break
                     at += len(page)
             out.sort(key=SORTS[sort])
@@ -2565,15 +2668,16 @@ def browse_cat(tid, typ="movie", skip=0, sort=""):
         return cached(f"browse:cat:{tid}:{typ}:all:{sort}", 3600, build_all)
 
     def build():
+        # many lists page with skip= even when they don't say so: always ask for more, and offer More while a
+        # page comes back full (a list that ignores skip just repeats itself, and Ember then hides More)
         out, seen, more = [], set(), False
         for c in cats:
-            if skip and not c["skip"]:
-                continue
-            for m in _cat_metas(c, skip):
+            page = _cat_metas(c, skip)
+            for m in page:
                 if m.get("id") not in seen:
                     seen.add(m.get("id"))
                     out.append({**m, "type": m.get("type") or c["type"]})
-            more = more or (c["skip"] and len(out) > 0)
+            more = more or len(page) >= 10
         return {"metas": out, "more": more}
     return cached(f"browse:cat:{tid}:{typ}:{skip}", 3600, build)
 
@@ -2852,6 +2956,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(shared_settings(body))
             elif path == "/progress/watched":
                 self._json(mark_watched(body))
+            elif path == "/love":
+                self._json(set_love(body))
             elif path == "/client/log":
                 self._json(client_log_add(body))
             elif path == "/pick/failed":
@@ -2928,6 +3034,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(in_cinemas())
             elif path == "/watched":
                 self._json(watched_status())
+            elif path == "/loves":
+                self._json(loves())
             elif path == "/client/log":
                 self._json(client_log())
             elif path == "/progress/dismissed":
@@ -3012,7 +3120,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": str(e)}, 500)
 
     def _addon(self, rest):
-        """Passes requests through to your Stremio addon, which only listens inside the Pi."""
+        """Passes requests through to your Stremio addon, which only listens inside the Pi. The recommendation
+        rows (New ... For You, All Time Recommendations) are steered by your loves on the way through."""
         up = CFG["addon_upstream"].rstrip("/")
         try:
             req = urllib.request.Request(up + rest, headers={"User-Agent": "ember-feed/1.0", "Accept": "application/json"})
@@ -3022,6 +3131,18 @@ class Handler(BaseHTTPRequestHandler):
                 code = r.status
         except urllib.error.HTTPError as e:
             body, ctype, code = e.read(), e.headers.get("Content-Type", "text/plain"), e.code
+        m = re.fullmatch(r"/catalog/(movie|series)/([^/]+)\.json", rest.split("?")[0])
+        if m and code == 200:
+            try:
+                man = cached("addon-manifest", 3600, lambda: json.loads(http_get(up + "/manifest.json", timeout=15)))
+                name = next((c.get("name", "") for c in man.get("catalogs", [])
+                             if c.get("type") == m.group(1) and c.get("id") == urllib.parse.unquote(m.group(2))), "")
+                if re.search(r"for you|all.?time|recommend", name, re.I):
+                    j = json.loads(body)
+                    j["metas"] = love_rerank(j.get("metas", []), m.group(1), new_only=not re.search(r"all.?time", name, re.I))
+                    body, ctype = json.dumps(j).encode(), "application/json"
+            except Exception as e:
+                print(f"[ember-feed] love steering skipped: {e}", flush=True)
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

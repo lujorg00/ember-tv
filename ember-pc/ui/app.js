@@ -60,9 +60,32 @@ async function loadWatched() {
   if (Date.now() - watchedAt < 120e3) return;
   try { watchedMap = (await getJson(`${feed()}/watched`, 8000)).items || {}; watchedAt = Date.now(); } catch (e) {}
 }
-const badgeHtml = (id) => watchedMap[id] === "done" ? `✓` : watchedMap[id] === "partial" ? `<i></i>` : `✓`;
-const badgeClass = (id) => watchedMap[id] === "done" ? "done" : watchedMap[id] === "partial" ? "part" : "add";
-const badgeTitle = (id) => watchedMap[id] === "done" ? "Watched (click to undo)" : watchedMap[id] === "partial" ? "Started (click to mark it all watched)" : "Mark as watched";
+// Loves: watched isn't the same as liked. Double-click the tick for a heart; it steers the recommendation rows.
+let lovedIds = new Set();
+const HEART = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.4h2c.7-1.2 2.2-2.4 4.3-2.4 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg>`;
+async function loadLoves() { try { lovedIds = new Set((await getJson(`${feed()}/loves`, 8000)).items || []); refreshBadges(); } catch (e) {} }
+const badgeHtml = (id) => lovedIds.has(id) ? HEART : watchedMap[id] === "done" ? `✓` : watchedMap[id] === "partial" ? `<i></i>` : `✓`;
+const badgeClass = (id) => lovedIds.has(id) ? "loved" : watchedMap[id] === "done" ? "done" : watchedMap[id] === "partial" ? "part" : "add";
+const badgeTitle = (id) => lovedIds.has(id) ? "Loved (double-click to take the love off)" : watchedMap[id] === "done" ? "Watched (click to undo, double-click to love it)" : watchedMap[id] === "partial" ? "Started (click to mark it all watched)" : "Mark as watched (double-click to love it)";
+function refreshBadges(id) {
+  document.querySelectorAll(id ? `[data-wid="${id}"] .wbadge` : "[data-wid] .wbadge").forEach(x => {
+    const i = x.closest("[data-wid]").dataset.wid;
+    x.className = "wbadge " + badgeClass(i); x.innerHTML = badgeHtml(i); x.title = badgeTitle(i);
+  });
+}
+/** Love a title (or take the love off): on the Pi and Trakt (a 10/10); loving it also marks it watched. */
+async function setLove(type, id, name, on) {
+  try {
+    const r = await fetch(`${feed()}/love`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imdb: id, type, on }) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+  } catch (e) { toast("Couldn't save that: " + e.message); return false; }
+  if (on) lovedIds.add(id); else lovedIds.delete(id);
+  if (on && watchedMap[id] !== "done") await markTitle(type, id, true);
+  refreshBadges(id);
+  toast(on ? `Loved ${name}. Your recommendations will lean towards it.` : `Took the love off ${name}.`);
+  return true;
+}
+loadLoves();
 const badge = (id) => `<button class="wbadge ${badgeClass(id)}" title="${badgeTitle(id)}">${badgeHtml(id)}</button>`;
 
 /** Marks a whole film or show watched (or not) from its poster: on the Pi and in Trakt. */
@@ -83,7 +106,8 @@ async function markTitle(type, id, watched) {
   if (watched) delete progress[id];
   return true;
 }
-// One click handler for every badge on every page.
+// One click handler for every badge on every page: a click marks it watched (or not); a double-click loves it.
+const badgeClicks = new WeakMap();
 document.addEventListener("click", async (e) => {
   const b = e.target.closest(".wbadge");
   if (!b) return;
@@ -91,6 +115,15 @@ document.addEventListener("click", async (e) => {
   const holder = b.closest("[data-wid]");
   if (!holder) return;
   const id = holder.dataset.wid, type = holder.dataset.wtype, name = holder.dataset.wname || "it";
+  if (badgeClicks.has(b)) { // the second click: love it (or take the love off)
+    clearTimeout(badgeClicks.get(b)); badgeClicks.delete(b);
+    b.classList.add("busy"); await setLove(type, id, name, !lovedIds.has(id)); b.classList.remove("busy");
+    return;
+  }
+  badgeClicks.set(b, setTimeout(() => { badgeClicks.delete(b); badgeClick(b, holder, id, type, name); }, 280));
+}, true);
+async function badgeClick(b, holder, id, type, name) {
+  if (lovedIds.has(id)) { toast(`${name} is loved. Double-click to take the love off.`); return; }
   const undo = watchedMap[id] === "done";
   if (undo && type === "series" && !b.dataset.armed) { // a whole show: ask with a second click
     b.dataset.armed = "1"; b.classList.add("ask"); b.title = "Click again to mark it unwatched";
@@ -99,7 +132,7 @@ document.addEventListener("click", async (e) => {
   }
   b.classList.add("busy");
   if (await markTitle(type, id, !undo)) {
-    document.querySelectorAll(`[data-wid="${id}"] .wbadge`).forEach(x => { x.className = "wbadge " + badgeClass(id); x.innerHTML = badgeHtml(id); x.title = badgeTitle(id); });
+    refreshBadges(id);
     // ticked on a watchlist row: watched, so it comes off the watchlist (and out of the row)
     if (!undo && b.closest(".strip.wall")) {
       try {
@@ -117,7 +150,7 @@ document.addEventListener("click", async (e) => {
     } else toast(undo ? `${name} is unwatched again.` : `Marked ${name} as watched.`);
   }
   b.classList.remove("busy");
-}, true);
+}
 async function loadProgress() {
   const w = loadWatched();
   try { progress = (await getJson(`${feed()}/progress`, 6000)).items || {}; } catch (e) { progress = progress || {}; }
@@ -603,6 +636,7 @@ async function continueRow(cwCat) {
 function spotCard(m, type) {
   const t = m.type || type, p = progress[m.id];
   const sp = h(`<div class="spot" data-wid="${esc(m.id)}" data-wtype="${esc(t)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">
+    <div class="spot-pimg" style="background-image:url('${esc(poster(m))}')"></div>
     ${watchlistIds.has(m.id) ? BOOKMARK : ""}${badge(m.id)}
     <div class="spot-in"><span class="spot-k">Top pick</span><div class="spot-t"></div>
       <div class="spot-m">${esc([m.releaseInfo, m.imdbRating && "★ " + m.imdbRating].filter(Boolean).join("  ·  "))}</div>
@@ -656,7 +690,9 @@ function hoverRow(title, metas, type) {
   strip.addEventListener("mouseover", (e) => {
     const poster = e.target.closest(".poster");
     if (!poster || !strip.contains(poster) || e.target.closest(".wbadge")) return;
-    logoFor(byId.get(poster.dataset.wid), type);   // ready by the time the card opens
+    const hm = byId.get(poster.dataset.wid);
+    logoFor(hm, type);   // logo and picture ready by the time the card opens
+    if (hm && backdrop(hm)) new Image().src = backdrop(hm);
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (open && open.poster === poster) return;
@@ -788,8 +824,8 @@ async function tileRows(hidden = new Set(), typ = "") {
         const parts = (tile.title || "").split(" "), last = parts.length > 1 ? parts.pop() : "";
         inner = `<div class="tile director"><div class="ph" style="background-image:url('${esc(tile.image)}')"></div><b>${esc(parts.join(" "))}<br>${esc(last)}</b></div>`;
       }
-      else if (key === "007") // the films' logos all carry their own titles: a designed one instead
-        inner = `<div class="tile art haslogo bond" style="background-image:url('${esc(tile.image || "")}')"><b>007</b><small>JAMES BOND</small></div>`;
+      else if (key === "007") // the 007 logo on the gun barrel
+        inner = `<div class="tile art bondimg" style="background-image:url('brands/007.jpg')"><span>James Bond</span></div>`;
       else if (g.style === "logo") inner = `<div class="tile logo ${tile.logo ? "haslogo" : ""}" style="background:${esc(tile.colour)}">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
       else if (g.style === "person") inner = `<div class="tile person"><div class="face" style="background-image:url('${esc(tile.image)}')"></div><span>${esc(tile.title)}</span></div>`;
       else inner = `<div class="tile art ${tile.logo ? "haslogo" : ""}" style="background-image:url('${esc(tile.image || "")}')">${tile.logo ? `<img src="${esc(tile.logo)}" alt="">` : ""}<span>${esc(tile.title)}</span></div>`;
@@ -1031,7 +1067,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}</div>`;
+    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // In cinemas / not out yet
   (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -1069,6 +1105,11 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     drawer.classList.add("open");
   };
   $("#chooseBtn", head).onclick = openStreams;
+  // Love: watched isn't the same as liked; loved titles steer your recommendation rows
+  const lb = $("#loveBtn", head);
+  const loveLabel = () => { const on = lovedIds.has(id); lb.innerHTML = `${HEART}<span>${on ? "Loved" : "Love"}</span>`; lb.classList.toggle("loved", on); };
+  loveLabel();
+  lb.onclick = async () => { lb.disabled = true; await setLove(type, id, mm.name, !lovedIds.has(id)); loveLabel(); lb.disabled = false; };
   $(".tp-dr-x", page).onclick = close;
   $(".tp-dr-shade", page).onclick = close;
   const onKey = (ev) => { if (!document.body.contains(page)) return document.removeEventListener("keydown", onKey, true);

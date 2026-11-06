@@ -15,3 +15,4 @@ ember-atv/Payload/
 ember-atv/*.ipa
 lucapi/ember-feed/client.log
 lucapi/ember-feed/toplists.json
+lucapi/ember-feed/loves.json
