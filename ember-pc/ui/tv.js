@@ -88,6 +88,13 @@
       // up/down to another row lands near the left of what's showing, like TV apps
       if (score < bestScore) { bestScore = score; best = el; }
     }
+    // the two watchlists side by side: at the end of one, left/right carries on into the other
+    if (!best && sideways && sameStrip && cur.closest(".wl-pair")) {
+      const pair = cur.closest(".wl-pair");
+      const other = items.filter(el => el.closest(".wl-pair") === pair && el.closest(".strip") !== sameStrip && level(el));
+      other.sort((x, y) => dir === "right" ? x.getBoundingClientRect().left - y.getBoundingClientRect().left : y.getBoundingClientRect().left - x.getBoundingClientRect().left);
+      best = other.find(el => dir === "right" ? el.getBoundingClientRect().left > a.left : el.getBoundingClientRect().left < a.left) || null;
+    }
     if (best) setFocus(best);
     // the start of a row: a fresh press of left goes to the sidebar; holding left just stops there
     else if (dir === "left" && !held && !cur.closest("#side")) setFocus(document.querySelector("#side .nav.on") || document.querySelector("#side .nav"));

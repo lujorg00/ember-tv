@@ -489,6 +489,7 @@ async function showHome() {
       return metas;
     })),
   ]);
+  pairWalls(rows);
   const own = (await heroList).flat();
   hero.start(own.length ? own : slideshowFrom([...topLists, ...otherLists]));
 }
@@ -634,6 +635,15 @@ function hoverRow(title, metas, type) {
   });
   strip.addEventListener("mouseleave", () => { clearTimeout(timer); timer = setTimeout(close, 180); });
   return r;
+}
+
+/** The two watchlists (films and series) side by side, where the first of them was. */
+function pairWalls(container) {
+  const walls = [...container.querySelectorAll(":scope > .row")].filter(r => r.querySelector(".strip.wall"));
+  if (walls.length < 2) return;
+  const pair = h(`<div class="wl-pair"></div>`);
+  walls[0].before(pair);
+  pair.append(walls[0], walls[1]);
 }
 
 /** Your watchlists: posters two rows deep, so they stand apart from the other rows (each carries its bookmark). */

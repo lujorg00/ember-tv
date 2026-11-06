@@ -587,3 +587,10 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .strip.hoverspot .spot-d { font-size: 13px; }
 .strip.hoverspot .spot .btn { padding: 6px 14px; font-size: 13px; }
 .strip.hoverspot .spot .bmk { right: 12px; width: 22px; height: 30px; }
+
+/* the two watchlists side by side, each scrolling within its half */
+.wl-pair { display: flex; align-items: flex-start; }
+.wl-pair > .row { flex: 1 1 0; min-width: 0; }
+.wl-pair > .row + .row h2 { margin-left: 18px; }
+.wl-pair > .row + .row .strip { padding-left: 18px; }
+.wl-pair > .row:first-child .strip { padding-right: 18px; }

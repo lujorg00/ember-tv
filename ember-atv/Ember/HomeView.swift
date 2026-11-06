@@ -14,8 +14,21 @@ struct HomeView: View {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
                     if !store.cw.isEmpty { ContinueRow(items: store.cw) }
+                    // the two watchlists (films, series) sit side by side, where the first of them comes
+                    let walls = store.rows.filter(\.wide)
                     ForEach(store.rows) { r in
-                        if r.top { TopRow(row: r) } else if r.wide { WallRow(row: r) } else { SpotRow(row: r) }
+                        if r.top { TopRow(row: r) }
+                        else if r.wide {
+                            if walls.count >= 2 {
+                                if r.id == walls[0].id {
+                                    HStack(alignment: .top, spacing: 0) {
+                                        WallRow(row: walls[0], leading: 90, trailing: 30, clip: true).frame(maxWidth: .infinity, alignment: .leading)
+                                        WallRow(row: walls[1], leading: 30, trailing: 90, clip: true).frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            } else { WallRow(row: r) }
+                        }
+                        else { SpotRow(row: r) }
                     }
                     ForEach(store.tileGroups) { g in TileRow(group: g, type: "") }
                     if !store.homeLoaded {
@@ -322,13 +335,14 @@ struct RowHeader: View {
     let title: String
     var kind: String? = nil
     var count: Int? = nil
+    var leading: CGFloat = 90
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text(title).font(.ember(34, .bold))
             if let kind { Text(kind).font(.ember(24, .semibold)).foregroundStyle(Theme.accent) }
             if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }
-        .padding(.leading, 90)
+        .padding(.leading, leading)
     }
 }
 
@@ -581,17 +595,20 @@ struct SpotCard: View {
 /// Your watchlists: posters two rows deep, so they stand apart (each carries its bookmark).
 struct WallRow: View {
     let row: RowData
+    var leading: CGFloat = 90
+    var trailing: CGFloat = 90
+    var clip = false          // side by side: each scrolls within its own half
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RowHeader(title: row.title, kind: row.kind, count: row.metas.count)
+            RowHeader(title: row.title, kind: row.kind, count: row.metas.count, leading: leading)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHGrid(rows: [GridItem(.fixed(240), spacing: 30), GridItem(.fixed(240))], spacing: 26) {
                     ForEach(row.metas) { m in PosterCard(meta: m, width: 160).remember("\(row.id)|\(m.id)") }
                 }
-                .padding(.horizontal, 90)
+                .padding(.leading, leading).padding(.trailing, trailing)
                 .padding(.vertical, 28)
             }
-            .scrollClipDisabled()
+            .scrollClipDisabled(!clip)
         }
         .focusSection()
     }
