@@ -42,6 +42,12 @@ struct SettingsView: View {
                     } header: { Text("Picture") } footer: {
                         Text("Off: HDR and Dolby Vision are converted to a normal picture (reliable). On: sent to the TV as HDR; if streams then crash or look wrong, turn it off.")
                     }
+                    Section("What Ember last did") {
+                        let steps = Array(Diag.lastSteps(25).reversed())
+                        ForEach(steps.indices, id: \.self) { i in
+                            Text(steps[i]).font(.system(size: 16, design: .monospaced)).lineLimit(2)
+                        }
+                    }
                     Section {
                         Button("Reload everything") { Task { await store.loadHome() } }
                     } footer: {

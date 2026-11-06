@@ -130,7 +130,7 @@ enum Diag {
     /// One step, kept on the Apple TV and sent to the Pi.
     static func log(_ msg: String) {
         let line = "\(Date().formatted(.iso8601.time(includingFractionalSeconds: true))) \(msg)"
-        q.async {
+        q.sync {   // written straight away, so the last step before a crash is never lost
             var lines = ((try? String(contentsOf: logFile, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
             lines.append(line)
             if lines.count > 300 { lines.removeFirst(lines.count - 300) }
@@ -150,7 +150,8 @@ enum Diag {
     static func stoppedPlaying() { try? FileManager.default.removeItem(at: playingFile) }
 
     /// If Ember died last time, tell the Pi what it was doing.
-    static func reportLastRun() {
+    @discardableResult
+    static func reportLastRun() -> [String]? {
         var out: [String] = []
         if let c = try? String(contentsOf: crashFile, encoding: .utf8) {
             out.append("CRASH last time: " + String(c.prefix(6000)))
@@ -160,10 +161,11 @@ enum Diag {
             out.append("Ember closed while playing (\(p)) without stopping normally")
             stoppedPlaying()
         }
-        guard !out.isEmpty else { return }
+        guard !out.isEmpty else { return nil }
         out.append("its last steps:")
         out += lastSteps(40)
         API.fire("/client/log", ["device": API.deviceName, "lines": out])
+        return out
     }
 
     static func installCrashHandlers() {
