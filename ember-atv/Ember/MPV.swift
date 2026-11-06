@@ -9,14 +9,6 @@ final class MetalLayer: CAMetalLayer {
         set { if Int(newValue.width) > 1 && Int(newValue.height) > 1 { super.drawableSize = newValue } }
     }
 
-    /// HDR: MoltenVK switches the layer to extended range from mpv's drawing thread, but the switch has to happen on
-    /// the main thread (off it, the app is killed). Same fix as MPVKit's iOS demo.
-    override var wantsExtendedDynamicRangeContent: Bool {
-        get { super.wantsExtendedDynamicRangeContent }
-        set {
-            if Thread.isMainThread { super.wantsExtendedDynamicRangeContent = newValue }
-            else { DispatchQueue.main.sync { super.wantsExtendedDynamicRangeContent = newValue } }
-        }
     }
 }
 

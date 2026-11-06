@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: Store
     @AppStorage("feed") private var feed = ""
+    @AppStorage("hdrOutput") private var hdrOutput = false
 
     var body: some View {
         NavigationStack {
@@ -35,6 +36,11 @@ struct SettingsView: View {
                         if store.aio.isEmpty {
                             Text("Open Ember PC once: it shares the link with your TVs through lucapi.").font(.ember(19)).foregroundStyle(Theme.muted)
                         }
+                    }
+                    Section {
+                        Toggle("HDR output (experimental)", isOn: $hdrOutput)
+                    } header: { Text("Picture") } footer: {
+                        Text("Off: HDR and Dolby Vision are converted to a normal picture (reliable). On: sent to the TV as HDR; if streams then crash or look wrong, turn it off.")
                     }
                     Section {
                         Button("Reload everything") { Task { await store.loadHome() } }

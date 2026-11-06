@@ -317,9 +317,11 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let url = URL(string: session.stream.url) {
-                // HDR output only for streams named HDR / Dolby Vision (and only if the TV can show HDR)
+                // HDR output (experimental, Settings): only for streams named HDR / Dolby Vision. Otherwise HDR is
+                // converted to a normal picture, which is what's been reliable.
                 MPVView(model: model, url: url, start: session.start,
-                        hdr: session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
+                        hdr: UserDefaults.standard.bool(forKey: "hdrOutput")
+                            && session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
             }
             if model.buffering { ProgressView().scaleEffect(1.8).tint(.white) }
 
