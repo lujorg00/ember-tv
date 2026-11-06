@@ -258,6 +258,10 @@ public class WebHomeActivity extends Activity {
             });
         }
 
+        /** Sends a test calendar and cat notification; false if Ember's notification service (the dimmer) is off. */
+        @JavascriptInterface
+        public boolean testNotices() { return DimService.test(); }
+
         /** Ember's own TV settings: dimmer, screensaver, home-screen takeover. */
         @JavascriptInterface
         public void openTvSettings() {

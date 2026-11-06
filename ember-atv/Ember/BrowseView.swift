@@ -208,6 +208,15 @@ struct TilePage: View {
     private var own: Bool { tile.kind == "cat" }
     private var both: Bool { own ? tile.types.count > 1 : ["service", "genre", "company"].contains(tile.kind) }
     static let sorts: [(String, String)] = [("", "List order"), ("new", "Newest"), ("old", "Oldest"), ("rating", "Top rated"), ("az", "A–Z")]
+    /// A streaming service: its own shows and films too ("Netflix Originals").
+    private var hasOriginals: Bool {
+        own && tile.title.range(of: "^(netflix|prime video|amazon|disney\\s*\\+|apple tv\\s*\\+|hbo max|max|hulu|paramount\\s*\\+|peacock)\\b",
+                                options: [.regularExpression, .caseInsensitive]) != nil
+    }
+    private var originalsName: String {
+        let base = tile.title.replacingOccurrences(of: "\\s*(shows?|series|films?|movies?)$", with: "", options: [.regularExpression, .caseInsensitive])
+        return (base.lowercased() == "prime video" ? "Amazon" : base) + " Originals"
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -222,6 +231,9 @@ struct TilePage: View {
                                 chip("Films", on: typ == "movie") { typ = "movie"; reload() }
                                 chip("Series", on: typ == "series") { typ = "series"; reload() }
                                 Spacer().frame(width: 30)
+                            }
+                            if hasOriginals {
+                                chip(originalsName, on: sort == "orig") { sort = sort == "orig" ? "" : "orig"; reload() }
                             }
                             if own {
                                 ForEach(0..<TilePage.sorts.count, id: \.self) { i in
@@ -270,7 +282,9 @@ struct TilePage: View {
     private func loadMore() {
         guard more, !busy else { return }
         busy = true
-        let path = own ? "/browse/cat/\(tile.id)?type=\(typ)&skip=\(shown)&sort=\(sort)" : "/browse/\(tile.kind)/\(tile.id)?type=\(typ)&page=\(page)"
+        let orig = sort == "orig"
+        let path = orig ? "/browse/originals/\(API.q(tile.title))?type=\(typ)&page=\(page)"
+            : own ? "/browse/cat/\(tile.id)?type=\(typ)&skip=\(shown)&sort=\(sort)" : "/browse/\(tile.kind)/\(tile.id)?type=\(typ)&page=\(page)"
         let want = (typ, sort)
         Task {
             defer { busy = false }
@@ -280,7 +294,8 @@ struct TilePage: View {
             let fresh = got.filter { !have.contains($0.id) }
             metas += fresh
             shown += got.count
-            if own { more = r.bool("more") && !fresh.isEmpty } else { page += 1; more = page <= (r.int("pages") ?? 1) }
+            if orig { page += 1; more = page <= (r.int("pages") ?? 1) && !fresh.isEmpty }
+            else if own { more = r.bool("more") && !fresh.isEmpty } else { page += 1; more = page <= (r.int("pages") ?? 1) }
         }
     }
 }

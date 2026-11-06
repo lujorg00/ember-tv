@@ -658,3 +658,19 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
   opacity: 1; transition: opacity .3s ease; pointer-events: none; }
 .strip.hoverspot .spot.open .spot-pimg { opacity: 0; transition-delay: .05s; }
 .strip.hoverspot .spot .wbadge, .strip.hoverspot .spot .bmk { z-index: 3; }
+.chip.orig { border-color: rgba(240,160,75,.45); }
+
+/* Home: a small glance, top right (the cats, and what's next today or tomorrow) */
+.glance { position: absolute; z-index: 3; top: 22px; right: 84px; display: flex; align-items: center; gap: 12px; padding: 7px 14px;
+  border-radius: 999px; background: rgba(14,11,9,.5); border: 1px solid rgba(255,255,255,.07); font-size: 13.5px; color: #E8DDD1;
+  animation: glIn .5s ease; }
+@keyframes glIn { from { opacity: 0; } to { opacity: 1; } }
+.tv .glance { right: 48px; top: 26px; font-size: 15px; }
+.gl-cats { display: flex; gap: 12px; }
+.gl-cat { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.gl-cat svg { width: 14px; height: 14px; fill: currentColor; }
+.gl-cat i, .gl-next i { font-style: normal; font-weight: 400; color: var(--faint); }
+.gl-cat.in svg { color: #7fd38a; } .gl-cat.out svg { color: #8a7d70; }
+.gl-next { font-weight: 600; max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gl-next.shift { color: var(--accent); }
+.gl-sep { width: 1px; height: 14px; background: rgba(255,255,255,.15); }

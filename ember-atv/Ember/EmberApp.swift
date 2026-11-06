@@ -12,6 +12,7 @@ enum Theme {
 @main
 struct EmberApp: App {
     @StateObject private var store = Store()
+    @StateObject private var notices = Notices()
 
     init() {
         // posters and backdrops: keep plenty on disk so rows come back instantly
@@ -28,6 +29,7 @@ struct EmberApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .environmentObject(notices)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
@@ -36,6 +38,7 @@ struct EmberApp: App {
 
 struct RootView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var notices: Notices
     @Environment(\.scenePhase) private var phase
     @State private var lastCrash: [String]?
 
@@ -59,6 +62,7 @@ struct RootView: View {
                     .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
             }
             if let l = store.loading { LoadingView(state: l).transition(.opacity).zIndex(2) }
+            NoticeOverlay().zIndex(4)
             if let t = store.toast {
                 VStack {
                     Spacer()
@@ -79,11 +83,13 @@ struct RootView: View {
             CrashReport(lines: lastCrash ?? [])
         }
         .fullScreenCover(item: $store.playing) { s in
-            PlayerScreen(session: s).environmentObject(store)
+            PlayerScreen(session: s).environmentObject(store).environmentObject(notices)
+                .overlay { NoticeOverlay().environmentObject(notices) }
         }
         .task {
             lastCrash = Diag.reportLastRun()
             Diag.log("app: started, version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            notices.start()
             await store.loadHome()
         }
         .onChange(of: phase) { _, p in

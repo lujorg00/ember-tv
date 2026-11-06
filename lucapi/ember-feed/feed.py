@@ -431,6 +431,25 @@ def status_cards():
             "weather": weather()}
 
 
+def glance():
+    """A small line for the top of Ember's Home: the cats (in or out) and what's next on the calendar today
+    or tomorrow (anything already under way counts as now)."""
+    out = {"cats": [], "next": None}
+    try:
+        out["cats"] = [{"name": c["name"], "home": c["home"]} for c in cached("cats", 15, _cats) if c.get("detail") != "Unknown"]
+    except Exception:
+        pass
+    try:
+        for e in events():
+            if e.get("allDay") or e.get("day") not in ("Today", "Tomorrow"):
+                continue
+            out["next"] = {"title": e["title"], "day": e["day"], "time": e["time"], "shift": bool(e.get("shift"))}
+            break
+    except Exception:
+        pass
+    return out
+
+
 def screensaver(base_url):
     return {
         "generated": datetime.now(TZ).isoformat(),
@@ -2865,6 +2884,54 @@ def browse_tiles():
         return {"groups": [], "error": str(e)}
 
 
+# A service's own shows and films ("Netflix Originals"): shows by the network that made them (TMDB networks),
+# films by the service's production companies. Each network id is checked against TMDB's name before use.
+ORIGINALS = {
+    "netflix": ([213], ["Netflix"]),
+    "prime video": ([1024], ["Amazon MGM Studios", "Amazon Studios"]), "amazon": ([1024], ["Amazon MGM Studios", "Amazon Studios"]),
+    "disney+": ([2739], []), "apple tv+": ([2552], ["Apple Studios", "Apple Original Films"]),
+    "hbo max": ([49, 3186], ["HBO Films"]), "max": ([3186, 49], ["HBO Films"]), "hulu": ([453], []),
+    "paramount+": ([4330], []), "paramount +": ([4330], []), "peacock": ([3353], []),
+}
+_ORIG_WORD = {"prime video": "amazon", "amazon": "amazon", "hbo max": "hbo|max", "max": "hbo|max", "apple tv+": "apple",
+              "paramount+": "paramount", "paramount +": "paramount", "disney+": "disney"}
+
+
+def _orig_key(title):
+    k = title.lower().strip()
+    if k in ORIGINALS:
+        return k
+    n = " ".join(re.sub(r"\b(shows?|series|movies?|films?|tv|originals?|uk|us)\b", "", k).split())
+    return n if n in ORIGINALS else next((x for x in sorted(ORIGINALS, key=len, reverse=True) if n.startswith(x)), "")
+
+
+def browse_originals(title, typ="movie", page=1):
+    key = _orig_key(title)
+    if not key:
+        return {"metas": [], "pages": 1, "unsupported": True}
+    nets, companies = ORIGINALS[key]
+    word = _ORIG_WORD.get(key, key.split()[0])
+    k = "movie" if typ == "movie" else "tv"
+
+    def build():
+        if k == "tv":
+            ok = [n for n in nets if re.search(word, (_tmdb(f"/network/{n}").get("name") or ""), re.I)]
+            if not ok:
+                return {"metas": [], "pages": 1, "unsupported": True}
+            r = _tmdb("/discover/tv", with_networks="|".join(map(str, ok)), sort_by="popularity.desc", page=page)
+        else:
+            ids = []
+            for c in companies:
+                hit = next((x for x in _tmdb("/search/company", query=c).get("results", []) if x.get("name", "").lower() == c.lower()), None)
+                if hit:
+                    ids.append(str(hit["id"]))
+            if not ids:
+                return {"metas": [], "pages": 1, "unsupported": True}
+            r = _tmdb("/discover/movie", with_companies="|".join(ids), sort_by="popularity.desc", page=page, **{"vote_count.gte": 20})
+        return {"metas": _to_metas(r.get("results", []), k), "pages": r.get("total_pages", 1)}
+    return cached(f"originals:{key}:{k}:{page}", 6 * 3600, build)
+
+
 def browse_list(kind, tid, typ="movie", page=1):
     """The titles behind a tile. typ: movie or series."""
     k = "movie" if typ == "movie" else "tv"
@@ -2998,6 +3065,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": []})
             elif path == "/night":
                 self._json(night())
+            elif path == "/glance":
+                self._json(glance())
             elif path == "/alerts":
                 self._json(alerts())
             elif path == "/weather":
@@ -3055,6 +3124,10 @@ class Handler(BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(browse_cat(path.split("/")[3], (q.get("type") or ["movie"])[0], int((q.get("skip") or [0])[0]),
                                      (q.get("sort") or [""])[0]))
+            elif re.fullmatch(r"/browse/originals/[^/]+", path):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(browse_originals(urllib.parse.unquote(path.split("/")[3]), (q.get("type") or ["movie"])[0],
+                                            int((q.get("page") or [1])[0])))
             elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 _, _, kind, tid = path.split("/")

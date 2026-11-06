@@ -541,12 +541,32 @@ function createHero(pageName) {
 /** The top two from each row, in turn: the slideshow's titles. */
 const slideshowFrom = (lists) => { const out = []; for (let k = 0; k < 2; k++) for (const l of lists) if (l[k]) out.push(l[k]); return out; };
 
+/** Top right of Home, small: the cats (in or out) and what's next today or tomorrow. Refreshes every minute. */
+function glance(heroEl) {
+  const box = h(`<div class="glance" hidden></div>`);
+  heroEl.appendChild(box);
+  const cat = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3l3.5 4h7L19 3v8a7 7 0 0 1-14 0z"/></svg>`;
+  const draw = async () => {
+    if (!box.isConnected && !keptPages.has(heroEl)) return clearInterval(timer);
+    let g;
+    try { g = await getJson(`${feed()}/glance`, 8000); } catch (e) { return; }
+    const parts = [];
+    if ((g.cats || []).length) parts.push(`<span class="gl-cats">${g.cats.map(c => `<span class="gl-cat ${c.home ? "in" : "out"}" title="${esc(c.name)} is ${c.home ? "in" : "out"}">${cat}${esc(c.name)} <i>${c.home ? "in" : "out"}</i></span>`).join("")}</span>`);
+    if (g.next) parts.push(`<span class="gl-next ${g.next.shift ? "shift" : ""}">${esc(g.next.title)} <i>${esc(g.next.day === "Today" ? "" : g.next.day + " ")}${esc(g.next.time)}</i></span>`);
+    box.innerHTML = parts.join(`<span class="gl-sep"></span>`);
+    box.hidden = !parts.length;
+  };
+  const timer = setInterval(draw, 60000);
+  draw();
+}
+
 async function showHome() {
   const v = $("#view");
   v.innerHTML = "";
   const hero = createHero("");
   const rows = h(`<div class="rows"></div>`);
   v.append(hero.el, rows);
+  glance(hero.el);
   await loadProgress();
   const { rows: cats, hero: heroCats } = await homeCats();
   if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
@@ -896,12 +916,15 @@ async function showTile(kind, id, title, image, typ, sort = "") {
   const info = tileInfo[id] || {};
   const both = own ? (info.types || []).length > 1 : ["service", "genre", "company"].includes(kind);
   typ = typ || (own && info.types ? info.types[0] : "movie");
+  // a streaming service: its own shows and films too ("Netflix Originals")
+  const hasOriginals = own && /^(netflix|prime video|amazon|disney\s*\+|apple tv\s*\+|hbo max|max|hulu|paramount\s*\+|peacock)\b/i.test(title || "");
+  const origName = `${(title || "").replace(/\s*(shows?|series|films?|movies?)$/i, "").replace(/^prime video$/i, "Amazon")} Originals`;
   const v = $("#view");
   v.innerHTML = "";
   const head = h(`<header class="tile-head" style="background-image:url('${esc(image)}')"><div class="shade"></div>
     <button class="back">‹ Back</button><h1>${esc(title)}</h1>
     <div class="tile-bar">${both ? `<div class="chips"><span class="chip btn-chip ${typ === "movie" ? "on" : ""}" data-t="movie">Films</span><span class="chip btn-chip ${typ === "series" ? "on" : ""}" data-t="series">Series</span></div>` : "<div></div>"}
-    ${own ? `<div class="chips sorts">${TILE_SORTS.map(([k, l]) => `<span class="chip btn-chip ${k === sort ? "on" : ""}" data-s="${k}">${l}</span>`).join("")}</div>` : ""}</div></header>`);
+    ${own ? `<div class="chips sorts">${hasOriginals ? `<span class="chip btn-chip orig ${sort === "orig" ? "on" : ""}" data-s="${sort === "orig" ? "" : "orig"}">${esc(origName)}</span>` : ""}${TILE_SORTS.map(([k, l]) => `<span class="chip btn-chip ${k === sort ? "on" : ""}" data-s="${k}">${l}</span>`).join("")}</div>` : ""}</div></header>`);
   const grid = h(`<div class="grid fade-in"></div>`);
   const more = h(`<div class="btns" style="padding:0 48px 60px"><button class="btn">More</button></div>`);
   v.append(head, grid, more);
@@ -912,17 +935,20 @@ async function showTile(kind, id, title, image, typ, sort = "") {
   const ids = new Set();
   const load = async () => {
     more.querySelector("button").textContent = "Loading…";
-    if (own && sort && !shown) grid.innerHTML = `<div class="empty">Sorting the whole list…</div>`;
+    const orig = sort === "orig";
+    if (own && sort && !orig && !shown) grid.innerHTML = `<div class="empty">Sorting the whole list…</div>`;
     let r;
-    const url = own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}&sort=${sort}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
+    const url = orig ? `${feed()}/browse/originals/${encodeURIComponent(title)}?type=${typ}&page=${page}`
+      : own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}&sort=${sort}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
     try { r = await getJson(url, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
     pages = r.pages || 1;
-    if (own && sort && !shown) grid.innerHTML = "";
+    if (own && sort && !orig && !shown) grid.innerHTML = "";
+    if (orig && r.unsupported && !grid.children.length) grid.appendChild(h(`<div class="empty">No ${esc(origName)} list for ${typ === "movie" ? "films" : "series"} yet.</div>`));
     const fresh = (r.metas || []).filter(m => !ids.has(m.id));
     fresh.forEach(m => { ids.add(m.id); grid.appendChild(card(m, m.type || typ)); });
     shown += (r.metas || []).length;
-    if (own && !grid.children.length) grid.appendChild(h(`<div class="empty">Nothing in this list yet.</div>`));
-    more.hidden = own ? !(r.more && fresh.length) : page >= pages;
+    if (own && !orig && !grid.children.length) grid.appendChild(h(`<div class="empty">Nothing in this list yet.</div>`));
+    more.hidden = orig ? page >= pages || !fresh.length : own ? !(r.more && fresh.length) : page >= pages;
     more.querySelector("button").textContent = "More";
   };
   more.querySelector("button").onclick = () => { page++; load(); };
@@ -1594,8 +1620,11 @@ function showSettings() {
   $("#picksUrl").value = picksUrl();
   $("#copyPicks").onclick = async () => { try { await navigator.clipboard.writeText($("#picksUrl").value); toast("Copied"); } catch (e) { $("#picksUrl").select(); } };
   if (TV) {
-    $(".form", v)?.insertAdjacentHTML("afterbegin", `<label>This TV</label><div class="btns" style="margin-bottom:14px"><button class="btn" id="tvSettings">Dimmer, screensaver and home screen…</button>${EmberTV.openSystem ? `<button class="btn" id="sysSettings">Chromecast settings</button><button class="btn" id="playStore">Play Store</button>` : ""}</div>`);
+    $(".form", v)?.insertAdjacentHTML("afterbegin", `<label>This TV</label><div class="btns" style="margin-bottom:14px"><button class="btn" id="tvSettings">Dimmer, screensaver and home screen…</button>${EmberTV.openSystem ? `<button class="btn" id="sysSettings">Chromecast settings</button><button class="btn" id="playStore">Play Store</button>` : ""}${EmberTV.testNotices ? `<button class="btn" id="testNotices">Test notifications</button>` : ""}</div>`);
     $("#tvSettings").onclick = () => EmberTV.openTvSettings();
+    if ($("#testNotices")) $("#testNotices").onclick = () => {
+      if (!EmberTV.testNotices()) toast("Ember's notifications are off: run tv-update.sh on lucapi to switch them back on.");
+    };
     if ($("#sysSettings")) { $("#sysSettings").onclick = () => EmberTV.openSystem("settings"); $("#playStore").onclick = () => EmberTV.openSystem("store"); }
   }
   $("#save").onclick = () => {

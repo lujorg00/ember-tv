@@ -180,6 +180,13 @@ struct HeroView: View {
                 // left from Play (nothing else that way): the slide before
                 if d == .left && btn == .play { step(-1) }
             }
+            if pageName == nil {
+                // the cats and what's next, small, top right (below the tabs)
+                GlanceView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.trailing, 80).padding(.top, 150)
+                    .allowsHitTesting(false)
+            }
             if pageName == nil && !store.upcoming.isEmpty {
                 WeekPanel(eps: store.upcoming)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

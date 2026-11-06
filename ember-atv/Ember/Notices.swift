@@ -1,0 +1,202 @@
+import SwiftUI
+
+/// Calendar and reminder alerts, new episodes, and the cats coming and going - the same pop-ups as Ember TV, from
+/// lucapi. tvOS doesn't let an app put anything over other apps, so these show while Ember is open (including
+/// over the player): calendar ones top right for 10 s, the cats bottom left for 8 s.
+@MainActor
+final class Notices: ObservableObject {
+    struct Alert { let id: String; let at: Date; let until: Date; let start: Date; let wake: Date?
+                   let title: String; let place: String; let kind: String; let shift: Bool; let level: Int }
+
+    @Published var top: (text: String, level: Int)? = nil
+    @Published var cat: String? = nil
+    @Published var glance: JSON = [:]
+
+    private var alerts: [Alert] = []
+    private var alertsAt = Date.distantPast
+    private var catsHome: [String: Bool] = [:]
+    private var catsKnown = false
+    private var queue: [(String, Int)] = []
+    private var topUntil = Date.distantPast
+    private var running = false
+
+    private var shown: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "shownAlerts") ?? []) }
+        set { UserDefaults.standard.set(Array(newValue.suffix(300)), forKey: "shownAlerts") }
+    }
+
+    func start() {
+        guard !running else { return }
+        running = true
+        Task {
+            while true {
+                if Date().timeIntervalSince(alertsAt) > 300 { await fetchAlerts() }
+                showDue()
+                await pollCats()
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+    }
+
+    private static func date(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        let f = ISO8601DateFormatter()
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
+    }
+
+    private func fetchAlerts() async {
+        alertsAt = Date()
+        guard let j = try? await API.feedGet("/alerts", timeout: 10) else { return }
+        alerts = j.arr("alerts").compactMap { a in
+            guard let id = a.str("id"), let at = Notices.date(a.str("at")), let until = Notices.date(a.str("until")),
+                  let start = Notices.date(a.str("start")) else { return nil }
+            return Alert(id: id, at: at, until: until, start: start, wake: Notices.date(a.str("wake")), title: a.str("title") ?? "",
+                         place: a.str("where") ?? "", kind: a.str("kind") ?? "cal", shift: (a["shift"] as? Bool) ?? false,
+                         level: a.int("level") ?? 1)
+        }
+    }
+
+    private func showDue() {
+        let now = Date()
+        var seen = shown
+        for a in alerts where a.at <= now && a.until > now && !seen.contains(a.id) {
+            seen.insert(a.id)
+            say(Notices.text(a, now), level: a.level)
+        }
+        shown = seen
+    }
+
+    private func pollCats() async {
+        guard let j = try? await API.feedGet("/glance", timeout: 8) else { return }
+        glance = j
+        var msg: [String] = []
+        for c in j.arr("cats") {
+            guard let name = c.str("name"), let home = c["home"] as? Bool else { continue }
+            let before = catsHome.updateValue(home, forKey: name)
+            if catsKnown, let before, before != home { msg.append(home ? "\(name) came in" : "\(name) went out") }
+        }
+        catsKnown = true
+        if !msg.isEmpty { showCat(msg.joined(separator: "  ·  ")) }
+    }
+
+    /// A calendar-style note, top right, one at a time (urgent ones jump the queue).
+    func say(_ text: String, level: Int) {
+        if Date() < topUntil {
+            if level >= 3 { queue.insert((text, level), at: 0) } else { queue.append((text, level)) }
+            return
+        }
+        withAnimation(.easeOut(duration: 0.35)) { top = (text, level) }
+        topUntil = Date().addingTimeInterval(10)
+        Task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            withAnimation(.easeIn(duration: 0.35)) { top = nil }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if !queue.isEmpty { let n = queue.removeFirst(); topUntil = .distantPast; say(n.0, level: n.1) }
+        }
+    }
+
+    func showCat(_ text: String) {
+        withAnimation(.easeOut(duration: 0.35)) { cat = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            withAnimation(.easeIn(duration: 0.35)) { if cat == text { cat = nil } }
+        }
+    }
+
+    /// The words, worked out when shown, so the time left is right (as on Ember TV).
+    static func text(_ a: Alert, _ now: Date) -> String {
+        let hm = DateFormatter(); hm.dateFormat = "HH:mm"
+        let at = hm.string(from: a.start)
+        let place = a.place.isEmpty ? "" : "  ·  " + a.place
+        if let w = a.wake { return "Early shift: \(a.title) at \(at)  ·  you need to be up at \(hm.string(from: w)), in \(span(w.timeIntervalSince(now)))" }
+        let left = span(a.start.timeIntervalSince(now))
+        if a.kind == "ep" { return a.title }
+        if a.kind == "rem" { return a.level >= 3 ? "Reminder in \(left): \(a.title)!" : "Reminder in \(left): \(a.title) (\(at))" }
+        let what = a.shift ? "Shift: \(a.title)" : a.title
+        switch a.level {
+        case 1: return "In \(left)  ·  \(what) at \(at)\(place)"
+        case 2: return "In \(left): \(what) at \(at)\(place)"
+        default: return "\(what) starts in \(left)!  \(at)\(place)"
+        }
+    }
+
+    static func span(_ s: TimeInterval) -> String {
+        let m = max(0, Int(s / 60))
+        return m < 60 ? "\(m) min" : String(format: "%dh %02dm", m / 60, m % 60)
+    }
+}
+
+/// The pop-ups themselves: calendar top right, the cats bottom left.
+struct NoticeOverlay: View {
+    @EnvironmentObject var notices: Notices
+    var body: some View {
+        ZStack {
+            if let t = notices.top {
+                HStack(spacing: 16) {
+                    Image(systemName: t.level >= 3 ? "exclamationmark.circle.fill" : "calendar")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(t.level >= 3 ? Color(red: 1, green: 0.42, blue: 0.36) : t.level == 2 ? Theme.accent : .white.opacity(0.85))
+                    Text(t.text).font(.ember(t.level >= 3 ? 28 : 25, .semibold)).lineLimit(2)
+                }
+                .padding(.horizontal, 28).padding(.vertical, 20)
+                .frame(maxWidth: 900, alignment: .leading)
+                .background(Theme.bg.opacity(0.92), in: RoundedRectangle(cornerRadius: 22))
+                .overlay(RoundedRectangle(cornerRadius: 22)
+                    .stroke(t.level >= 3 ? Color(red: 1, green: 0.42, blue: 0.36) : t.level == 2 ? Theme.accent : .white.opacity(0.12), lineWidth: t.level >= 2 ? 2 : 1))
+                .shadow(color: .black.opacity(0.5), radius: 24, y: 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.top, 50).padding(.trailing, 70)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+            if let c = notices.cat {
+                HStack(spacing: 12) {
+                    Image(systemName: "pawprint.fill").foregroundStyle(Theme.accent)
+                    Text(c).font(.ember(22, .semibold))
+                }
+                .padding(.horizontal, 22).padding(.vertical, 14)
+                .background(Theme.bg.opacity(0.88), in: Capsule())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.bottom, 50).padding(.leading, 70)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+}
+
+/// Top right of Home, small: the cats (in or out) and what's next today or tomorrow.
+struct GlanceView: View {
+    @EnvironmentObject var notices: Notices
+    var body: some View {
+        let cats = notices.glance.arr("cats")
+        let next = notices.glance["next"] as? JSON
+        if !cats.isEmpty || next != nil {
+            HStack(spacing: 18) {
+                ForEach(cats.indices, id: \.self) { i in
+                    let c = cats[i], home = (c["home"] as? Bool) ?? false
+                    HStack(spacing: 7) {
+                        Image(systemName: "pawprint.fill").foregroundStyle(home ? Color(red: 0.5, green: 0.83, blue: 0.54) : Theme.muted)
+                        Text(c.str("name") ?? "").font(.ember(19, .semibold))
+                        Text(home ? "in" : "out").font(.ember(19)).foregroundStyle(Theme.muted)
+                    }
+                }
+                if let n = next {
+                    if !cats.isEmpty { Rectangle().fill(.white.opacity(0.15)).frame(width: 1, height: 20) }
+                    HStack(spacing: 7) {
+                        Text(n.str("title") ?? "").font(.ember(19, .semibold)).lineLimit(1)
+                            .foregroundStyle((n["shift"] as? Bool) == true ? Theme.accent : .white)
+                        Text((n.str("day") == "Today" ? "" : (n.str("day") ?? "") + " ") + (n.str("time") ?? ""))
+                            .font(.ember(19)).foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: 420, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+            .background(Theme.bg.opacity(0.5), in: Capsule())
+            .transition(.opacity)
+        }
+    }
+}

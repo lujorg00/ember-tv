@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var notices: Notices
     @AppStorage("feed") private var feed = ""
     @AppStorage("hdrOutput") private var hdrOutput = false
 
@@ -41,6 +42,14 @@ struct SettingsView: View {
                         Toggle("HDR output (experimental)", isOn: $hdrOutput)
                     } header: { Text("Picture") } footer: {
                         Text("Off: HDR and Dolby Vision are converted to a normal picture (reliable). On: sent to the TV as HDR; if streams then crash or look wrong, turn it off.")
+                    }
+                    Section {
+                        Button("Test notifications") {
+                            notices.say("Test: in 1h 00m  ·  Shift: MOTD at 18:30", level: 1)
+                            notices.showCat("Test: Winnie came in")
+                        }
+                    } header: { Text("Notifications") } footer: {
+                        Text("Calendar alerts show top right and the cats bottom left, while Ember is open (including over the player). tvOS doesn't let apps show anything over other apps.")
                     }
                     Section("What Ember last did") {
                         let steps = Array(Diag.lastSteps(25).reversed())

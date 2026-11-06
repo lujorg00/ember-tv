@@ -100,9 +100,24 @@ public class DimService extends AccessibilityService {
         }
     };
 
+    /** The running service, so Ember's Settings can check it's on and send a test notification. */
+    static volatile DimService live;
+
+    /** Shows a sample of each notification (calendar top right, cats bottom left); false if the service is off. */
+    static boolean test() {
+        final DimService d = live;
+        if (d == null) return false;
+        d.main.post(() -> {
+            d.showNote("Test: in 1h 00m  \u00b7  Shift: MOTD at 18:30", 8_000, 1);
+            d.showCatNote("Test: Winnie came in");
+        });
+        return true;
+    }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        live = this;
         prefs = new Prefs(this);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         power = (PowerManager) getSystemService(POWER_SERVICE);
@@ -117,6 +132,7 @@ public class DimService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
+        if (live == this) live = null;
         main.removeCallbacksAndMessages(null);
         net.shutdownNow();
         try {
