@@ -36,6 +36,13 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var skipStreak = 0
     private var skipTarget: Double?
     private var skipDir: Double = 0
+    // sliding a finger on the remote's touch surface: where you'd land, and a picture of it
+    @Published var scrubTo: Double?
+    @Published var preview: UIImage?
+    @Published var previewAt: Double = -1
+    private var thumbs: Thumbnailer?
+    private var playAfterScrub = false
+    var lastScrub = Date.distantPast
     private var done = false
     private var ticker: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -169,8 +176,68 @@ final class PlayerModel: ObservableObject, MPVEvents {
         controls = true
         controlsUntil = Date().addingTimeInterval(seconds)
     }
+    // MARK: scrubbing with the touch surface (like Apple's player): slide to look, click to jump, Back to stay
+
+    var scrubbing: Bool { scrubTo != nil }
+
+    func scrubBegin() {
+        guard started, dur > 0, !done, !upNext else { return }
+        lastScrub = Date()
+        if scrubTo == nil {
+            scrubTo = pos
+            playAfterScrub = !paused
+            core.pause()
+            if thumbs == nil, let s = session, let u = URL(string: s.stream.url) {
+                let t = Thumbnailer(url: u)
+                t.onImage = { [weak self] at, img in
+                    guard let self, self.scrubTo != nil else { return }
+                    self.preview = img
+                    self.previewAt = at
+                }
+                thumbs = t
+            }
+            thumbs?.request(pos)
+        }
+        showControls(for: 3600)
+    }
+
+    /// dx: how far the finger moved; faster slides cover more ground.
+    func scrubMove(_ dx: CGFloat, velocity: CGFloat) {
+        guard let t = scrubTo, dur > 0 else { return }
+        lastScrub = Date()
+        let perPoint = max(0.15, dur / 12000) * Double(1 + min(7, abs(velocity) / 900))
+        let to = max(0, min(dur - 2, t + Double(dx) * perPoint))
+        scrubTo = to
+        thumbs?.request(to)
+        showControls(for: 3600)
+    }
+
+    func scrubEnded() { lastScrub = Date() }
+
+    func scrubCommit() {
+        guard let t = scrubTo else { return }
+        Diag.log("player: scrubbed to \(Int(t))s")
+        core.command(["seek", String(format: "%.1f", t), "absolute"])
+        pos = t
+        endScrub()
+    }
+
+    func scrubCancel() { endScrub() }
+
+    private func endScrub() {
+        scrubTo = nil
+        preview = nil
+        previewAt = -1
+        lastScrub = Date()
+        if playAfterScrub { core.play() }
+        playAfterScrub = false
+        showControls()
+    }
+
     /// Left/right on the timeline. Pressing (or holding) quickly speeds up: 10 s, then 30 s, then 1 and 2 minutes a press.
     func skip(_ s: Double) {
+        // the move that ends a slide on the touch surface isn't a skip
+        if scrubbing || Date().timeIntervalSince(lastScrub) < 0.5 { return }
         let now = Date()
         let dir: Double = s < 0 ? -1 : 1
         if now.timeIntervalSince(lastSkip) < 0.7 && dir == skipDir { skipStreak += 1 } else { skipStreak = 0; skipTarget = nil }
@@ -324,6 +391,8 @@ final class PlayerModel: ObservableObject, MPVEvents {
         Diag.stoppedPlaying()
         if case .next = how {} else { resetDisplay() }   // straight into the next episode: stay in this mode
         ticker?.cancel()
+        thumbs?.close()
+        thumbs = nil
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
         core.shutdown()
@@ -386,6 +455,12 @@ struct PlayerScreen: View {
             if model.buffering { ProgressView().scaleEffect(1.8).tint(.white) }
 
             // controls hidden: this invisible button has the remote. Click shows the controls; left/right skip 10 s.
+            RemotePan(allowed: { (focus == .bar || focus == .catcher) && !showSubs && !showAudio && !model.upNext },
+                      began: { model.scrubBegin(); focus = .bar },
+                      moved: { dx, v in model.scrubMove(dx, velocity: v) },
+                      ended: { model.scrubEnded() })
+                .frame(width: 1, height: 1).allowsHitTesting(false)
+
             Button { model.showControls(); focus = .bar } label: { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
                 .buttonStyle(BareButtonStyle())
                 .focused($focus, equals: .catcher)
@@ -411,6 +486,7 @@ struct PlayerScreen: View {
         }
         .onPlayPauseCommand { model.togglePause() }
         .onExitCommand {
+            if model.scrubbing { model.scrubCancel(); return }
             if model.controls && !model.paused { model.controls = false; focus = .catcher }
             else if model.upNext { model.watchCredits(); focus = .catcher }
             else { model.stop() }
@@ -490,7 +566,9 @@ struct PlayerScreen: View {
                         default: model.showControls()
                         }
                     }
-                    .onTapGesture { model.togglePause(); model.showControls() }
+                    .onTapGesture {
+                        if model.scrubbing { model.scrubCommit() } else { model.togglePause(); model.showControls() }
+                    }
                 HStack(spacing: 24) {
                     Button { showSubs = true; model.refreshTracks() } label: { Label("Subtitles", systemImage: "captions.bubble") }
                             .buttonStyle(EmberButtonStyle(primary: false))
@@ -551,21 +629,50 @@ struct Timeline: View {
         VStack(spacing: 14) {
             GeometryReader { g in
                 let f = model.dur > 0 ? min(1, max(0, model.pos / model.dur)) : 0
+                let sf = model.dur > 0 ? min(1, max(0, (model.scrubTo ?? 0) / model.dur)) : 0
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.3)).frame(height: focused ? 12 : 8)
                     Capsule().fill(Theme.accent).frame(width: max(8, g.size.width * f), height: focused ? 12 : 8)
-                    Circle().fill(focused ? .white : Theme.accent)
+                    Circle().fill(model.scrubbing ? Theme.accent : focused ? .white : Theme.accent)
                         .frame(width: focused ? 34 : 18, height: focused ? 34 : 18)
                         .shadow(color: .black.opacity(0.5), radius: 6)
                         .offset(x: g.size.width * f - (focused ? 17 : 9))
+                    if let t = model.scrubTo {
+                        // where you'd land: a white marker, with the picture and time above it
+                        Capsule().fill(.white).frame(width: 6, height: 34).offset(x: g.size.width * sf - 3)
+                        let pw: CGFloat = 400, ph: CGFloat = 225
+                        VStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.85))
+                                if let img = model.preview {
+                                    Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                                        .frame(width: pw, height: ph).clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                } else {
+                                    ProgressView().tint(.white)
+                                }
+                            }
+                            .frame(width: pw, height: ph)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.85), lineWidth: 3))
+                            .shadow(color: .black.opacity(0.6), radius: 16)
+                            Text(clock(t)).font(.ember(26, .semibold).monospacedDigit())
+                                .shadow(color: .black, radius: 6)
+                        }
+                        .frame(width: pw)
+                        .offset(x: min(max(0, g.size.width * sf - pw / 2), g.size.width - pw), y: -(ph / 2 + 60))
+                    }
                 }
                 .frame(maxHeight: .infinity)
             }
             .frame(height: 36)
             HStack {
                 Text(clock(model.pos))
-                if model.paused { Image(systemName: "pause.fill").padding(.leading, 8) }
+                if model.paused && !model.scrubbing { Image(systemName: "pause.fill").padding(.leading, 8) }
                 Spacer()
+                if model.scrubbing {
+                    Text("Click to jump · Back to stay").foregroundStyle(.white.opacity(0.7))
+                    Spacer()
+                }
                 Text("-" + clock(max(0, model.dur - model.pos)))
             }
             .font(.ember(22).monospacedDigit())
