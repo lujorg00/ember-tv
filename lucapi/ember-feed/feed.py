@@ -2037,6 +2037,17 @@ def _bg(m):
     return f"https://images.metahub.space/background/medium/{m['id']}/img" if str(m.get("id", "")).startswith("tt") else ""
 
 
+def _svc_key(title):
+    """A service list's name as the tables know it, also when it's grown a word ("Hulu Shows", "Peacock TV")."""
+    k = title.lower().strip()
+    if k in SERVICE_NAMES:
+        return k
+    n = " ".join(re.sub(r"\b(shows?|series|movies?|films?|tv|anime|originals?|uk|us)\b", "", k).split())
+    if n in SERVICE_NAMES:
+        return n
+    return next((x for x in sorted(SERVICE_NAMES, key=len, reverse=True) if n.startswith(x + " ")), k)
+
+
 def _wikidata_logo(article):
     """The logo on a Wikipedia article's Wikidata entry, as a PNG from Wikimedia Commons ("" if it has none)."""
     def get():
@@ -2299,10 +2310,11 @@ def _build_tiles():
     logos = _service_logos() if tmdb_ok else {}
     def art(t):
         if t["box"] == "services":
-            pname = SERVICE_NAMES.get(t["title"].lower(), t["title"])
+            sk = _svc_key(t["title"])
+            pname = SERVICE_NAMES.get(sk, t["title"])
             t["colour"] = SERVICE_COLOURS.get(pname, "#1E1A17")
             # the wordmark (NETFLIX, prime video...) from Wikidata; TMDB's square app icon if there isn't one
-            for article in SERVICE_WIKI.get(t["title"].lower(), t["title"]).split("|"):
+            for article in SERVICE_WIKI.get(sk, t["title"]).split("|"):
                 t["logo"] = _wikidata_logo(article)
                 if t["logo"]:
                     t["logo_kind"] = "wordmark"

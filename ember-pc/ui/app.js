@@ -323,6 +323,7 @@ async function relFlush() {
   document.querySelectorAll(".poster[data-wid]").forEach(relApply);
 }
 function relScan() {
+  if (watchlistIds.size) applyBookmarks(document.getElementById("view"));
   const thisYear = new Date().getFullYear();
   document.querySelectorAll("#view .poster[data-wid]:not([data-rel])").forEach(el => {
     el.dataset.rel = "1";
@@ -684,7 +685,8 @@ function top10Row(title, metas, onPick) {
   const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 10).forEach((m, i) => {
-    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')"><span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
+    const bm = watchlistIds.has(m.id);
+    const el = h(`<div class="t10"><b>${i + 1}</b><div class="t10-art${bm ? " bm" : ""}" data-wid="${esc(m.id)}" data-wtype="${esc(m.type)}" data-wname="${esc(m.name)}" style="background-image:url('${esc(backdrop(m))}')">${bm ? BOOKMARK : ""}<span>${esc(m.name)}</span>${badge(m.id)}</div></div>`);
     el.onclick = () => go("title", m.type, m.id, m);
     $(".strip", r).appendChild(el);
   });
@@ -695,7 +697,7 @@ function top10Row(title, metas, onPick) {
 // [gradient from, gradient to, logo ink, (logo kept in Ember), (caption under it)]: w = white, k = black, o = its own colours, W = always white
 const BRAND = {
   "netflix": ["#3a0606", "#0c0202", "o", "brands/netflix.svg"], "prime video": ["#1f8fff", "#0a3f8a", "w", "brands/prime-video.svg"], "apple tv+": ["#3a3a3a", "#050505", "w", "brands/apple-tv-plus.svg"],
-  "disney+": ["#1d3a9c", "#070f33", "w"], "hbo max": ["#262626", "#000000", "w"], "hulu": ["#1ed27a", "#0a6b3b", "w"],
+  "disney+": ["#1d3a9c", "#070f33", "w"], "hbo max": ["#262626", "#000000", "w"], "hulu": ["#1ed27a", "#0a6b3b", "w", "brands/hulu.svg"],
   "paramount +": ["#3c7bff", "#1238b8", "w"], "paramount+": ["#3c7bff", "#1238b8", "w"], "peacock": ["#2a2a2a", "#000000", "w"],
   "discovery +": ["#2468e8", "#0a2a7a", "w", "brands/discovery-plus.svg"], "discovery+": ["#2468e8", "#0a2a7a", "w", "brands/discovery-plus.svg"],
   "crunchyroll": ["#ff8a3d", "#c24a0c", "w", "brands/crunchyroll.svg"],
@@ -704,12 +706,20 @@ const BRAND = {
   "dreamworks animation": ["#2a62c9", "#0a1f4f", "w"], "illumination studios": ["#ffd23a", "#d39a00", "k"],
   "sony pictures animation": ["#4b7fe0", "#13306e", "w"], "sony pictures": ["#2a2a2a", "#000000", "W"],
   "studio ghibli": ["#72b6e3", "#1f5f8f", "w"], "universal pictures": ["#14284f", "#02060f", "w"],
-  "warner brothers": ["#2357b0", "#0a2350", "o"], "warner brothers animation": ["#2357b0", "#0a2350", "o", "", "ANIMATION"],
+  "warner brothers": ["#2357b0", "#0a2350", "w", "brands/warner-bros.svg"], "warner brothers animation": ["#2357b0", "#0a2350", "w", "brands/warner-bros.svg", "ANIMATION"],
   "lionsgate": ["#4a4a4a", "#111111", "w"], "miramax": ["#2a2a2a", "#000000", "w"], "mgm": ["#8a6a24", "#2b1d06", "w"],
   "searchlight pictures": ["#24384e", "#070d14", "w"],
   "cbeebies": ["#22307a", "#0b1238", "o", "brands/cbeebies.png"], "cartoon network": ["#9a9a9a", "#4a4a4a", "o", "brands/cartoon-network.png"],
   "nickelodeon": ["#2a2a2a", "#050505", "o", "brands/nickelodeon.png"], "disney kids": ["#4b33b5", "#1a1150", "o", "brands/disney-channel.png"], "imdb top 250": ["#2a2a2a", "#000000", "o", "brands/imdb.svg", "TOP 250"],
 };
+/** A tile's brand, also when the list's name has grown a word ("Hulu Shows", "Crunchyroll Anime", "Peacock TV"). */
+function brandOf(key) {
+  if (BRAND[key]) return BRAND[key];
+  const n = key.replace(/\b(shows?|series|movies?|films?|tv|anime|originals?|uk|us)\b/g, "").replace(/\s+/g, " ").trim();
+  if (BRAND[n]) return BRAND[n];
+  const k = Object.keys(BRAND).filter(b => n.startsWith(b + " ") || n === b).sort((a, b) => b.length - a.length)[0];
+  return k ? BRAND[k] : null;
+}
 // Awards: [gradient from, to, small line, big title]
 const AWARD = {
   "oscar winners": ["#432466", "#120a22", "The Academy Awards", "OSCARS", "oscar"],
@@ -735,7 +745,7 @@ async function tileRows(hidden = new Set(), typ = "") {
       if (tile.kind === "cat") tileInfo[tile.id] = tile;
       if (tile.logo && tile.logo.startsWith("/")) tile = { ...tile, logo: feed() + tile.logo }; // kept on the Pi
       let inner;
-      const key = (tile.title || "").toLowerCase().trim(), br = BRAND[key], aw = AWARD[key];
+      const key = (tile.title || "").toLowerCase().trim(), br = brandOf(key), aw = AWARD[key];
       if (aw) inner = `<div class="tile brand award ${aw[3].length > 9 ? "long" : ""} ${aw[5] || ""}" style="--a:${aw[0]};--b:${aw[1]}"><img class="aw-art aw-${aw[4]}" src="awards/${aw[4]}.svg" alt="">${aw[4] === "tomato" ? `<em class="aw-pct">100%</em>` : ""}<small>${esc(aw[2])}</small><b>${esc(aw[3])}</b></div>`;
       else if (br) {
         // an app icon has had its square cut away on the Pi, so it's shown in its own colours

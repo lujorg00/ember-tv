@@ -81,7 +81,7 @@ struct TileCard: View {
         let key = tile.title.lowercased().trimmingCharacters(in: .whitespaces)
         Group {
             if let aw = Award.all[key] { award(aw) }
-            else if let br = Brand.all[key] { brand(br) }
+            else if let br = Brand.find(key) { brand(br) }
             else if tile.style == "person" { person }
             else if key == "007" { bond }
             else if tile.style == "logo" { serviceLogo }
@@ -298,12 +298,21 @@ struct Brand {
     let from: String, to: String, ink: String
     var asset: String? = nil
     var sub: String? = nil
+    /// A tile's brand, also when the list's name has grown a word ("Hulu Shows", "Crunchyroll Anime", "Peacock TV").
+    static func find(_ key: String) -> Brand? {
+        if let b = all[key] { return b }
+        let n = key.replacingOccurrences(of: "\\b(shows?|series|movies?|films?|tv|anime|originals?|uk|us)\\b", with: "", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+        if let b = all[n] { return b }
+        let k = all.keys.filter { n.hasPrefix($0 + " ") }.sorted { $0.count > $1.count }.first
+        return k.flatMap { all[$0] }
+    }
     static let all: [String: Brand] = [
         "netflix": Brand(from: "#3a0606", to: "#0c0202", ink: "o", asset: "brand-netflix"),
         "prime video": Brand(from: "#1f8fff", to: "#0a3f8a", ink: "w", asset: "brand-prime-video"),
         "apple tv+": Brand(from: "#3a3a3a", to: "#050505", ink: "w", asset: "brand-apple-tv-plus"),
         "disney+": Brand(from: "#1d3a9c", to: "#070f33", ink: "w"), "hbo max": Brand(from: "#262626", to: "#000000", ink: "w"),
-        "hulu": Brand(from: "#1ed27a", to: "#0a6b3b", ink: "w"),
+        "hulu": Brand(from: "#1ed27a", to: "#0a6b3b", ink: "w", asset: "brand-hulu"),
         "paramount +": Brand(from: "#3c7bff", to: "#1238b8", ink: "w"), "paramount+": Brand(from: "#3c7bff", to: "#1238b8", ink: "w"),
         "peacock": Brand(from: "#2a2a2a", to: "#000000", ink: "w"),
         "discovery +": Brand(from: "#2468e8", to: "#0a2a7a", ink: "w", asset: "brand-discovery-plus"),
@@ -315,8 +324,8 @@ struct Brand {
         "dreamworks animation": Brand(from: "#2a62c9", to: "#0a1f4f", ink: "w"), "illumination studios": Brand(from: "#ffd23a", to: "#d39a00", ink: "k"),
         "sony pictures animation": Brand(from: "#4b7fe0", to: "#13306e", ink: "w"), "sony pictures": Brand(from: "#2a2a2a", to: "#000000", ink: "W"),
         "studio ghibli": Brand(from: "#72b6e3", to: "#1f5f8f", ink: "w"), "universal pictures": Brand(from: "#14284f", to: "#02060f", ink: "w"),
-        "warner brothers": Brand(from: "#2357b0", to: "#0a2350", ink: "o"),
-        "warner brothers animation": Brand(from: "#2357b0", to: "#0a2350", ink: "o", sub: "ANIMATION"),
+        "warner brothers": Brand(from: "#2357b0", to: "#0a2350", ink: "w", asset: "brand-warner-bros"),
+        "warner brothers animation": Brand(from: "#2357b0", to: "#0a2350", ink: "w", asset: "brand-warner-bros", sub: "ANIMATION"),
         "lionsgate": Brand(from: "#4a4a4a", to: "#111111", ink: "w"), "miramax": Brand(from: "#2a2a2a", to: "#000000", ink: "w"),
         "mgm": Brand(from: "#8a6a24", to: "#2b1d06", ink: "w"), "searchlight pictures": Brand(from: "#24384e", to: "#070d14", ink: "w"),
         "cbeebies": Brand(from: "#22307a", to: "#0b1238", ink: "o", asset: "brand-cbeebies"),
