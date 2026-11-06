@@ -19,6 +19,39 @@ struct Inner {
 struct Player(Arc<Mutex<Inner>>);
 
 #[cfg(windows)]
+/// The player goes when Ember goes: mpv is put in a Windows "job" that closes with Ember, so even if Ember is
+/// ended in Task Manager or crashes, the player can't be left running (it used to block the next update).
+#[cfg(windows)]
+mod job {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::System::JobObjects::*;
+    static JOB: OnceLock<usize> = OnceLock::new();
+    fn job() -> usize {
+        *JOB.get_or_init(|| unsafe {
+            let h = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if h.is_null() {
+                return 0;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(h, JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32);
+            h as usize
+        })
+    }
+    pub fn tie(child: &std::process::Child) {
+        use std::os::windows::io::AsRawHandle;
+        let j = job();
+        if j == 0 {
+            return;
+        }
+        unsafe {
+            AssignProcessToJobObject(j as _, child.as_raw_handle() as _);
+        }
+    }
+}
+
 mod layer {
     // mpv only gets the mouse and keyboard properly in its own window, so "inside Ember" means: mpv's own
     // borderless window, made a child-like "owned" window of Ember's (stays above it, minimises with it,
@@ -208,6 +241,8 @@ async fn play(
         cmd.creation_flags(0x0800_0000); // no console window
     }
     let child = cmd.spawn().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    job::tie(&child);
     {
         let mut g = player.0.lock().unwrap();
         g.child = Some(child);
@@ -324,6 +359,11 @@ fn main() {
         .manage(Player::default())
         .invoke_handler(tauri::generate_handler![play, stop, playing, player_log, last_exit, open_trailer])
         .on_window_event(|window, event| {
+            // closing Ember's window stops the player with it
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                stop_inner(app, &app.state::<Player>());
+            }
             if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) {
                 let app = window.app_handle();
                 let player = app.state::<Player>();
@@ -336,6 +376,11 @@ fn main() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("couldn't start Ember");
+        .build(tauri::generate_context!())
+        .expect("couldn't start Ember")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                stop_inner(app, &app.state::<Player>());
+            }
+        });
 }
