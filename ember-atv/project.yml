@@ -20,11 +20,14 @@ targets:
     dependencies:
       - package: MPVKit
         product: MPVKit-GPL
+      - sdk: AVKit.framework          # the TV's picture-mode switching (UIWindow.avDisplayManager) lives here
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework
     info:
       path: Ember/Info.plist
       properties:
         CFBundleDisplayName: Ember
-        CFBundleShortVersionString: "0.4.5"
+        CFBundleShortVersionString: "0.4.6"
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIAppFonts: [Selawik-Light.ttf, Selawik-Semilight.ttf, Selawik-Regular.ttf, Selawik-Semibold.ttf, Selawik-Bold.ttf]

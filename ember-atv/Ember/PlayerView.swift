@@ -202,8 +202,14 @@ final class PlayerModel: ObservableObject, MPVEvents {
 
     // MARK: the TV's picture mode follows the video (frame rate, HDR), when "Match Content" is on in the Apple TV's settings
 
+    /// The TV's picture-mode switcher. Asked for carefully: if it isn't there, Ember just doesn't switch (it used to crash).
     private var displayManager: AVDisplayManager? {
-        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.avDisplayManager
+        guard let win = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first,
+              win.responds(to: NSSelectorFromString("avDisplayManager")) else {
+            Diag.log("tv mode: switching isn't available")
+            return nil
+        }
+        return win.avDisplayManager
     }
 
     private func matchDisplay() {
