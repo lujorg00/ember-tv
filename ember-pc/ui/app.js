@@ -257,7 +257,7 @@ document.addEventListener("keydown", e => {
 
 // Your watchlist (Trakt, through lucapi): every poster of a title on it carries an amber bookmark, on every page.
 let watchlistIds = new Set();
-const BOOKMARK = `<span class="bmk" aria-hidden="true"><svg viewBox="0 0 24 32"><path d="M0 0h24v32l-12-8-12 8z"/></svg></span>`;
+const BOOKMARK = `<i class="bmk" aria-hidden="true"><svg viewBox="0 0 24 32"><path d="M0 0h24v32l-12-8-12 8z"/></svg></i>`;
 async function loadWatchlist() {
   try { watchlistIds = new Set((await getJson(`${feed()}/watchlist`, 8000)).items || []); applyBookmarks(); } catch (e) {}
 }
@@ -934,10 +934,12 @@ function aioCatalogs() {
 /** One score, small: IMDb 7.8, the tomato and 92%, Metacritic's coloured square, TMDB, Trakt. */
 function scoreChip(r) {
   const v = esc(String(r.value || ""));
-  if (r.src === "imdb") return `<span class="sc" title="IMDb"><img class="sc-imdb" src="brands/imdb.svg" alt="IMDb">${v}</span>`;
-  if (r.src === "rt") { const n = parseInt(r.value, 10); return `<span class="sc" title="Rotten Tomatoes (critics)"><img class="sc-rt${n < 60 ? " rotten" : ""}" src="awards/tomato.svg" alt="Rotten Tomatoes">${v}</span>`; }
-  if (r.src === "mc") { const n = parseInt(r.value, 10); return `<span class="sc" title="Metacritic"><b class="sc-mc ${n >= 61 ? "hi" : n >= 40 ? "mid" : "lo"}">${v}</b>Metacritic</span>`; }
-  return `<span class="sc" title="${esc(r.label)}"><em>${esc(r.label)}</em>${v}</span>`;
+  let mark = `<em>${esc(r.label)}</em>`, name = esc(r.label), val = v;
+  if (r.src === "imdb") { mark = `<img class="sc-imdb" src="brands/imdb.svg" alt="IMDb">`; name = ""; }
+  else if (r.src === "rt") { const n = parseInt(r.value, 10); mark = `<img class="sc-rt${n < 60 ? " rotten" : ""}" src="awards/tomato.svg" alt="">`; }
+  else if (r.src === "mc") { const n = parseInt(r.value, 10); mark = `<b class="sc-mc ${n >= 61 ? "hi" : n >= 40 ? "mid" : "lo"}">${v}</b>`; val = ""; }
+  else name = "";
+  return `<div class="sc"><span class="sc-m">${mark}</span><span class="sc-v">${val}</span><span class="sc-n">${name}</span></div>`;
 }
 
 /** A Top list, 25 long: the service's own Top 10, then what was in it on recent days (kept by lucapi). */
@@ -993,7 +995,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   v.innerHTML = "";
   const page = h(`<div class="tp"><div class="tp-bd"></div><div class="tp-scrim"></div>
     <button class="back">‹ Back</button>
-    <header class="tp-head fade-in"></header>
+    <div class="tp-top"><header class="tp-head fade-in"></header><aside class="tp-scores" hidden></aside></div>
     <div class="tp-body"><section class="tp-eps"></section></div>
     <section class="tp-more"></section>
     <div class="tp-drawer"><div class="tp-dr-shade"></div><aside class="tp-dr"><button class="tp-dr-x" title="Close">✕</button><div class="tp-streams"></div></aside></div></div>`);
@@ -1027,7 +1029,6 @@ async function showTitle(type, id, hint = {}, opts = {}) {
   };
   head.innerHTML = `${mm.logo ? `<img class="tp-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">` : `<h1>${esc(mm.name)}</h1>`}
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
-    <div class="tp-scores">${mm.imdbRating ? scoreChip({ src: "imdb", label: "IMDb", value: mm.imdbRating }) : ""}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
     <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}</div>`;
@@ -1076,11 +1077,12 @@ async function showTitle(type, id, hint = {}, opts = {}) {
 
   // Scores (IMDb, Rotten Tomatoes, Metacritic, TMDB, Trakt), small, under the line about it
   getJson(`${feed()}/ratings/${type}/${id}`, 15000).then(r => {
-    const items = r.items || [], box = $(".tp-scores", head);
+    const items = r.items || [], box = $(".tp-scores", page);
     if (!items.length || !box) return;
     const order = ["imdb", "rt", "mc", "tmdb", "trakt"];
     items.sort((a, b) => order.indexOf(a.src) - order.indexOf(b.src));
-    box.innerHTML = items.map(scoreChip).join("");
+    box.innerHTML = `<h3>Ratings</h3>` + items.map(scoreChip).join("");
+    box.hidden = false;
     box.classList.add("fade-in");
   }).catch(() => {});
 
@@ -1518,7 +1520,7 @@ function showSettings() {
       <label>Sound</label>
       <label class="check"><input type="checkbox" id="pt"> Send Dolby and DTS untouched to a receiver or soundbar (HDMI only; leave off for PC speakers and headphones)</label>
       <label>Background</label>
-      <label class="check"><input type="checkbox" id="motion"> Moving background (stars at night, embers in the evening)</label>
+      <label class="check"><input type="checkbox" id="motion"> Moving background (dust in the sunlight by day, embers in the evening, stars at night)</label>
       <div class="btns" style="margin-top:18px"><button class="btn primary" id="save">Save</button></div>
       <label style="margin-top:28px">Ember picks for Omni (or any app that takes Stremio addons)</label>
       <div class="muted" style="font-size:13px">Add this as an addon in Omni: it gives the same streams as AIOStreams, tested and sorted best first by lucapi. It works at home, where the Apple TV can reach the Pi. It contains your AIOStreams link, so keep it to yourself.</div>
@@ -1609,7 +1611,7 @@ const sky = (() => {
   const seed = () => {
     parts = [];
     // day: a few motes drifting in the sunlight; evening: embers; night: stars
-    const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : (TV ? 14 : 22);
+    const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : (TV ? 22 : 36);
     for (let i = 0; i < n; i++) parts.push({ x: Math.random(), y: Math.random(), r: Math.random(), s: Math.random(), p: Math.random() * 6.28 });
     const layers = mode === "day"
       ? [soft("1500px 1000px", "92% -12%", "255,206,140", 0.30), soft("900px 600px", "100% 0%", "255,230,190", 0.14), "linear-gradient(#1C140E, #120D0A 55%, #0E0B09)"]
@@ -1629,9 +1631,12 @@ const sky = (() => {
         // motes of dust drifting slowly down through the light at the top right
         const life = (s * (0.012 + p.s * 0.014) + p.p) % 1;
         const x = (0.55 + p.x * 0.45) * W + Math.sin(s * 0.3 + p.p) * 14 - life * W * 0.08, y = (p.y * 0.25 + life * 0.6) * H;
-        const a = Math.sin(life * Math.PI) * 0.35;
-        g.fillStyle = `rgba(255,228,180,${a})`;
-        g.beginPath(); g.arc(x, y, 0.7 + p.r * 1.1, 0, 6.28); g.fill();
+        const a = Math.sin(life * Math.PI) * 0.6, r = 0.8 + p.r * 1.3;
+        // a soft glow round each mote (blurred, so no hard edge); the TV skips the blur to stay smooth
+        if (!TV) { g.shadowColor = `rgba(255,214,150,${a})`; g.shadowBlur = 6; }
+        g.fillStyle = `rgba(255,236,200,${a})`;
+        g.beginPath(); g.arc(x, y, r, 0, 6.28); g.fill();
+        g.shadowBlur = 0;
       } else if (mode === "night") {
         const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(s * (0.4 + p.s) + p.p));
         g.fillStyle = `rgba(232,236,255,${a * 0.8})`; g.fillRect(p.x * W, p.y * H * 0.7, (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1), (TV ? 0.8 : 1) + p.r * (TV ? 0.7 : 1));

@@ -67,18 +67,24 @@ struct DetailView: View {
             ScrollView(.vertical, showsIndicators: false) {
               VStack(alignment: .leading, spacing: 26) {
                 VStack(alignment: .leading, spacing: 16) {
+                  // the title and what it's about on the left; its scores on the right, where there's room
+                  HStack(alignment: .bottom, spacing: 40) {
+                    VStack(alignment: .leading, spacing: 16) {
                     TitleArt(meta: mm, height: 130, width: 560).padding(.top, 70)
                     HStack(spacing: 18) {
                         Text(scores.isEmpty ? mm.metaLine : mm.metaLinePlain).foregroundStyle(.white.opacity(0.75))
                         if let line = store.release[mm.id]?.line { Text(line).foregroundStyle(Theme.accent) }
                     }
                     .font(.ember(21, .medium))
-                    if !scores.isEmpty { ScoreChips(items: scores).transition(.opacity) }
                     if let p = store.progress[mm.id] {
                         Text(p.line).font(.ember(21, .semibold)).foregroundStyle(Theme.accent)
                     }
                     Text(mm.description).font(.ember(22)).foregroundStyle(.white.opacity(0.9)).lineLimit(3)
                         .frame(maxWidth: 860, alignment: .leading)
+                    }
+                    Spacer(minLength: 0)
+                    if !scores.isEmpty { ScoreChips(items: scores).transition(.opacity) }
+                  }
                     HStack(spacing: 20) {
                         Button { play() } label: { Label(playLabel, systemImage: "play.fill") }
                             .buttonStyle(EmberButtonStyle(primary: true)).focused($btn, equals: .play)
@@ -336,32 +342,38 @@ struct Score: Identifiable {
     init(_ j: JSON) { src = j.str("src") ?? ""; label = j.str("label") ?? ""; value = j.str("value") ?? "" }
 }
 
-/// IMDb 7.8 · the tomato 92% · Metacritic's coloured square · TMDB · Trakt: small, under the line about it.
+/// The scores, in a small quiet box on the right: IMDb, Rotten Tomatoes, Metacritic, TMDB, Trakt.
 struct ScoreChips: View {
     let items: [Score]
     var body: some View {
-        HStack(spacing: 26) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(items) { r in
-                HStack(spacing: 9) {
-                    switch r.src {
-                    case "imdb":
-                        Image("brand-imdb").resizable().scaledToFit().frame(height: 24)
-                    case "rt":
-                        Image("award-tomato").resizable().scaledToFit().frame(height: 26)
-                            .hueRotation(.degrees((Int(r.value.filter(\.isNumber)) ?? 100) < 60 ? 70 : 0))
-                    case "mc":
-                        let n = Int(r.value) ?? 0
-                        Text(r.value).font(.ember(18, .bold)).foregroundStyle(n >= 40 && n < 61 ? Color.black : .white)
-                            .frame(minWidth: 34, minHeight: 30)
-                            .background(n >= 61 ? Color(red: 0.23, green: 0.71, blue: 0.29) : n >= 40 ? Color(red: 0.89, green: 0.66, blue: 0) : Color(red: 0.88, green: 0.21, blue: 0.17),
-                                        in: RoundedRectangle(cornerRadius: 5))
-                    default:
-                        Text(r.label.uppercased()).font(.ember(15, .bold)).tracking(0.8).foregroundStyle(Theme.muted)
+                HStack(spacing: 12) {
+                    Group {
+                        switch r.src {
+                        case "imdb":
+                            Image("brand-imdb").resizable().scaledToFit().frame(height: 20)
+                        case "rt":
+                            Image("award-tomato").resizable().scaledToFit().frame(height: 22)
+                                .hueRotation(.degrees((Int(r.value.filter(\.isNumber)) ?? 100) < 60 ? 70 : 0))
+                        case "mc":
+                            let n = Int(r.value) ?? 0
+                            Text(r.value).font(.ember(15, .bold)).foregroundStyle(n >= 40 && n < 61 ? Color.black : .white)
+                                .frame(width: 30, height: 24)
+                                .background(n >= 61 ? Color(red: 0.23, green: 0.71, blue: 0.29) : n >= 40 ? Color(red: 0.89, green: 0.66, blue: 0) : Color(red: 0.88, green: 0.21, blue: 0.17),
+                                            in: RoundedRectangle(cornerRadius: 5))
+                        default:
+                            Text(r.label.uppercased()).font(.ember(13, .bold)).tracking(0.6).foregroundStyle(Theme.muted)
+                        }
                     }
-                    if r.src != "mc" { Text(r.value).font(.ember(21, .semibold)) }
-                    else { Text("Metacritic").font(.ember(17, .semibold)).foregroundStyle(Theme.muted) }
+                    .frame(width: 50, alignment: .leading)
+                    if r.src == "mc" { Text("Metacritic").font(.ember(16)).foregroundStyle(Theme.muted) }
+                    else { Text(r.value).font(.ember(20, .semibold)) }
                 }
             }
         }
+        .padding(.horizontal, 18).padding(.vertical, 14)
+        .background(Theme.bg.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.bottom, 8)
     }
 }

@@ -17,15 +17,17 @@ struct AmbientBackground: View {
                 Canvas { ctx, size in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let W = size.width, H = size.height
+                    if mode == .day { ctx.addFilter(.blur(radius: 1.4)) }   // the dust glows softly, no hard edges
                     for p in parts {
                         if mode == .day {
                             // motes of dust drifting slowly down through the light at the top right
                             let life = (t * (0.012 + p.s * 0.014) + p.p).truncatingRemainder(dividingBy: 1)
                             let x = (0.55 + p.x * 0.45) * W + sin(t * 0.3 + p.p) * 20 - life * W * 0.08
                             let y = (p.y * 0.25 + life * 0.6) * H
-                            let d = 1.8 + p.r * 2.6
+                            let d = 2 + p.r * 2.8, a = sin(life * .pi) * 0.6
+                            // softened, so each mote glows a little with no hard edge
                             ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: d, height: d)),
-                                     with: .color(Color(red: 1, green: 0.89, blue: 0.7).opacity(sin(life * .pi) * 0.35)))
+                                     with: .color(Color(red: 1, green: 0.93, blue: 0.78).opacity(a)))
                         } else if mode == .night {
                             let a = 0.25 + 0.55 * (0.5 + 0.5 * sin(t * (0.4 + p.s) + p.p))
                             let d = 1.6 + p.r * 2.2
@@ -62,7 +64,7 @@ struct AmbientBackground: View {
                 let now: Mode = m < rise + 20 || m > set + 45 ? .night : m > set - 75 ? .evening : .day
                 if now != mode || parts.isEmpty {
                     mode = now
-                    let n = now == .night ? 90 : now == .evening ? 34 : 24
+                    let n = now == .night ? 90 : now == .evening ? 34 : 36
                     parts = (0..<n).map { _ in Particle(x: .random(in: 0...1), y: .random(in: 0...1), r: .random(in: 0...1), s: .random(in: 0...1), p: .random(in: 0...6.28)) }
                 }
                 try? await Task.sleep(nanoseconds: 60_000_000_000)

@@ -225,7 +225,7 @@ input { font: inherit; color: var(--text); }
 .t10-art { position: relative; z-index: 1; width: 360px; aspect-ratio: 16/9; border-radius: 12px; background: var(--card) center/cover; overflow: hidden;
   box-shadow: 0 6px 18px #0006; transition: transform .18s, box-shadow .18s; }
 .t10-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 55%, rgba(0,0,0,.8)); }
-.t10-art span { position: absolute; z-index: 1; left: 12px; bottom: 10px; right: 12px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t10-art > span { position: absolute; z-index: 1; left: 12px; bottom: 10px; right: 12px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t10:hover .t10-art { transform: translateY(-3px) scale(1.03); box-shadow: 0 0 0 2px var(--accent), 0 12px 30px #000a; }
 .t10:hover b { -webkit-text-stroke-color: var(--accent); }
 
@@ -470,7 +470,7 @@ input { font: inherit; color: var(--text); }
 .tp-rel.cinema::before { content: "● "; color: var(--accent); }
 
 /* Top 10 cards: bigger names on the artwork */
-.t10-art span { font: 700 22px/1.15 "Segoe UI Variable Display", "Segoe UI", sans-serif; left: 14px; right: 14px; bottom: 12px;
+.t10-art > span { font: 700 22px/1.15 "Segoe UI Variable Display", "Segoe UI", sans-serif; left: 14px; right: 14px; bottom: 12px;
   white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; text-shadow: 0 2px 12px #000, 0 0 2px #000; }
 .t10-art::after { background: linear-gradient(transparent 40%, rgba(0,0,0,.85)); }
 
@@ -621,12 +621,19 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .t10-art .ttl-name { font: 700 22px/1.15 "Segoe UI Variable Display", "Segoe UI", sans-serif; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-shadow: 0 2px 12px #000, 0 0 2px #000; }
 
 
-/* details: the scores, small, under the line about it */
-.tp-scores { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 2px 0 8px; min-height: 24px; font-size: 15px; font-weight: 600; color: #EDE2D6; }
-.sc { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.sc img { height: 18px; width: auto; display: block; }
-.sc-rt { height: 20px !important; }
+/* details: the scores, a small quiet box on the right of the title (the left is busy) */
+.tp-top { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding-right: 48px; }
+.tp-top .tp-head { flex: 1 1 auto; min-width: 0; }
+.tp-scores { flex: none; margin-bottom: 30px; padding: 10px 14px; border-radius: 12px; background: rgba(14,11,9,.45);
+  border: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 7px; }
+.tp-scores h3 { display: none; }
+.sc { display: grid; grid-template-columns: 36px auto; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: #EDE2D6; }
+.sc-m { display: flex; align-items: center; }
+.sc-m img { height: 15px; width: auto; display: block; }
+.sc-m .sc-rt { height: 17px; }
 .sc-rt.rotten { filter: hue-rotate(70deg) saturate(.8); }
-.sc-mc { display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 4px; border-radius: 4px; font-size: 13px; color: #fff; }
+.sc-mc { display: inline-grid; place-items: center; min-width: 24px; height: 19px; padding: 0 3px; border-radius: 4px; font-size: 12px; color: #fff; }
 .sc-mc.hi { background: #3bb54a; } .sc-mc.mid { background: #e2a800; color: #1a1206; } .sc-mc.lo { background: #e0352b; }
-.sc em { font-style: normal; font-size: 12px; font-weight: 700; letter-spacing: .6px; color: var(--faint); text-transform: uppercase; }
+.sc-m em { font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--faint); text-transform: uppercase; }
+.sc-n { display: none; }
+.sc-v:empty::before { content: "Metacritic"; font-size: 12px; font-weight: 500; color: var(--faint); }
