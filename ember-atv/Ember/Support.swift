@@ -88,11 +88,14 @@ final class ImageStore {
         if let hit = cache.object(forKey: url as NSURL) { return hit }
         for attempt in 0..<3 {
             if Task.isCancelled { return nil }
-            if let res = try? await session.data(from: url),
-               ((res.1 as? HTTPURLResponse)?.statusCode ?? 200) < 400, let img = UIImage(data: res.0) {
-                let ready = await img.byPreparingForDisplay() ?? img
-                cache.setObject(ready, forKey: url as NSURL)
-                return ready
+            if let res = try? await session.data(from: url) {
+                let code = (res.1 as? HTTPURLResponse)?.statusCode ?? 200
+                if code == 404 || code == 410 { return nil }   // there isn't one (a logo many titles lack): no retrying
+                if code < 400, let img = UIImage(data: res.0) {
+                    let ready = await img.byPreparingForDisplay() ?? img
+                    cache.setObject(ready, forKey: url as NSURL)
+                    return ready
+                }
             }
             try? await Task.sleep(nanoseconds: UInt64(500_000_000 * (attempt + 1)))
         }

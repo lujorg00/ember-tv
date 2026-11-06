@@ -114,7 +114,11 @@ struct Meta: Identifiable, Hashable {
         if let b = background, let u = URL(string: b) { return u }
         return id.hasPrefix("tt") ? URL(string: "https://images.metahub.space/background/large/\(id)/img") : nil
     }
-    var logoURL: URL? { logo.flatMap(URL.init(string:)) }
+    /// The title's logo; when the details don't name one, metahub's (which most titles have).
+    var logoURL: URL? {
+        if let l = logo, let u = URL(string: l) { return u }
+        return id.hasPrefix("tt") ? URL(string: "https://images.metahub.space/logo/medium/\(id)/img") : nil
+    }
     var year: String { String(releaseInfo.prefix(4)) }
     var runtimeMinutes: Int? { runtime.flatMap { Int($0.filter(\.isNumber)) } }
 

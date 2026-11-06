@@ -555,14 +555,26 @@ function spotCard(m, type) {
   watch.onclick = (e) => { e.stopPropagation(); go("title", t, m.id, m, { autoplay: true }); };
   details.onclick = (e) => { e.stopPropagation(); go("title", t, m.id, m); };
   sp.onclick = () => go("title", t, m.id, m);
+  // The title's logo in place of its name: the name waits hidden while the logo loads (at most 0.8 s), so it
+  // doesn't flash up first; if there's no logo, the name shows.
+  const tt = $(".spot-t", sp);
+  tt.style.visibility = "hidden";
+  let logoDone = false;
+  const showName = () => { if (!logoDone) { logoDone = true; tt.style.visibility = ""; } };
+  const tryLogo = (url) => {
+    if (!url || logoDone) return;
+    const img = h(`<img class="spot-logo" alt="${esc(m.name)}">`);
+    img.onload = () => { if (logoDone && !tt.isConnected) return; logoDone = true; if (tt.isConnected) tt.replaceWith(img); };
+    img.onerror = () => {};
+    img.src = url;
+  };
+  if (m.id && m.id.startsWith("tt")) tryLogo(`https://images.metahub.space/logo/medium/${m.id}/img`);
+  setTimeout(showName, 800);
   // the full details (logo, description, genres) arrive a moment later
   meta(t, m.id).then(full => {
     if (!full) return;
     const mm = { ...m, ...full };
-    if (mm.logo) {
-      const img = h(`<img class="spot-logo" src="${esc(mm.logo)}" alt="${esc(mm.name)}">`);
-      img.onload = () => { const tt = $(".spot-t", sp); if (tt) tt.replaceWith(img); };
-    }
+    if (mm.logo && !logoDone) tryLogo(mm.logo);
     if (!m.description && mm.description) $(".spot-d", sp).textContent = mm.description;
     $(".spot-m", sp).textContent = [mm.releaseInfo || mm.year, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 2).join(", ")].filter(Boolean).join("  ·  ");
     if (!m.background && mm.background) sp.style.backgroundImage = `url('${mm.background}')`;
