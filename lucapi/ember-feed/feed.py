@@ -691,7 +691,28 @@ def report(body):
                 with _cache_lock:
                     _cache.pop("watched", None)  # the poster badges catch up
             threading.Thread(target=_scrobble, args=(verb, d, max(pct, 80.0) if finished else pct), daemon=True).start()
+    # The watchlist looks after itself: a series comes off when you start watching it, a film when you finish it.
+    if (typ == "series" and state == "playing") or (typ == "movie" and finished):
+        threading.Thread(target=_watchlist_drop, args=(imdb, typ), daemon=True).start()
     return {"ok": True, "finished": finished, "percent": d["percent"]}
+
+
+_dropped = set()
+
+
+def _watchlist_drop(imdb, typ):
+    if imdb in _dropped or not all(trakt_creds()):
+        return
+    try:
+        if imdb not in cached("watchlist", 300, _watchlist_ids):
+            _dropped.add(imdb)
+            return
+        _dropped.add(imdb)
+        watchlist_set({"imdb": imdb, "type": typ, "add": False})
+        print(f"[ember-feed] {imdb} off the watchlist ({'started' if typ == 'series' else 'finished'})", flush=True)
+    except Exception as e:
+        _dropped.discard(imdb)
+        print(f"[ember-feed] watchlist tidy-up failed for {imdb}: {e}", flush=True)
 
 
 _last_state = {}
@@ -2932,6 +2953,125 @@ def browse_originals(title, typ="movie", page=1):
     return cached(f"originals:{key}:{k}:{page}", 6 * 3600, build)
 
 
+# ---- smart search: "rom coms from the 2000s", "seth rogen comedies", "slow-burn Nordic crime shows"...
+# With an Anthropic key (config.json "anthropic_key"), Claude reads the request and suggests titles, which TMDB
+# then finds. Without one, Ember reads it itself: genres, decades and years, a person, films or series.
+_SMART_GENRES = [  # words -> (movie genre ids, tv genre ids)
+    (r"rom.?coms?|romantic comed(y|ies)", [10749, 35], [35]), (r"romance|romantic|love stor(y|ies)", [10749], [18]),
+    (r"comed(y|ies)|funny|comic", [35], [35]), (r"horror|scary", [27], [9648]), (r"thrillers?", [53], [80]),
+    (r"action", [28], [10759]), (r"adventures?", [12], [10759]), (r"sci.?fi|science fiction", [878], [10765]),
+    (r"fantasy", [14], [10765]), (r"animat(ed|ion)|cartoons?|anime", [16], [16]), (r"documentar(y|ies)|docs?", [99], [99]),
+    (r"crime|heists?|gangsters?|mob", [80], [80]), (r"mysteries|mystery|whodunn?its?|detective", [9648], [9648]),
+    (r"war\b|wartime", [10752], [10768]), (r"westerns?", [37], [37]), (r"family|kids", [10751], [10751]),
+    (r"musicals?|music", [10402], [10402]), (r"dramas?", [18], [18]), (r"histor(y|ical)|period", [36], [10768]),
+]
+
+
+def _anthropic_key():
+    return CFG.get("anthropic_key") or os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+def _smart_ai(q):
+    """Claude reads the request and names up to 30 titles; TMDB finds each one."""
+    body = json.dumps({
+        "model": CFG.get("anthropic_model", "claude-haiku-5-5"), "max_tokens": 1200,
+        "system": "You help someone find films and TV series to watch. Reply with JSON only, no prose: "
+                  '{"label": "<a short heading for the results>", "items": [{"title": "...", "year": 2004, "type": "movie|series"}]} '
+                  "with up to 30 real, well-matched titles, best matches first.",
+        "messages": [{"role": "user", "content": q}],
+    }).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
+        "x-api-key": _anthropic_key(), "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=40) as r:
+        text = "".join(c.get("text", "") for c in json.loads(r.read()).get("content", []))
+    j = json.loads(text[text.find("{"): text.rfind("}") + 1])
+
+    def find(it):
+        kind = "tv" if it.get("type") == "series" else "movie"
+        params = {"query": it.get("title", "")}
+        if it.get("year"):
+            params["first_air_date_year" if kind == "tv" else "year"] = it["year"]
+        res = _tmdb(f"/search/{kind}", **params).get("results", []) or _tmdb(f"/search/{kind}", query=it.get("title", "")).get("results", [])
+        return _to_metas(res[:1], kind)
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        found = list(ex.map(lambda it: find(it) if it.get("title") else [], j.get("items", [])[:30]))
+    out, seen = [], set()
+    for lst in found:
+        for m in lst:
+            if m["id"] not in seen:
+                seen.add(m["id"])
+                out.append(m)
+    return {"label": j.get("label") or q, "metas": out, "ai": True}
+
+
+def _smart_rules(q):
+    """Without AI: genres, a decade or year, a person, films or series - then TMDB's discover."""
+    text = " " + q.lower() + " "
+    kinds = ["tv"] if re.search(r"\b(series|shows?|tv|sitcoms?)\b", text) else ["movie"] if re.search(r"\b(films?|movies?)\b", text) else ["movie", "tv"]
+    gm, gt, words = [], [], text
+    for pat, m_ids, t_ids in _SMART_GENRES:
+        if re.search(r"\b(" + pat + r")\b", words):
+            gm += [g for g in m_ids if g not in gm]
+            gt += [g for g in t_ids if g not in gt]
+            words = re.sub(r"\b(" + pat + r")\b", " ", words)
+    yfrom = yto = None
+    m = re.search(r"\b(?:the )?(19|20)?(\d0)'?s\b", words)
+    if m:
+        cent = m.group(1) or ("20" if int(m.group(2)) <= 20 else "19")
+        yfrom = int(cent + m.group(2)); yto = yfrom + 9
+        words = words.replace(m.group(0), " ")
+    m = re.search(r"\b(?:from|in|since|after)?\s*((?:19|20)\d\d)\b", words)
+    if m and not yfrom:
+        y = int(m.group(1)); since = "since" in m.group(0) or "after" in m.group(0)
+        yfrom, yto = y, (date.today().year if since else y)
+        words = words.replace(m.group(0), " ")
+    words = re.sub(r"\b(films?|movies?|series|shows?|tv|sitcoms?|from|the|with|starring|by|directed|in|and|of|best|good|great|old|new|recent|classic|some|any|me|show|find|like)\b", " ", words)
+    name = " ".join(words.replace("'s", " ").split())
+    person = None
+    if len(name) >= 4:
+        hit = (_tmdb("/search/person", query=name).get("results") or [None])[0]
+        if hit and hit.get("popularity", 0) >= 2:
+            person = hit
+    if not (gm or gt or yfrom or person):
+        return {"metas": [], "label": ""}
+    out = []
+    for k in kinds:
+        p = {"sort_by": "popularity.desc", "vote_count.gte": 50 if k == "movie" else 20}
+        g = gm if k == "movie" else gt
+        if g:
+            p["with_genres"] = ",".join(map(str, g))
+        if yfrom:
+            p["primary_release_date.gte" if k == "movie" else "first_air_date.gte"] = f"{yfrom}-01-01"
+            p["primary_release_date.lte" if k == "movie" else "first_air_date.lte"] = f"{yto}-12-31"
+        if person and k == "movie":
+            p["with_people"] = person["id"]
+            p["vote_count.gte"] = 10
+        elif person:   # TV discover can't filter by person: their TV credits instead
+            credits = _tmdb(f"/person/{person['id']}/tv_credits").get("cast", [])
+            res = [c for c in sorted(credits, key=lambda c: -c.get("popularity", 0)) if not g or set(g) & set(c.get("genre_ids", []))]
+            out += _to_metas(res[:20], "tv")
+            continue
+        out += _to_metas(_tmdb(f"/discover/{k}", **p).get("results", [])[:20], k)
+    return {"metas": out, "label": q[:1].upper() + q[1:]}
+
+
+def smart_search(q):
+    q = " ".join(str(q).split())[:200]
+    if len(q) < 3:
+        return {"metas": [], "label": ""}
+    def get():
+        if _anthropic_key():
+            try:
+                return _smart_ai(q)
+            except Exception as e:
+                print(f"[ember-feed] smart search via Claude failed, reading it myself: {e}", flush=True)
+        return _smart_rules(q)
+    try:
+        return cached(f"smart:{q.lower()}", 6 * 3600, get)
+    except Exception as e:
+        return {"metas": [], "label": "", "error": str(e)}
+
+
 def browse_list(kind, tid, typ="movie", page=1):
     """The titles behind a tile. typ: movie or series."""
     k = "movie" if typ == "movie" else "tv"
@@ -3065,6 +3205,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": []})
             elif path == "/night":
                 self._json(night())
+            elif path == "/search/smart":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(smart_search((q.get("q") or [""])[0]))
             elif path == "/glance":
                 self._json(glance())
             elif path == "/alerts":

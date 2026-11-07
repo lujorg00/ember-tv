@@ -693,3 +693,4 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .t10-art .rel.cinema::before, .spot .rel.cinema::before { content: "● "; color: var(--accent); font-size: 9px; vertical-align: 1px; }
 .t10-art.bm .rel, .spot.bm .rel { left: 44px; }   /* the tick sits top left on bookmarked cards */
 .strip.hoverspot .spot .rel { display: none; }      /* the poster underneath already shows it */
+.smart-wait { margin: 6px 48px 18px; font-size: 15px; color: var(--faint); animation: glIn .4s ease; }

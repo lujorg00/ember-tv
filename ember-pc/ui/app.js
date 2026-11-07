@@ -980,7 +980,7 @@ async function showTile(kind, id, title, image, typ, sort = "") {
 async function showSearch(q = "") {
   const v = $("#view");
   v.innerHTML = "";
-  const head = h(`<div class="page-h"><div class="search"><span class="muted">⌕</span><input placeholder="Search films and series" value="${esc(q)}"></div></div>`);
+  const head = h(`<div class="page-h"><div class="search"><span class="muted">⌕</span><input placeholder="Search, or ask: rom coms from the 2000s, Seth Rogen comedies…" value="${esc(q)}"></div></div>`);
   const out = h(`<div class="rows" style="padding-top:12px"></div>`);
   v.append(head, out);
   const input = $("input", head); input.focus();
@@ -993,12 +993,23 @@ async function showSearch(q = "") {
       getJson(`${CINEMETA}/catalog/${t}/top/search=${enc}.json`).then(j => (j.metas || []).map(x => ({ ...x, type: t }))).catch(() => [])));
     if (my !== gen) return;
     out.innerHTML = "";
-    if (!s.length && !m.length) { out.appendChild(h(`<div class="empty">Nothing found for “${esc(term)}”.</div>`)); return; }
+    // Asking for something ("rom coms from the 2000s"): Ember's picks for it come in on top a moment later
+    const smartSlot = h(`<div></div>`);
+    out.appendChild(smartSlot);
+    if (term.split(/\s+/).length >= 2) {
+      smartSlot.innerHTML = `<div class="smart-wait">Looking for “${esc(term)}”…</div>`;
+      getJson(`${feed()}/search/smart?q=${enc}`, 45000).then(r => {
+        if (my !== gen) return;
+        if ((r.metas || []).length) smartSlot.replaceWith(row({ name: "✦ " + (r.label || term), kind: r.ai ? "picked by Claude" : "" }, r.metas, "movie"));
+        else smartSlot.remove();
+        if (!s.length && !m.length && !(r.metas || []).length) out.appendChild(h(`<div class="empty">Nothing found for “${esc(term)}”.</div>`));
+      }).catch(() => smartSlot.remove());
+    } else if (!s.length && !m.length) { out.appendChild(h(`<div class="empty">Nothing found for “${esc(term)}”.</div>`)); return; }
     if (s.length) out.appendChild(row("Series", s, "series"));
     if (m.length) out.appendChild(row("Films", m, "movie"));
     navStack[navStack.length - 1][1] = [term];
   };
-  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 350); });
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, input.value.trim().includes(" ") ? 800 : 350); });
   if (q) run();
 }
 

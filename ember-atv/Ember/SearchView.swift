@@ -7,6 +7,10 @@ struct SearchView: View {
     @State private var series: [Meta] = []
     @State private var films: [Meta] = []
     @State private var searched = ""
+    @State private var smart: [Meta] = []          // asking for something: Ember's picks for it
+    @State private var smartLabel = ""
+    @State private var smartBy = ""
+    @State private var asking = false
 
     var body: some View {
         NavigationStack {
@@ -14,23 +18,28 @@ struct SearchView: View {
             AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 30) {
+                    if asking && smart.isEmpty {
+                        Text("Looking for “\(searched)”…").font(.ember(21)).foregroundStyle(Theme.muted).padding(.horizontal, 90)
+                    }
+                    if !smart.isEmpty { PosterRow(row: RowData(id: "smart", title: "✦ " + smartLabel, kind: smartBy.isEmpty ? nil : smartBy, metas: smart, top: false)) }
                     if !series.isEmpty { PosterRow(row: RowData(id: "s", title: "Series", kind: nil, metas: series, top: false)) }
                     if !films.isEmpty { PosterRow(row: RowData(id: "f", title: "Films", kind: nil, metas: films, top: false)) }
-                    if !searched.isEmpty && series.isEmpty && films.isEmpty {
+                    if !searched.isEmpty && series.isEmpty && films.isEmpty && smart.isEmpty && !asking {
                         Text("Nothing found for “\(searched)”.").foregroundStyle(Theme.muted).padding(.horizontal, 90).padding(.top, 60)
                     }
                 }
                 .padding(.bottom, 80)
             }
             .scrollClipDisabled()
-            .searchable(text: $q, prompt: "Films and series")
+            .searchable(text: $q, prompt: "Search, or ask: rom coms from the 2000s…")
           }
             .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
         }
         .task(id: q) {
             let term = q.trimmingCharacters(in: .whitespaces)
-            guard term.count >= 2 else { series = []; films = []; searched = ""; return }
-            try? await Task.sleep(nanoseconds: 400_000_000)   // wait for typing to pause
+            guard term.count >= 2 else { series = []; films = []; smart = []; searched = ""; asking = false; return }
+            let ask = term.contains(" ")
+            try? await Task.sleep(nanoseconds: ask ? 800_000_000 : 400_000_000)   // wait for typing to pause
             if Task.isCancelled { return }
             async let s = search("series", term)
             async let f = search("movie", term)
@@ -39,6 +48,16 @@ struct SearchView: View {
             series = rs
             films = rf
             searched = term
+            smart = []
+            guard ask else { asking = false; return }
+            asking = true
+            let r = try? await API.feedGet("/search/smart?q=\(API.q(term))", timeout: 45)
+            if Task.isCancelled { return }
+            asking = false
+            let got = (r?.arr("metas") ?? []).map { Meta($0, type: $0.str("type") ?? "movie") }.filter { !$0.id.isEmpty }
+            smartLabel = r?.str("label") ?? term
+            smartBy = (r?["ai"] as? Bool) == true ? "picked by Claude" : ""
+            withAnimation(.easeOut(duration: 0.3)) { smart = got }
         }
     }
 
