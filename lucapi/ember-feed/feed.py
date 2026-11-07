@@ -3081,9 +3081,233 @@ def in_cinemas():
 
 def browse_tiles():
     try:
-        return cached("browse:tiles", 24 * 3600, _build_tiles)
+        t = cached("browse:tiles", 24 * 3600, _build_tiles)
     except Exception as e:
         return {"groups": [], "error": str(e)}
+    # the collections on Home this time round go in after your first recommendations row
+    rot = rotation()
+    if rot and rot.get("rows") and isinstance(t.get("home"), list):
+        home = list(t["home"])
+        at = next((i + 1 for i, h in enumerate(home) if h.get("style") == "row" and re.search(r"for you|recommend", h.get("name", ""), re.I)),
+                  next((i + 1 for i, h in enumerate(home) if h.get("style") == "row"), len(home)))
+        home[at:at] = [{"type": r["type"], "id": r["id"], "name": r["name"], "style": "row"} for r in rot["rows"]]
+        t = dict(t, home=home)
+    return t
+
+
+# ------------------------------------------------------------------ collections on Home, changing every few days
+# Like Netflix's occasional rows: three at a time from a pool - a seasonal one when it's due (Halloween, Christmas...),
+# one made from your own watching (because you loved..., more from a director, finishing a franchise), and themes.
+# Each needs COLL_MIN titles you haven't watched. They're served as if they were your addon's own lists, so Ember PC,
+# Ember TV and Apple TV show them like any other row. Same rows on every device; they change every ROTATE_DAYS days.
+
+ROTATE_DAYS = 3
+ROTATE_COUNT = 3
+COLL_MIN = 12
+# (id, name, type, (from MMDD, to MMDD) or None for any time, TMDB discover filters; "kw" = keyword names, any of)
+COLLS = [
+    ("halloween", "Halloween Horror", "movie", ("1001", "1031"), {"kw": ["halloween"], "with_genres": "27"}),
+    ("haunted", "Ghosts and Haunted Houses", "movie", ("1001", "1031"), {"kw": ["haunted house", "ghost"], "with_genres": "27"}),
+    ("dark-nights", "Dark Nights In: British Crime", "series", ("1101", "1130"), {"with_origin_country": "GB", "with_genres": "80"}),
+    ("christmas", "Christmas Films", "movie", ("1125", "1231"), {"kw": ["christmas"]}),
+    ("christmas-family", "Christmas for All the Family", "movie", ("1201", "1231"), {"kw": ["christmas"], "with_genres": "10751|16"}),
+    ("valentines", "Romcoms for Valentine's", "movie", ("0201", "0214"), {"with_genres": "10749,35"}),
+    ("summer", "Summer Blockbusters", "movie", ("0615", "0831"), {"with_genres": "28|12", "vote_count.gte": 6000}),
+    ("heist", "Heist Films", "movie", None, {"kw": ["heist"]}),
+    ("time-travel", "Time Travel", "movie", None, {"kw": ["time travel"]}),
+    ("twist", "Twist Endings", "movie", None, {"kw": ["twist ending", "plot twist"]}),
+    ("one-place", "Set in One Place", "movie", None, {"kw": ["single location"]}),
+    ("road-trip", "Road Trips", "movie", None, {"kw": ["road trip"]}),
+    ("survival", "Survival", "movie", None, {"kw": ["survival"]}),
+    ("killer", "On the Trail of a Killer", "movie", None, {"kw": ["serial killer"]}),
+    ("space", "Lost in Space", "movie", None, {"kw": ["space", "outer space", "spacecraft"], "with_genres": "878"}),
+    ("ai", "Artificial Intelligence", "movie", None, {"kw": ["artificial intelligence (a.i.)", "artificial intelligence"]}),
+    ("dystopia", "Dystopian Futures", "movie", None, {"kw": ["dystopia"]}),
+    ("courtroom", "Courtroom Dramas", "movie", None, {"kw": ["courtroom", "lawyer"], "with_genres": "18"}),
+    ("spies", "Spies", "movie", None, {"kw": ["spy", "espionage"]}),
+    ("con", "Con Artists", "movie", None, {"kw": ["con artist", "con man"]}),
+    ("revenge", "Revenge", "movie", None, {"kw": ["revenge"], "with_genres": "28|53|80"}),
+    ("coming-of-age", "Coming of Age", "movie", None, {"kw": ["coming of age"]}),
+    ("true-story", "Based on a True Story", "movie", None, {"kw": ["based on true story"]}),
+    ("zombies", "Zombies", "movie", None, {"kw": ["zombie"]}),
+    ("mind-benders", "Mind-Benders", "movie", None, {"with_genres": "878,9648"}),
+    ("short", "Under 90 Minutes", "movie", None, {"with_runtime.gte": 70, "with_runtime.lte": 90, "vote_average.gte": 7}),
+    ("long", "Three Hours Plus", "movie", None, {"with_runtime.gte": 170}),
+    ("gems", "Hidden Gems", "movie", None, {"vote_average.gte": 7.3, "vote_count.gte": 250, "vote_count.lte": 2500, "sort_by": "vote_average.desc"}),
+    ("world", "Foreign-Language Favourites", "movie", None, {"with_original_language": "fr|es|ko|ja|it|de|da|sv|no|pt|zh", "vote_average.gte": 7.2}),
+    ("brit-comedy", "British Comedies", "movie", None, {"with_origin_country": "GB", "with_genres": "35"}),
+    ("brit-crime", "British Crime Dramas", "series", None, {"with_origin_country": "GB", "with_genres": "80"}),
+    ("nordic", "Nordic Noir", "series", None, {"with_origin_country": "DK|SE|NO|IS|FI", "with_genres": "80|9648"}),
+    ("miniseries", "Finish It in a Weekend", "series", None, {"with_type": "2"}),
+    ("sitcoms", "Sitcoms to Binge", "series", None, {"with_genres": "35", "with_type": "4", "vote_count.gte": 400}),
+    ("korean", "Korean Dramas", "series", None, {"with_original_language": "ko", "with_genres": "18"}),
+    ("anime", "Anime Series", "series", None, {"with_original_language": "ja", "with_genres": "16"}),
+    ("docuseries", "Docuseries", "series", None, {"with_genres": "99", "vote_count.gte": 60}),
+    ("true-crime", "True Crime", "series", None, {"with_genres": "99", "kw": ["true crime"], "vote_count.gte": 20}),
+]
+PERSONAL = ["loved", "director", "franchise"]
+
+
+def _keyword(name):
+    def get():
+        res = _tmdb("/search/keyword", query=name).get("results", [])
+        hit = next((r for r in res if r.get("name", "").lower() == name.lower()), None)
+        return hit["id"] if hit else 0
+    return cached(f"kw:{name}", 30 * 86400, get)
+
+
+def _unwatched(metas):
+    seen = watched_status().get("items", {})
+    return [m for m in metas if seen.get(m["id"]) != "done"]
+
+
+def _coll_theme(c):
+    cid, name, typ, _, spec = c
+    k = "movie" if typ == "movie" else "tv"
+    p = {"sort_by": "popularity.desc", "vote_count.gte": 300 if k == "movie" else 80, "vote_average.gte": 6.6}
+    p.update({a: b for a, b in spec.items() if a != "kw"})
+    if spec.get("kw"):
+        ids = [i for i in (_keyword(w) for w in spec["kw"]) if i]
+        if not ids:
+            return None
+        p["with_keywords"] = "|".join(str(i) for i in ids)
+    res = []
+    for page in (1, 2):
+        res += _tmdb(f"/discover/{k}", **dict(p, page=page)).get("results", [])
+    return {"id": cid, "name": name, "type": typ, "metas": _unwatched(_to_metas(res, k))}
+
+
+def _tmdb_of(imdb, typ):
+    f = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+    res = (f.get("tv_results") if typ == "series" else f.get("movie_results")) or []
+    return res[0] if res else None
+
+
+def _coll_personal(which, rnd):
+    if which == "loved":
+        pool = loved_list()[:25]
+        rnd.shuffle(pool)
+        for x in pool[:4]:
+            hit = _tmdb_of(x["imdb"], x["type"])
+            if not hit:
+                continue
+            k = "tv" if x["type"] == "series" else "movie"
+            res = []
+            for page in (1, 2):
+                res += _tmdb(f"/{k}/{hit['id']}/recommendations", page=page).get("results", [])
+            metas = _unwatched(_to_metas(res, k))
+            if len(metas) >= COLL_MIN:
+                return {"id": f"loved-{x['imdb']}", "name": f"Because You Loved {hit.get('title') or hit.get('name')}",
+                        "type": x["type"], "metas": metas}
+        return None
+    if which == "director":
+        with _db_lock:
+            recent = [r[0] for r in db().execute("SELECT DISTINCT imdb FROM plays WHERE type='movie' ORDER BY ts DESC LIMIT 15")]
+        pool = list(dict.fromkeys([x["imdb"] for x in loved_list() if x["type"] == "movie"][:15] + recent))
+        rnd.shuffle(pool)
+        for imdb in pool[:5]:
+            hit = _tmdb_of(imdb, "movie")
+            if not hit:
+                continue
+            crew = _tmdb(f"/movie/{hit['id']}/credits").get("crew", [])
+            d = next((c for c in crew if c.get("job") == "Director"), None)
+            if not d:
+                continue
+            films = [c for c in _tmdb(f"/person/{d['id']}/movie_credits").get("crew", [])
+                     if c.get("job") == "Director" and c.get("release_date") and (c.get("vote_count") or 0) >= 100]
+            films.sort(key=lambda c: -(c.get("popularity") or 0))
+            metas = _unwatched(_to_metas(films, "movie"))
+            if len(metas) >= 6:
+                return {"id": f"director-{d['id']}", "name": f"More from {d['name']}", "type": "movie", "metas": metas}
+        return None
+    if which == "franchise":
+        seen = watched_status().get("items", {})
+        out = []
+        for c in big_series():
+            parts = _to_metas(c["parts"], "movie")
+            done = [m for m in parts if seen.get(m["id"]) == "done"]
+            if done and len(done) < len(parts):
+                out += [m for m in parts if seen.get(m["id"]) != "done"][:6]
+        if len(out) >= 6:
+            return {"id": "finish-franchise", "name": "Finish the Franchise", "type": "movie", "metas": out[:40]}
+        return None
+
+
+def _rotation_period():
+    return date.today().toordinal() // ROTATE_DAYS
+
+
+def _build_rotation():
+    period = _rotation_period()
+    rnd = random.Random(period)
+    today = datetime.now(TZ).strftime("%m%d")
+    due = lambda w: (w[0] <= today <= w[1]) if w[0] <= w[1] else (today >= w[0] or today <= w[1])
+    seasonal = [c for c in COLLS if c[3] and due(c[3])]
+    themes = [c for c in COLLS if not c[3]]
+    personal = PERSONAL[:]
+    for x in (seasonal, themes, personal):
+        rnd.shuffle(x)
+    rows = []
+
+    def add(row):
+        if row and len(row["metas"]) >= (6 if row["id"].startswith(("director-", "finish-")) else COLL_MIN) \
+                and not any(r["id"] == "ember-col-" + row["id"] for r in rows):
+            rows.append(dict(row, id="ember-col-" + row["id"], metas=row["metas"][:40]))
+            return True
+        return False
+
+    def tried(fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:
+            print(f"[ember-feed] collection failed: {e}", flush=True)
+            return None
+    for c in seasonal:
+        if add(tried(_coll_theme, c)):
+            break
+    for w in personal:
+        if add(tried(_coll_personal, w, rnd)):
+            break
+    for c in themes:
+        if len(rows) >= ROTATE_COUNT:
+            break
+        add(tried(_coll_theme, c))
+    print(f"[ember-feed] collections: {', '.join(r['name'] for r in rows)}", flush=True)
+    return {"period": period, "rows": rows}
+
+
+_rot_lock = threading.Lock()
+
+
+def rotation():
+    """This time round's collections, or None while they're first being put together (it happens in the background,
+    so Home never waits; they're there next time). Refreshed every 6 hours, so what you watch drops out."""
+    key = f"rotation:{_rotation_period()}"
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]
+    if _rot_lock.acquire(blocking=False):
+        def run():
+            try:
+                v = _build_rotation()
+                with _cache_lock:
+                    _cache[key] = (time.time(), v)
+            except Exception as e:
+                print(f"[ember-feed] collections failed: {e}", flush=True)
+            finally:
+                _rot_lock.release()
+        threading.Thread(target=run, daemon=True).start()
+    if hit:
+        return hit[1]
+    with _cache_lock:     # the last time round's, until this one's ready
+        old = [v for k, v in _cache.items() if k.startswith("rotation:")]
+    return old[-1][1] if old else None
+
+
+def collection_metas(cid):
+    rot = rotation() or {}
+    return next((r["metas"] for r in rot.get("rows", []) if r["id"] == cid), [])
 
 
 # A service's own shows and films ("Netflix Originals"): shows by the network that made them (TMDB networks),
@@ -3577,6 +3801,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(toplist(parts[2], urllib.parse.unquote(parts[3][:-5]), (q.get("aio") or ["0"])[0] == "1"))
             elif path == "/screensaver":
                 self._json(screensaver(self._base()))
+            elif re.fullmatch(r"/addon/catalog/(movie|series)/ember-col-[^/]+\.json", path):
+                self._json({"metas": collection_metas(path.split("/")[4][:-5])})
             elif path == "/addon" or path.startswith("/addon/"):
                 self._addon(self.path[len("/addon"):] or "/")
             elif path.startswith("/photo/"):
@@ -3647,6 +3873,7 @@ def main():
     else:
         print("[ember-feed] no Trakt login found: progress store runs without Trakt", flush=True)
     start_jellyfin_proxy()
+    threading.Thread(target=lambda: (time.sleep(20), rotation()), daemon=True).start()  # Home's collections, ready early
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()

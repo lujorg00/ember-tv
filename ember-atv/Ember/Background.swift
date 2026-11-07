@@ -8,6 +8,7 @@ struct AmbientBackground: View {
 
     @State private var mode: Mode = .night
     @State private var parts: [Particle] = []
+    @State private var flakes: [Particle] = []     // December: light snow over whichever scene is showing
 
     var body: some View {
         ZStack {
@@ -43,6 +44,17 @@ struct AmbientBackground: View {
                                      with: .color(Color(red: 1, green: (150 + p.r * 60) / 255, blue: 70 / 255).opacity((1 - life) * 0.6)))
                         }
                     }
+                    // snow: slow, soft flakes drifting and swaying, the bigger (nearer) ones a little quicker
+                    let tint = mode == .evening ? Color(red: 1, green: 0.89, blue: 0.79)
+                        : mode == .day ? Color(red: 1, green: 0.97, blue: 0.92) : Color(red: 0.91, green: 0.93, blue: 1)
+                    for p in flakes {
+                        let near = 0.4 + p.r * 0.6
+                        let y = (p.y + t * (0.012 + p.s * 0.016) * near).truncatingRemainder(dividingBy: 1) * (H + 20) - 10
+                        let drift = p.x * W + sin(t * (0.25 + p.s * 0.3) + p.p) * 30 * near + t * 6 * near
+                        let x = drift.truncatingRemainder(dividingBy: W + 20) - 10
+                        let d = 2.4 + near * 4.2
+                        ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: d, height: d)), with: .color(tint.opacity(0.2 + 0.45 * near)))
+                    }
                 }
             }
         }
@@ -66,6 +78,8 @@ struct AmbientBackground: View {
                     mode = now
                     let n = now == .night ? 90 : now == .evening ? 34 : 36
                     parts = (0..<n).map { _ in Particle(x: .random(in: 0...1), y: .random(in: 0...1), r: .random(in: 0...1), s: .random(in: 0...1), p: .random(in: 0...6.28)) }
+                    let december = Calendar.current.component(.month, from: Date()) == 12
+                    flakes = december ? (0..<80).map { _ in Particle(x: .random(in: 0...1), y: .random(in: 0...1), r: .random(in: 0...1), s: .random(in: 0...1), p: .random(in: 0...6.28)) } : []
                 }
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
             }

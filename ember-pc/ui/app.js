@@ -1765,7 +1765,7 @@ function showSettings() {
       <label>Sound</label>
       <label class="check"><input type="checkbox" id="pt"> Send Dolby and DTS untouched to a receiver or soundbar (HDMI only; leave off for PC speakers and headphones)</label>
       <label>Background</label>
-      <label class="check"><input type="checkbox" id="motion"> Moving background (dust in the sunlight by day, embers in the evening, stars at night)</label>
+      <label class="check"><input type="checkbox" id="motion"> Moving background (dust in the sunlight by day, embers in the evening, stars at night, snow in December)</label>
       <div class="btns" style="margin-top:18px"><button class="btn primary" id="save">Save</button></div>
       <label style="margin-top:28px">Ember picks for Omni (or any app that takes Stremio addons)</label>
       <div class="muted" style="font-size:13px">Add this as an addon in Omni: it gives the same streams as AIOStreams, tested and sorted best first by lucapi. It works at home, where the Apple TV can reach the Pi. It contains your AIOStreams link, so keep it to yourself.</div>
@@ -1833,7 +1833,7 @@ fetchSharedSettings();
 
 const sky = (() => {
   const cv = $("#sky"), g = cv.getContext("2d"), glow = $("#glow");
-  let mode = "night", parts = [], raf = 0, paused = false, last = 0, rise = 7 * 60, set = 17 * 60;
+  let mode = "night", parts = [], flakes = [], raf = 0, paused = false, last = 0, rise = 7 * 60, set = 17 * 60;
   // on the Chromecast: a third of the size and 12 frames a second, so rows still scroll smoothly over it
   const size = () => { const k = TV ? 3 : 2; cv.width = Math.round(innerWidth / k); cv.height = Math.round(innerHeight / k); };
   const pickMode = () => {
@@ -1861,6 +1861,10 @@ const sky = (() => {
     // day: a few motes drifting in the sunlight; evening: embers; night: stars
     const n = mode === "night" ? (TV ? 50 : 70) : mode === "evening" ? (TV ? 20 : 26) : (TV ? 22 : 36);
     for (let i = 0; i < n; i++) parts.push({ x: Math.random(), y: Math.random(), r: Math.random(), s: Math.random(), p: Math.random() * 6.28 });
+    // December: light snow falling over whichever scene is showing
+    flakes = [];
+    if (new Date().getMonth() === 11) for (let i = 0; i < (TV ? 34 : 70); i++)
+      flakes.push({ x: Math.random(), y: Math.random(), r: Math.random(), s: Math.random(), p: Math.random() * 6.28 });
     const layers = mode === "day"
       ? [soft("1500px 1000px", "92% -12%", "255,206,140", 0.30), soft("900px 600px", "100% 0%", "255,230,190", 0.14), "linear-gradient(#1C140E, #120D0A 55%, #0E0B09)"]
       : mode === "evening"
@@ -1895,13 +1899,22 @@ const sky = (() => {
         g.beginPath(); g.arc(x, y, 0.8 + p.r * 1.4, 0, 6.28); g.fill();
       }
     }
+    // snow: slow, soft flakes drifting and swaying, bigger ones nearer and quicker; tinted to suit the light
+    const tint = mode === "evening" ? "255,226,200" : mode === "day" ? "255,246,234" : "232,238,255";
+    for (const p of flakes) {
+      const near = 0.4 + p.r * 0.6;
+      const y = ((p.y + s * (0.012 + p.s * 0.016) * near) % 1) * (H + 10) - 5;
+      const x = ((p.x * W + Math.sin(s * (0.25 + p.s * 0.3) + p.p) * 16 * near + s * 3 * near) % (W + 10) + W + 10) % (W + 10) - 5;
+      g.fillStyle = `rgba(${tint},${0.22 + 0.45 * near})`;
+      g.beginPath(); g.arc(x, y, (TV ? 0.5 : 0.7) + near * (TV ? 1.1 : 1.6), 0, 6.28); g.fill();
+    }
   };
   async function start() {
     try { const w = await getJson(`${feed()}/weather`, 5000); const hm = (x) => { const [a, b] = (x || "").split(":").map(Number); return a * 60 + b; };
       if (w.sunrise) { rise = hm(w.sunrise); set = hm(w.sunset); } } catch (e) {}
     mode = pickMode(); size(); seed();
     cancelAnimationFrame(raf);
-    if (store.get("motion", "1") === "1" && parts.length) raf = requestAnimationFrame(draw); else g.clearRect(0, 0, cv.width, cv.height);
+    if (store.get("motion", "1") === "1" && (parts.length || flakes.length)) raf = requestAnimationFrame(draw); else g.clearRect(0, 0, cv.width, cv.height);
   }
   addEventListener("resize", () => { size(); });
   setInterval(() => { if (pickMode() !== mode) start(); }, 60000);
