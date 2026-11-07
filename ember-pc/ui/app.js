@@ -414,7 +414,7 @@ async function relFlush() {
 function relScan() {
   if (watchlistIds.size) applyBookmarks(document.getElementById("view"));
   const thisYear = new Date().getFullYear();
-  document.querySelectorAll("#view .poster[data-wid]:not([data-rel])").forEach(el => {
+  document.querySelectorAll("#view .poster[data-wid]:not([data-rel]), #view .t10-art[data-wid]:not([data-rel]), #view .spot[data-wid]:not([data-rel])").forEach(el => {
     el.dataset.rel = "1";
     const y = +el.dataset.year;
     if (y && y < thisYear - 1) return; // older titles are out everywhere

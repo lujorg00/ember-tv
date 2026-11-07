@@ -406,6 +406,7 @@ struct TopRow: View {
                                     WatchBadge(state: store.badge(m.id))
                                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(m.id) ? .topLeading : .topTrailing)
                                     if store.watchlist.contains(m.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
+                                    ReleaseTag(id: m.id)
                                 }
                                 .frame(width: 400, height: 225)
                             }
@@ -503,6 +504,24 @@ struct PosterCard: View {
         .buttonStyle(.card)
         .onAppear { store.wantRelease(meta) }
         .contextMenu { PosterMenu(meta: meta, inWatchlist: inWatchlist) }
+    }
+}
+
+/// In cinemas / coming 29 Nov: top left of a card (beside the tick when that's top left too).
+struct ReleaseTag: View {
+    @EnvironmentObject var store: Store
+    let id: String
+    var body: some View {
+        if let label = store.release[id]?.label {
+            let cinema = store.release[id]?.s == "cinema"
+            Text(label).font(.ember(15, .bold))
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(cinema ? Theme.accent : Color.black.opacity(0.7), in: Capsule())
+                .foregroundStyle(cinema ? Theme.ink : .white)
+                .padding(10)
+                .padding(.leading, store.watched[id] != nil && store.watchlist.contains(id) ? 48 : 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
     }
 }
 
@@ -651,6 +670,7 @@ private struct SpotFace: View {
             if store.watchlist.contains(meta.id) { Bookmark().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing) }
             WatchBadge(state: store.badge(meta.id))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: store.watchlist.contains(meta.id) ? .topLeading : .topTrailing)
+            ReleaseTag(id: meta.id)
             if let p = store.progress[meta.id], !open {
                 ProgressBar(fraction: p.percent / 100).padding(10).frame(width: 205)
             }
