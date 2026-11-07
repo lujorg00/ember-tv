@@ -114,8 +114,11 @@
   window.emberTvLongOk = () => {
     okLong = true;
     if (!cur) return;
-    if (cur.matches(".cw")) return cwMenu(cur); // Continue watching: offer to remove it
-    const b = cur.querySelector(".wbadge, .ep-mark") || (cur.closest(".spot") && cur.closest(".spot").querySelector(".wbadge")); // a poster's tick, an episode's, or the spotlight's
+    // a poster, a wide card, the spotlight or Continue watching: a menu (watched, love, and remove for Continue watching)
+    const holder = cur.matches("[data-wid], [data-tid]") ? cur
+      : cur.querySelector("[data-wid]") || (cur.closest(".spot, [data-wid]"));
+    if (holder && window.emberTitle) return titleMenu(cur, holder);
+    const b = cur.querySelector(".ep-mark"); // an episode's tick
     if (b) b.click();
   };
 
@@ -128,6 +131,28 @@
     if (menuFrom && visible(menuFrom)) setFocus(menuFrom, false); else setFocus(first());
     menuFrom = null;
     return true;
+  }
+  function titleMenu(from, holder) {
+    closeMenu();
+    menuFrom = from;
+    const id = holder.dataset.wid || holder.dataset.tid, type = holder.dataset.wtype || holder.dataset.ttype || "movie";
+    const name = holder.dataset.wname || holder.dataset.tname || (from.querySelector(".cw-name") || {}).textContent || "this";
+    const st = window.emberTitle.state(id), wall = !!holder.closest(".strip.wall"), cw = from.matches(".cw");
+    const m = document.createElement("div");
+    m.className = "tvm";
+    m.innerHTML = `<div class="tvm-box"><div class="tvm-t"></div></div>`;
+    m.querySelector(".tvm-t").textContent = name;
+    const box = m.querySelector(".tvm-box");
+    const add = (label, fn, cls) => { const b = document.createElement("button"); b.className = "tvm-b" + (cls ? " " + cls : ""); b.textContent = label;
+      b.onclick = () => { closeMenu(); fn(); }; box.appendChild(b); return b; };
+    const firstBtn = add(st.watched ? "Mark as unwatched" : wall ? "Mark as watched (takes it off your watchlist)" : "Mark as watched",
+      () => window.emberTitle.watched(type, id, name, !st.watched, wall));
+    add(st.loved ? "Take the love off" : "Love it (steers your recommendations)", () => window.emberTitle.love(type, id, name, !st.loved));
+    if (cw) add("Remove from Continue watching", () => { const x = from.querySelector(".cw-x"); const next = from.nextElementSibling || from.previousElementSibling;
+      if (x) x.click(); setTimeout(() => setFocus(next && visible(next) ? next : first()), 300); }, "danger");
+    add("Cancel", () => {});
+    document.body.appendChild(m);
+    setFocus(firstBtn, false);
   }
   function cwMenu(card) {
     closeMenu();

@@ -407,11 +407,7 @@ struct TopRow: View {
                             .buttonStyle(.card)
                             .remember("\(row.id)|\(m.id)")
                             .onAppear { store.wantRelease(m) }
-                            .contextMenu {
-                                Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
-                                    Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
-                                }
-                            }
+                            .contextMenu { PosterMenu(meta: m) }
                         }
                     }
                 }
@@ -450,11 +446,7 @@ struct WideRow: View {
                         .buttonStyle(.card)
                         .remember("\(row.id)|\(m.id)")
                         .onAppear { store.wantRelease(m) }
-                        .contextMenu {
-                            Button(store.watched[m.id] == "done" ? "Mark as unwatched" : "Mark as watched") {
-                                Task { await store.markTitle(m, watched: store.watched[m.id] != "done") }
-                            }
-                        }
+                        .contextMenu { PosterMenu(meta: m) }
                     }
                 }
                 .padding(.horizontal, 90)
@@ -825,6 +817,7 @@ struct ContinueRow: View {
                             .buttonStyle(.card)
                             .remember("cw|\(it.id)")
                             .contextMenu {
+                                PosterMenu(meta: it.meta)
                                 Button("Remove from Continue watching", role: .destructive) { store.dismiss(it.id) }
                             }
                             Text(it.meta.name).font(.ember(24, .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)

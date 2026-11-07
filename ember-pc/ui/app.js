@@ -125,6 +125,34 @@ document.addEventListener("click", async (e) => {
   }
   badgeClicks.set(b, setTimeout(() => { badgeClicks.delete(b); badgeClick(b, holder, id, type, name); }, 280));
 }, true);
+/** Mark a title watched or unwatched from anywhere (a tick, the TV's hold-OK menu); on a watchlist row, watched
+ *  also takes it off the watchlist. */
+async function setWatched(type, id, name, on, fromWall) {
+  if (!(await markTitle(type, id, on))) return false;
+  refreshBadges(id);
+  if (on && fromWall) {
+    try {
+      const r = await fetch(`${feed()}/watchlist`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imdb: id, type, add: false }) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      watchlistIds.delete(id); applyBookmarks();
+      document.querySelectorAll(`.strip.wall [data-wid="${id}"]`).forEach(p => {
+        const row = p.closest(".row"), n = row && $("h2 small", row);
+        p.style.transition = "opacity .3s, transform .3s"; p.style.opacity = "0"; p.style.transform = "scale(.9)";
+        setTimeout(() => { p.remove(); if (n) n.textContent = Math.max(0, (+n.textContent || 1) - 1); }, 300);
+      });
+      toast(`Marked ${name} as watched and took it off your watchlist.`);
+    } catch (err) { toast(`Marked ${name} as watched, but couldn't take it off your watchlist.`); }
+  } else toast(on ? `Marked ${name} as watched.` : `${name} is unwatched again.`);
+  return true;
+}
+// for the TV's hold-OK menu (tv.js)
+window.emberTitle = {
+  state: (id) => ({ watched: watchedMap[id] === "done", loved: lovedIds.has(id) }),
+  watched: (type, id, name, on, fromWall) => setWatched(type, id, name, on, fromWall),
+  love: (type, id, name, on) => setLove(type, id, name, on),
+};
+
 async function badgeClick(b, holder, id, type, name) {
   if (lovedIds.has(id)) { toast(`${name} is loved. Double-click to take the love off.`); return; }
   const undo = watchedMap[id] === "done";
@@ -134,24 +162,7 @@ async function badgeClick(b, holder, id, type, name) {
     return;
   }
   b.classList.add("busy");
-  if (await markTitle(type, id, !undo)) {
-    refreshBadges(id);
-    // ticked on a watchlist row: watched, so it comes off the watchlist (and out of the row)
-    if (!undo && b.closest(".strip.wall")) {
-      try {
-        const r = await fetch(`${feed()}/watchlist`, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imdb: id, type, add: false }) });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        watchlistIds.delete(id); applyBookmarks();
-        document.querySelectorAll(`.strip.wall [data-wid="${id}"]`).forEach(p => {
-          const row = p.closest(".row"), n = row && $("h2 small", row);
-          p.style.transition = "opacity .3s, transform .3s"; p.style.opacity = "0"; p.style.transform = "scale(.9)";
-          setTimeout(() => { p.remove(); if (n) n.textContent = Math.max(0, (+n.textContent || 1) - 1); }, 300);
-        });
-        toast(`Marked ${name} as watched and took it off your watchlist.`);
-      } catch (err) { toast(`Marked ${name} as watched, but couldn't take it off your watchlist.`); }
-    } else toast(undo ? `${name} is unwatched again.` : `Marked ${name} as watched.`);
-  }
+  await setWatched(type, id, name, !undo, !!b.closest(".strip.wall"));
   b.classList.remove("busy");
 }
 async function loadProgress() {
@@ -625,7 +636,7 @@ async function continueRow(cwCat) {
   const r = h(`<section class="row fade-in"><h2>Continue watching <small>${items.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   for (const it of items.slice(0, 20)) {
-    const el = h(`<div class="cw"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
+    const el = h(`<div class="cw" data-tid="${esc(it.id)}" data-ttype="${esc(it.type)}" data-tname="${esc((it.m && it.m.name) || "")}"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
     strip.appendChild(el);
     $(".cw-x", el).onclick = async (e) => {
       e.stopPropagation();
