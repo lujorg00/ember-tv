@@ -137,7 +137,7 @@ public class PlayerActivity extends Activity {
         upNext.addView(upNextText);
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        upNextPlay = pill("▶  Play now");
+        upNextPlay = pill("Play now");
         upNextStay = pill("Watch credits");
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-2, -2);
         bl.setMargins(0, dp(12), dp(10), 0);

@@ -812,7 +812,10 @@ struct ContinueRow: View {
                                     .clipped()
                                     LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .bottom, endPoint: .center)
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(it.label).font(.ember(24, .bold))
+                                        HStack(spacing: 8) {
+                                            if !it.label.hasPrefix("Next") { Image(systemName: "play.fill").font(.system(size: 17, weight: .bold)) }
+                                            Text(it.label).font(.ember(24, .bold))
+                                        }
                                         if let p = it.percent { ProgressBar(fraction: p / 100) }
                                     }
                                     .padding(18)

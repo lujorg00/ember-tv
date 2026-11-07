@@ -21,7 +21,7 @@ func niceName(_ name: String) -> String {
 struct CWItem: Identifiable {
     let id: String
     let meta: Meta
-    let label: String      // "▶ S2 · E6 · 10m left", "Next · S3 · E1"
+    let label: String      // "S2 · E6 · 10m left", "Next · S3 · E1" (a drawn play icon goes in front of a resume)
     let art: URL?
     let percent: Double?
 }
@@ -214,7 +214,7 @@ final class Store: ObservableObject {
                     var label = ""
                     if let p {
                         let left = p.minutesLeft.map { $0 <= 10 ? " · \($0)m left" : "" } ?? ""
-                        label = (full.isSeries && season != nil ? "▶ S\(season!) · E\(episode!)" : "▶ Resume") + left
+                        label = (full.isSeries && season != nil ? "S\(season!) · E\(episode!)" : "Resume") + left
                     } else if full.isSeries, let n = try? await API.feedGet("/next/\(m.id)", timeout: 6), let s = n.int("season") {
                         season = s
                         episode = n.int("episode")

@@ -674,3 +674,7 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .gl-next { font-weight: 600; max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gl-next.shift { color: var(--accent); }
 .gl-sep { width: 1px; height: 14px; background: rgba(255,255,255,.15); }
+
+/* the drawn play triangle (the ▶ character shows as an emoji on the Chromecast) */
+.pl { width: .78em; height: .78em; fill: currentColor; display: inline-block; vertical-align: -0.06em; margin-right: .5em; flex: none; }
+.cw-label .pl { width: .7em; height: .7em; margin-right: .4em; }

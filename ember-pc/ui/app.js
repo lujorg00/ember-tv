@@ -60,6 +60,9 @@ async function loadWatched() {
   if (Date.now() - watchedAt < 120e3) return;
   try { watchedMap = (await getJson(`${feed()}/watched`, 8000)).items || {}; watchedAt = Date.now(); } catch (e) {}
 }
+// A drawn play triangle: the ▶ character turns into a blue emoji box on the Chromecast.
+const PLAY = `<svg class="pl" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>`;
+
 // Loves: watched isn't the same as liked. Double-click the tick for a heart; it steers the recommendation rows.
 let lovedIds = new Set();
 const HEART = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.1 0 3.6 1.2 4.3 2.4h2c.7-1.2 2.2-2.4 4.3-2.4 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg>`;
@@ -640,12 +643,12 @@ async function continueRow(cwCat) {
       let season = it.p && it.p.season, episode = it.p && it.p.episode, label = "";
       if (it.p) {
         const left = it.p.duration ? Math.max(1, Math.round((it.p.duration - it.p.position) / 60)) : 0;
-        label = `▶ ${it.type === "series" && season ? `S${season} · E${episode}` : "Resume"}${left && left <= 10 ? ` · ${left}m left` : ""}`;
+        label = `${it.type === "series" && season ? `S${season} · E${episode}` : "Resume"}${left && left <= 10 ? ` · ${left}m left` : ""}`;
         el.querySelector(".cw-art").insertAdjacentHTML("beforeend", `<div class="bar"><i style="width:${Math.max(3, Math.min(100, it.p.progress))}%"></i></div>`);
       } else if (it.type === "series") {
         try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
       }
-      $(".cw-label", el).textContent = label;
+      $(".cw-label", el).innerHTML = (label.startsWith("Next") ? "" : PLAY) + esc(label);
       const ep = season && (full.videos || []).find(x => x.season === season && x.episode === episode);
       const art = (ep && ep.thumbnail) || backdrop(full);
       if (art) $(".cw-art", el).style.backgroundImage = `url('${art}')`;
@@ -1098,7 +1101,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">▶  ${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>▶  Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
+    <div class="btns"><button class="btn primary big" id="resumeBtn">${PLAY}${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>${PLAY}Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
   const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
   // In cinemas / not out yet
   (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -1207,7 +1210,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       const n = eps.find(e => aired(e) && !isDone(e.season + ":" + e.episode));
       if (n) cur = { season: n.season, episode: n.episode };
     }
-    $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
+    $("#resumeBtn", head).innerHTML = PLAY + esc(resumeLabel());
     return true;
   };
   // A second click within 4 seconds confirms (for big changes, like a whole show).
@@ -1261,7 +1264,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
         const mk = $(".ep-mark", el);
         if (mk) mk.onclick = async (ev) => { ev.stopPropagation(); const done = isDone(e.season + ":" + e.episode); if (await mark([e], !done)) drawEps(); };
         el.onclick = () => { grid.querySelectorAll(".epc").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
-          cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).textContent = "▶  " + resumeLabel();
+          cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).innerHTML = PLAY + esc(resumeLabel());
           if (isOpen()) pick(e.season, e.episode, e.name || e.title || ""); };
         grid.appendChild(el);
       });
@@ -1315,7 +1318,7 @@ async function streamsPanel(right, mm, season, episode, epTitle, saved, autoplay
   right.innerHTML = `<div class="panel sticky"><div class="sp-head"><h3>${mm.type === "series" ? `S${season} E${episode}${epTitle ? " · " + esc(epTitle) : ""}` : "Streams"}</h3>
     ${resume ? `<div class="resume-note">Resumes at <b>${fmt(resume.position)}</b> <span class="muted">· ${esc(resume.device)}, ${esc(resume.ago)} ago</span></div>
       <label class="muted small"><input type="checkbox" class="fromstart"> Start from the beginning</label>` : ""}
-    <div class="muted small">Pick one to play it. ▶ Play on the page picks the best for you.</div></div>
+    <div class="muted small">Pick one to play it. Play on the page picks the best for you.</div></div>
     <div class="streams"><div class="muted">Finding streams…</div></div></div>`;
   const box = $(".streams", right);
   if (!aioBase()) { box.innerHTML = `<div class="muted">Add your AIOStreams link in Settings first.</div>`; return; }
