@@ -54,7 +54,7 @@ struct RootView: View {
                     .tabItem { Label("Series", systemImage: "tv") }
                 SearchView()
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
-                MatchView()
+                WhatToWatchView()
                     .tabItem { Label("What to watch?", systemImage: "heart") }
                 YearView()
                     .tabItem { Label("Your year", systemImage: "chart.bar") }

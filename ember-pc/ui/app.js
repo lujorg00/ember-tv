@@ -1535,14 +1535,104 @@ async function showYear(year) {
 // ---------------------------------------------------------------- "What shall we watch?"
 
 let matchPoll = 0;
-async function showMatch() {
+// ---------------------------------------------------------------- what to watch: the shuffle
+const SHUF = {
+  type: [["both", "Films & series"], ["movie", "Films"], ["series", "Series"]],
+  vibe: [["", "Any vibe"], ["feelgood", "Feel-good"], ["laugh", "Laugh"], ["edge", "Edge of your seat"], ["mindbending", "Mind-bending"],
+         ["cosy", "Cosy"], ["dark", "Dark"], ["epic", "Epic"], ["tearjerker", "Tearjerker"]],
+  genres: [["", "Any genre"], ["action", "Action"], ["comedy", "Comedy"], ["drama", "Drama"], ["scifi", "Sci-Fi"], ["thriller", "Thriller"], ["horror", "Horror"],
+           ["crime", "Crime"], ["romance", "Romance"], ["animation", "Animation"], ["documentary", "Documentary"], ["fantasy", "Fantasy"], ["mystery", "Mystery"]],
+  decade: [["", "Any time"], ["2020", "2020s"], ["2010", "2010s"], ["2000", "2000s"], ["1990", "90s"], ["1980", "80s"], ["older", "Older"]],
+};
+function showShuffle() {
   clearInterval(matchPoll);
   const v = $("#view");
-  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1><div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div><div class="empty">Shuffling the deck…</div>`;
+  const f = (() => { try { return JSON.parse(store.get("shuffle", "{}")) || {}; } catch (e) { return {}; } })();
+  f.type = f.type || "both"; f.genres = f.genres || []; f.vibe = f.vibe || ""; f.decade = f.decade || "";
+  const chips = (key, list, multi) => `<div class="chips shuf-f" data-k="${key}">${list.map(([k, l]) =>
+    `<span class="chip btn-chip ${(multi ? (k ? f[key].includes(k) : !f[key].length) : f[key] === k) ? "on" : ""}" data-v="${k}">${esc(l)}</span>`).join("")}</div>`;
+  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
+      <div class="chips wtw-modes"><span class="chip btn-chip on">Shuffle</span><span class="chip btn-chip" id="toSwipe">Swipe together</span></div></div>
+    <div class="shuf fade-in">
+      <div class="shuf-filters">${chips("type", SHUF.type)}${chips("vibe", SHUF.vibe)}${chips("genres", SHUF.genres, true)}${chips("decade", SHUF.decade)}</div>
+      <div class="shuf-go"><button class="btn primary big" id="shufBtn">Shuffle</button><span class="muted shuf-note"></span></div>
+      <div class="shuf-stage"><div class="shuf-reel"></div><div class="shuf-frame"></div></div>
+      <div class="shuf-pick"></div>
+    </div>`;
+  $("#toSwipe", v).onclick = () => showMatch(true);
+  v.querySelectorAll(".shuf-f").forEach(row => row.onclick = (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    const k = row.dataset.k, val = c.dataset.v;
+    if (k === "genres") {
+      f.genres = !val ? [] : f.genres.includes(val) ? f.genres.filter(x => x !== val) : [...f.genres, val];
+      row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.dataset.v ? f.genres.includes(x.dataset.v) : !f.genres.length));
+    }
+    else { f[k] = val; row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c)); }
+    store.set("shuffle", JSON.stringify(f));
+    pile = null; // new filters: a new pile next time
+  });
+  const reel = $(".shuf-reel", v), stage = $(".shuf-stage", v), pickBox = $(".shuf-pick", v), note = $(".shuf-note", v), btn = $("#shufBtn", v);
+  let pile = null, used = 0, spinning = false;
+  const W = TV ? 176 : 150, GAP = 16;
+  const load = async () => {
+    const q = new URLSearchParams({ type: f.type, genres: f.genres.join(","), vibe: f.vibe, decade: f.decade });
+    const r = await getJson(`${feed()}/shuffle?${q}`, 45000);
+    pile = (r.metas || []).filter(m => m.poster);
+    used = 0;
+    pile.slice(0, 30).forEach(m => { new Image().src = m.poster; });
+  };
+  const spin = async () => {
+    if (spinning) return;
+    spinning = true; btn.disabled = true; note.textContent = ""; pickBox.innerHTML = ""; pickBox.classList.remove("on");
+    try { if (!pile || used >= pile.length) await load(); } catch (e) { note.textContent = "Couldn't reach lucapi: " + e.message; spinning = false; btn.disabled = false; return; }
+    if (!pile.length) { note.textContent = "Nothing matches all of those. Try fewer filters."; spinning = false; btn.disabled = false; return; }
+    const pick = pile[used++];
+    // the reel: a long run of the others, the pick near the end; it whizzes past and slows to a stop on it
+    const others = pile.filter(m => m !== pick);
+    const mix = others.slice().sort(() => Math.random() - 0.5);
+    const run = []; for (let i = 0; i < 34; i++) run.push(mix.length ? mix[i % mix.length] : pick);
+    const at = run.length; run.push(pick, ...others.slice(0, 4));
+    reel.style.transition = "none";
+    reel.innerHTML = run.map(m => `<div class="shuf-p" style="background-image:url('${esc(m.poster)}')"></div>`).join("");
+    const mid = stage.clientWidth / 2 - W / 2;
+    reel.style.transform = `translateX(${mid - 2 * (W + GAP)}px)`;
+    void reel.offsetWidth;
+    stage.classList.add("spinning");
+    reel.style.transition = `transform ${TV ? 3.2 : 3.6}s cubic-bezier(.12,.72,.14,1)`;
+    reel.style.transform = `translateX(${mid - at * (W + GAP)}px)`;
+    await new Promise(r => setTimeout(r, TV ? 3250 : 3650));
+    stage.classList.remove("spinning");
+    reel.children[at].classList.add("won");
+    // the pick, large
+    pickBox.innerHTML = `<div class="shuf-card" style="background-image:url('${esc(pick.background || pick.poster)}')">
+      <div class="shuf-in"><div class="shuf-t"></div><div class="shuf-m">${esc([pick.type === "series" ? "Series" : "Film", pick.releaseInfo, pick.imdbRating && "★ " + pick.imdbRating].filter(Boolean).join("  ·  "))}</div>
+      <div class="shuf-d">${esc(pick.description || "")}</div>
+      <div class="btns"><button class="btn primary">${PLAY}Watch</button><button class="btn">Details</button><button class="btn" id="again2">Not this one</button></div></div></div>`;
+    $(".shuf-t", pickBox).replaceWith(titleArt(pick, pick.type));
+    const [w, d, again] = pickBox.querySelectorAll("button");
+    w.onclick = () => go("title", pick.type, pick.id, pick, { autoplay: true });
+    d.onclick = () => go("title", pick.type, pick.id, pick);
+    again.onclick = spin;
+    requestAnimationFrame(() => pickBox.classList.add("on"));
+    spinning = false; btn.disabled = false; btn.textContent = "Shuffle again";
+    if (TV && window.emberTvFocus) window.emberTvFocus(w);
+  };
+  btn.onclick = spin;
+}
+
+async function showMatch(swipe) {
+  if (swipe !== true) return showShuffle();
+  clearInterval(matchPoll);
+  const v = $("#view");
+  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
+      <div class="chips wtw-modes"><span class="chip btn-chip" id="toShuffle">Shuffle</span><span class="chip btn-chip on">Swipe together</span></div></div><div class="empty">Shuffling the deck…</div>`;
+  $("#toShuffle", v).onclick = showShuffle;
   let m;
   try { m = await (await fetch(`${feed()}/match/new`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); }
   catch (e) { $(".empty", v).textContent = "Couldn't reach lucapi: " + e.message; return; }
-  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1><div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div>
+  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
+      <div class="chips wtw-modes"><span class="chip btn-chip" id="toShuffle">Shuffle</span><span class="chip btn-chip on">Swipe together</span></div>
+      <div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div>
     <div class="match fade-in">
       <div class="card2 qr"><img src="${feed()}/match/${m.code}/qr.png" alt="QR code" onerror="this.remove()">
         <div>Scan with your phone's camera, or go to<br><b>${esc(feed().replace(/^https?:\/\//, ""))}/m/${m.code}</b></div>
@@ -1550,7 +1640,8 @@ async function showMatch() {
         <button class="btn" id="again">New deck</button></div>
       <div class="matches"><h3>Matches</h3><div class="grid tight"><div class="muted">None yet. Needs at least two people.</div></div></div>
     </div>`;
-  $("#again", v).onclick = showMatch;
+  $("#again", v).onclick = () => showMatch(true);
+  $("#toShuffle", v).onclick = showShuffle;
   let shown = "";
   const tick = async () => {
     if (!document.body.contains($(".match", v))) return clearInterval(matchPoll);

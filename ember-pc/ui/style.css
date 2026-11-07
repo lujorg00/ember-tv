@@ -694,3 +694,37 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .t10-art.bm .rel, .spot.bm .rel { left: 44px; }   /* the tick sits top left on bookmarked cards */
 .strip.hoverspot .spot .rel { display: none; }      /* the poster underneath already shows it */
 .smart-wait { margin: 6px 48px 18px; font-size: 15px; color: var(--faint); animation: glIn .4s ease; }
+
+/* ---------------------------------------------------------------- what to watch: the shuffle */
+.wtw-modes { margin: 10px 0 4px; }
+.wtw-modes .chip { font-size: 15px; padding: 6px 16px; cursor: pointer; }
+.wtw-modes .chip.on, .shuf-f .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.shuf { padding: 6px 48px 60px; display: flex; flex-direction: column; gap: 18px; }
+.shuf-filters { display: flex; flex-direction: column; gap: 10px; }
+.shuf-f .chip { cursor: pointer; font-size: 14.5px; padding: 5px 13px; transition: background .15s, color .15s; }
+.shuf-f .chip:hover { border-color: rgba(240,160,75,.5); }
+.shuf-go { display: flex; align-items: center; gap: 16px; }
+.shuf-go .btn { min-width: 180px; }
+.shuf-stage { position: relative; height: 260px; overflow: hidden; border-radius: 16px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+.shuf-reel { position: absolute; left: 0; top: 18px; display: flex; gap: 16px; will-change: transform; }
+.shuf-p { flex: none; width: 150px; height: 225px; border-radius: 10px; background: #1d150f center/cover; box-shadow: 0 10px 24px rgba(0,0,0,.45);
+  transition: transform .45s cubic-bezier(.2,.9,.3,1.3), box-shadow .45s, filter .45s; }
+.tv .shuf-p { width: 176px; height: 220px; }
+.tv .shuf-stage { height: 256px; }
+.shuf-stage.spinning .shuf-p { filter: brightness(.8); }
+.shuf-p.won { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent), 0 0 46px rgba(240,160,75,.55); }
+.shuf-frame { position: absolute; left: 50%; top: 6px; bottom: 6px; width: 3px; margin-left: -1.5px; border-radius: 2px;
+  background: linear-gradient(transparent, rgba(240,160,75,.85) 15%, rgba(240,160,75,.85) 85%, transparent); opacity: .0; transition: opacity .3s; }
+.shuf-stage.spinning .shuf-frame { opacity: .9; }
+.shuf-pick { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+.shuf-pick.on { opacity: 1; transform: none; }
+.shuf-card { position: relative; border-radius: 18px; overflow: hidden; min-height: 300px; background: #1d150f center/cover; display: flex; }
+.shuf-card::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14,11,9,.96) 0%, rgba(14,11,9,.82) 42%, rgba(14,11,9,.2) 100%); }
+.shuf-in { position: relative; padding: 34px 40px; max-width: 640px; display: flex; flex-direction: column; gap: 12px; justify-content: flex-end; }
+.shuf-in .ttl { min-height: 60px; display: flex; align-items: flex-end; }
+.shuf-in .ttl-logo { max-height: 110px; max-width: 420px; object-fit: contain; object-position: left bottom; }
+.shuf-in .ttl-name { font-size: 38px; font-weight: 700; line-height: 1.1; }
+.shuf-m { color: #E6D6C4; font-size: 15px; }
+.shuf-d { color: var(--muted); font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.shuf-in .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }

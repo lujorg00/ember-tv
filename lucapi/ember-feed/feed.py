@@ -3072,6 +3072,72 @@ def smart_search(q):
         return {"metas": [], "label": "", "error": str(e)}
 
 
+# ---- What to watch: the shuffle. A good pile of well-liked titles you haven't seen, matching the filters,
+# in a random order; the first is the pick (the others fill the reel as it spins).
+_SHUF_GENRES = {  # name -> (movie genre, tv genre)
+    "action": (28, 10759), "comedy": (35, 35), "drama": (18, 18), "scifi": (878, 10765), "thriller": (53, 80),
+    "horror": (27, 9648), "crime": (80, 80), "romance": (10749, 18), "animation": (16, 16), "documentary": (99, 99),
+    "fantasy": (14, 10765), "mystery": (9648, 9648), "family": (10751, 10751), "war": (10752, 10768), "western": (37, 37),
+}
+_VIBES = {  # name -> (movie: with (any of), without), (tv: with, without)
+    "feelgood": (("35|10751|10402|16", "27,53,10752,80"), ("35|10751", "80,10768")),
+    "laugh": (("35", "27,10752"), ("35", "")),
+    "edge": (("53|28|9648", "35,10751,16"), ("80|9648|10759", "35,10751")),
+    "mindbending": (("878|9648", "10751,35"), ("10765|9648", "35,10751")),
+    "cosy": (("10751|16|35|10749", "27,53,80,10752"), ("35|10751|16", "80,10768")),
+    "dark": (("80|53|27", "10751,16,35"), ("80|9648", "35,10751,16")),
+    "epic": (("12|14|36|10752", "35"), ("10765|10768|10759", "35")),
+    "tearjerker": (("18,10749", "27,28"), ("18", "35")),
+}
+
+
+def shuffle_pick(typ="both", genres="", decade="", vibe=""):
+    kinds = ["movie", "tv"] if typ not in ("movie", "series") else ["movie" if typ == "movie" else "tv"]
+    try:
+        seen = set(watched_status().get("items", {}).keys())
+    except Exception:
+        seen = set()
+    picks = []
+
+    def one(k):
+        p = {"sort_by": random.choice(["popularity.desc", "vote_average.desc", "vote_count.desc"]),
+             "vote_count.gte": 300 if k == "movie" else 120, "vote_average.gte": 6.4}
+        gs = [g for g in genres.split(",") if g in _SHUF_GENRES]
+        v = _VIBES.get(vibe)
+        if gs:
+            p["with_genres"] = "|".join(str(_SHUF_GENRES[g][0 if k == "movie" else 1]) for g in gs)
+        elif v:
+            p["with_genres"] = v[0 if k == "movie" else 1][0]
+        if v and v[0 if k == "movie" else 1][1]:
+            # never exclude a genre you picked (Comedy + Dark = dark comedies, not nothing)
+            mine = {str(_SHUF_GENRES[g][0 if k == "movie" else 1]) for g in gs}
+            wo = [x for x in v[0 if k == "movie" else 1][1].split(",") if x not in mine]
+            if wo:
+                p["without_genres"] = ",".join(wo)
+        if re.fullmatch(r"(19|20)\d0", decade or ""):
+            y = int(decade)
+            a, b = ("primary_release_date", "primary_release_date") if k == "movie" else ("first_air_date", "first_air_date")
+            p[a + ".gte"], p[b + ".lte"] = f"{y}-01-01", f"{y + 9}-12-31"
+        elif decade == "older":
+            p[("primary_release_date" if k == "movie" else "first_air_date") + ".lte"] = "1979-12-31"
+        first = _tmdb(f"/discover/{k}", **p)
+        if first.get("total_results", 0) < 20:  # a narrow mix (old westerns, say): loosen the quality floor
+            p.update({"vote_count.gte": 40, "vote_average.gte": 5.8, "sort_by": "vote_count.desc"})
+            first = _tmdb(f"/discover/{k}", **p)
+        pages = max(1, min(int(first.get("total_pages", 1)), 15))
+        res = list(first.get("results", []))
+        for pg in random.sample(range(2, pages + 1), min(2, pages - 1)) if pages > 1 else []:
+            res += _tmdb(f"/discover/{k}", **dict(p, page=pg)).get("results", [])
+        random.shuffle(res)
+        return _to_metas(res[:30 if len(kinds) > 1 else 40], k)
+    with concurrent.futures.ThreadPoolExecutor(2) as ex:
+        for lst in ex.map(one, kinds):
+            picks += lst
+    picks = [m for m in picks if m["id"] not in seen]
+    random.shuffle(picks)
+    return {"metas": picks[:48]}
+
+
 def browse_list(kind, tid, typ="movie", page=1):
     """The titles behind a tile. typ: movie or series."""
     k = "movie" if typ == "movie" else "tv"
@@ -3205,6 +3271,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": []})
             elif path == "/night":
                 self._json(night())
+            elif path == "/shuffle":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                g = lambda k: (q.get(k) or [""])[0]
+                self._json(shuffle_pick(g("type") or "both", g("genres"), g("decade"), g("vibe")))
             elif path == "/search/smart":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(smart_search((q.get("q") or [""])[0]))
