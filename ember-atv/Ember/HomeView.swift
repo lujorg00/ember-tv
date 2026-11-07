@@ -21,10 +21,17 @@ struct HomeView: View {
                         else if r.wide {
                             if walls.count >= 2 {
                                 if r.id == walls[0].id {
-                                    HStack(alignment: .top, spacing: 0) {
-                                        WallRow(row: walls[0], leading: 90, trailing: 30, clip: true).frame(maxWidth: .infinity, alignment: .leading)
-                                        WallRow(row: walls[1], leading: 30, trailing: 90, clip: true).frame(maxWidth: .infinity, alignment: .leading)
+                                    // each in its own quiet box, so films and series read as two lists
+                                    HStack(alignment: .top, spacing: 30) {
+                                        ForEach([walls[0], walls[1]]) { w in
+                                            WallRow(row: w, leading: 30, trailing: 30, clip: true)
+                                                .padding(.top, 20).padding(.bottom, 4)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 26))
+                                                .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.07)))
+                                        }
                                     }
+                                    .padding(.horizontal, 60)
                                 }
                             } else { WallRow(row: r) }
                         }
