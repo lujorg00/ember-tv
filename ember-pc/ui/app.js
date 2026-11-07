@@ -1551,7 +1551,7 @@ async function weekCalendar() {
 async function showYear(year) {
   year = year || new Date().getFullYear();
   const v = $("#view");
-  v.innerHTML = `<div class="page-h"><h1>Your ${year} in watching</h1><div class="muted">From your Trakt history: Omni, Ember TV and Ember PC</div></div><div class="empty">Adding it all up…</div>`;
+  v.innerHTML = `<div class="page-h"><h1>Your ${year} in watching</h1><div class="muted">What you've watched in Ember: PC, Ember TV and Apple TV</div></div><div class="empty">Adding it all up…</div>`;
   let w;
   try { w = await getJson(`${feed()}/wrapped?year=${year}`, 90000); } catch (e) { $(".empty", v).textContent = "Couldn't get your history from lucapi: " + e.message; return; }
   const hr = (x) => x == null ? "" : `${((x + 11) % 12) + 1}${x < 12 ? "am" : "pm"}`;
@@ -1568,6 +1568,7 @@ async function showYear(year) {
       <div class="card2"><h3>Your habits</h3>
         <p>Your favourite night is <b>${esc(w.favouriteNight || "—")}</b>, and you usually start around <b>${hr(w.favouriteHour)}</b>.</p>
         ${w.busiestDay ? `<p>Your biggest day was <b>${new Date(w.busiestDay.date).toLocaleDateString("en-GB", { day: "numeric", month: "long" })}</b>: ${w.busiestDay.hours} hours.</p>` : ""}
+        ${(w.devices || []).length ? `<p>Watched on ${w.devices.map(d => `<b>${esc(d.name)}</b> ${d.hours}h`).join(", ")}.</p>` : ""}
         ${w.rewatched.length ? `<p>You couldn't stop rewatching <b>${esc(w.rewatched[0].title)}</b> (${w.rewatched[0].plays} times).</p>` : ""}</div>
       <div class="card2"><h3>Top shows</h3><ol>${w.topShows.slice(0, 8).map(x => `<li data-id="${esc(x.imdb || "")}" data-t="series">${esc(x.title)} <span class="muted">${x.episodes} eps · ${Math.round(x.minutes / 60)}h</span></li>`).join("")}</ol></div>
       <div class="card2"><h3>Top films</h3><ol>${w.topFilms.slice(0, 8).map(x => `<li data-id="${esc(x.imdb || "")}" data-t="movie">${esc(x.title)} <span class="muted">${x.year || ""}${x.plays > 1 ? " · " + x.plays + "×" : ""}</span></li>`).join("")}</ol></div>

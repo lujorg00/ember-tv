@@ -129,6 +129,12 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if let s = session, !s.trailer, dur > 0, dur < 180, (s.meta.runtimeMinutes ?? 30) >= 10 {
             return fail("was unavailable")
         }
+        // the stream just stopped well before the end (the connection dropped and the player took it as the end of
+        // the file): don't count it as watched or drop back to the details page - carry on from here on the next stream
+        if let s = session, !s.trailer, started, dur > 600, pos < dur - 300, pos / dur < 0.9 {
+            Diag.log("player: ended early at \(Int(pos))s of \(Int(dur))s")
+            return fail("stopped early")
+        }
         report("stopped", finished: true)
         finish(hasNext ? .next : .stopped)
     }

@@ -97,7 +97,7 @@ struct MatchView: View {
     }
 }
 
-/// Your year in watching, from your Trakt history (Omni, Ember TV, Ember PC and here).
+/// Your year in watching, from what you've watched in Ember itself (PC, Ember TV and here) - not Omni or Trakt.
 struct YearView: View {
     @EnvironmentObject var store: Store
     @State private var year = Calendar.current.component(.year, from: Date())
@@ -165,6 +165,10 @@ struct YearView: View {
                     let bd = w.obj("busiestDay")
                     if let d = parseDay(bd.str("date")) {
                         Text("Your biggest day was **\(d)**: \(bd.dbl("hours").map { String(format: "%.1f", $0) } ?? "") hours.")
+                    }
+                    let devs = w.arr("devices")
+                    if !devs.isEmpty {
+                        Text("Watched on " + devs.map { "\($0.str("name") ?? "") \(String(format: "%.0f", $0.dbl("hours") ?? 0))h" }.joined(separator: ", ") + ".")
                     }
                     if let r = w.arr("rewatched").first {
                         Text("You couldn't stop rewatching **\(r.str("title") ?? "")** (\(r.int("plays") ?? 0) times).")

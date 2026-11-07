@@ -25,7 +25,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /pick/<type>/<id>?aio=&quality=4k&runtime=  -> streams best first, the top few tested for speed
   POST /pick/failed -> a player says a stream errored or stalled (it's pushed down next time)
   GET /upcoming     -> new and upcoming episodes of your shows (Trakt calendar)
-  GET /wrapped?year= -> your year in watching (Trakt history)
+  GET /wrapped?year= -> your year in watching (what you watched in Ember)
   POST /match/new, GET /m/<code> (phones), GET /match/<code>, /match/<code>/qr.png -> "What shall we watch?"
   GET /picks/<code>/manifest.json -> "Ember picks", the picker as a Stremio addon for Omni and friends
   GET /browse/tiles -> your lists sorted into boxes (tiles), Home rows and the hero list
@@ -615,8 +615,48 @@ def db():
             trakt_watched INTEGER NOT NULL DEFAULT 0,
             episode_title TEXT)""")
         _db.execute("CREATE INDEX IF NOT EXISTS positions_imdb ON positions(imdb, updated)")
+        # What you've watched in Ember (PC, TV, Apple TV), for Your year: time watched per hour, when you started
+        # things, and every time you finished one. Only Ember's own players write here - never Trakt or Omni.
+        fresh = not _db.execute("SELECT 1 FROM sqlite_master WHERE name='watch_log'").fetchone()
+        _db.execute("""CREATE TABLE IF NOT EXISTS watch_log (bucket INTEGER, key TEXT, imdb TEXT, type TEXT, device TEXT,
+            seconds REAL, PRIMARY KEY (bucket, key, device))""")
+        _db.execute("CREATE TABLE IF NOT EXISTS starts (ts INTEGER, key TEXT, imdb TEXT, type TEXT, device TEXT)")
+        _db.execute("""CREATE TABLE IF NOT EXISTS plays (ts INTEGER, key TEXT, imdb TEXT, type TEXT, season INTEGER,
+            episode INTEGER, device TEXT, seconds REAL)""")
+        if fresh:
+            # From before the log: one play for each thing Ember finished, and the time it got to, at its last report
+            for r in _db.execute("SELECT key, imdb, type, season, episode, position, duration, updated, device, finished "
+                                 "FROM positions WHERE source='ember'").fetchall():
+                key, imdb, typ, se, ep, pos, dur, upd, dev, fin = r
+                secs = (dur or pos) if fin else pos
+                if secs and secs > 0:
+                    _db.execute("INSERT OR IGNORE INTO watch_log VALUES (?,?,?,?,?,?)", (upd - upd % 3600, key, imdb, typ, dev or "", secs))
+                    _db.execute("INSERT INTO starts VALUES (?,?,?,?,?)", (int(upd - secs), key, imdb, typ, dev or ""))
+                if fin:
+                    _db.execute("INSERT INTO plays VALUES (?,?,?,?,?,?,?,?)", (upd, key, imdb, typ, se, ep, dev or "", dur or pos))
         _db.commit()
     return _db
+
+
+def _log_watch(prev, d, state):
+    """Called with each report from an Ember player: adds the time watched since the last one, notes a fresh start,
+    and records a finish."""
+    now = d["updated"]
+    with _db_lock:
+        c = db()
+        if prev and prev.get("source") == "ember":
+            gap = now - (prev.get("updated") or 0)
+            delta = d["position"] - (prev.get("position") or 0)
+            if 0 < delta <= gap + 20 and gap < 900:      # actually playing (not a skip ahead or a long pause)
+                c.execute("""INSERT INTO watch_log VALUES (?,?,?,?,?,?) ON CONFLICT(bucket, key, device)
+                             DO UPDATE SET seconds = seconds + excluded.seconds""",
+                          (now - now % 3600, d["key"], d["imdb"], d["type"], d["device"], delta))
+        if state == "playing" and (not prev or now - (prev.get("updated") or 0) > 1800):
+            c.execute("INSERT INTO starts VALUES (?,?,?,?,?)", (now, d["key"], d["imdb"], d["type"], d["device"]))
+        if d["finished"] and not (prev and prev.get("finished") and now - (prev.get("updated") or 0) < 6 * 3600):
+            c.execute("INSERT INTO plays VALUES (?,?,?,?,?,?,?,?)", (now, d["key"], d["imdb"], d["type"], d["season"],
+                                                                      d["episode"], d["device"], d["duration"] or d["position"]))
+        c.commit()
 
 
 def _key(imdb, typ, season=None, episode=None):
@@ -676,7 +716,12 @@ def report(body):
          "position": pos, "duration": dur, "percent": round(pct, 2), "updated": int(time.time()),
          "device": str(body.get("device", ""))[:40], "source": "ember", "finished": int(finished),
          "trakt_watched": 0, "episode_title": str(body.get("episodeTitle", ""))[:120]}
+    prev = _get(d["key"])
     _upsert(d)
+    try:
+        _log_watch(prev, d, state)
+    except Exception as e:
+        print(f"[ember-feed] watch log failed: {e}", flush=True)
     print(f"[ember-feed] report {d['key']} {state} {round(pos)}s from {d['device']}", flush=True)
     with _cache_lock:
         _cache.pop("progress", None)
@@ -1626,46 +1671,80 @@ def _history(start_iso, end_iso):
     return out
 
 
+def _title_of(imdb, typ):
+    """An IMDb id's name (and a film's year), from TMDB. Remembered for a month."""
+    def get():
+        f = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+        res = (f.get("tv_results") if typ == "series" else f.get("movie_results")) or f.get("movie_results") or f.get("tv_results") or []
+        if not res:
+            return {"title": imdb, "year": None}
+        r = res[0]
+        d = r.get("release_date") or r.get("first_air_date") or ""
+        return {"title": r.get("title") or r.get("name") or imdb, "year": int(d[:4]) if d[:4].isdigit() else None}
+    try:
+        return cached(f"title-of:{imdb}", 30 * 86400, get)
+    except Exception:
+        return {"title": imdb, "year": None}
+
+
 def wrapped(year=None):
+    """Your year in watching, from what you watched in Ember itself (PC, TV and Apple TV) - not Trakt or Omni."""
     year = int(year or datetime.now(TZ).year)
 
     def build():
-        items = _history(f"{year}-01-01T00:00:00.000Z", f"{year}-12-31T23:59:59.000Z")
-        mins, shows, films, days, hours, weekdays = 0, {}, {}, {}, [0] * 24, [0] * 7
-        for it in items:
-            t = datetime.fromisoformat(it["watched_at"].replace("Z", "+00:00")).astimezone(TZ)
-            if it.get("type") == "episode":
-                rt = (it.get("episode") or {}).get("runtime") or (it.get("show") or {}).get("runtime") or 0
-                sh = it.get("show") or {}
-                k = (sh.get("ids") or {}).get("imdb") or sh.get("title")
-                rec = shows.setdefault(k, {"imdb": (sh.get("ids") or {}).get("imdb"), "title": sh.get("title", ""), "episodes": 0, "minutes": 0})
-                rec["episodes"] += 1; rec["minutes"] += rt
+        lo = int(datetime(year, 1, 1, tzinfo=TZ).timestamp())
+        hi = int(datetime(year + 1, 1, 1, tzinfo=TZ).timestamp())
+        with _db_lock:
+            logs = db().execute("SELECT bucket, imdb, type, device, seconds FROM watch_log WHERE bucket>=? AND bucket<?", (lo, hi)).fetchall()
+            starts = db().execute("SELECT ts FROM starts WHERE ts>=? AND ts<?", (lo, hi)).fetchall()
+            plays = db().execute("SELECT ts, imdb, type FROM plays WHERE ts>=? AND ts<?", (lo, hi)).fetchall()
+        secs, days, devices = 0.0, {}, {}
+        shows, films = {}, {}
+        for bucket, imdb, typ, dev, sec in logs:
+            secs += sec
+            d = datetime.fromtimestamp(bucket, TZ).strftime("%Y-%m-%d")
+            days[d] = days.get(d, 0) + sec
+            devices[dev or "Ember"] = devices.get(dev or "Ember", 0) + sec
+            if typ == "series":
+                shows.setdefault(imdb, {"imdb": imdb, "episodes": 0, "minutes": 0})["minutes"] += sec / 60
             else:
-                mv = it.get("movie") or {}
-                rt = mv.get("runtime") or 0
-                k = (mv.get("ids") or {}).get("imdb") or mv.get("title")
-                rec = films.setdefault(k, {"imdb": (mv.get("ids") or {}).get("imdb"), "title": mv.get("title", ""), "year": mv.get("year"), "plays": 0})
-                rec["plays"] += 1
-            mins += rt
-            d = t.strftime("%Y-%m-%d")
-            days[d] = days.get(d, 0) + rt
+                films.setdefault(imdb, {"imdb": imdb, "plays": 0, "minutes": 0})["minutes"] += sec / 60
+        for ts, imdb, typ in plays:
+            if typ == "series":
+                shows.setdefault(imdb, {"imdb": imdb, "episodes": 0, "minutes": 0})["episodes"] += 1
+            else:
+                films.setdefault(imdb, {"imdb": imdb, "plays": 0, "minutes": 0})["plays"] += 1
+        hours, weekdays = [0] * 24, [0] * 7
+        for (ts,) in starts:
+            t = datetime.fromtimestamp(ts, TZ)
             hours[t.hour] += 1
             weekdays[t.weekday()] += 1
-        names = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
+        top_shows = sorted(shows.values(), key=lambda x: -x["minutes"])[:10]
+        top_films = sorted([f for f in films.values() if f["plays"]], key=lambda x: (-x["plays"], -x["minutes"]))[:10]
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            names = dict(zip([x["imdb"] for x in top_shows] + [x["imdb"] for x in top_films],
+                             ex.map(lambda a: _title_of(*a), [(x["imdb"], "series") for x in top_shows] + [(x["imdb"], "movie") for x in top_films])))
+        for x in top_shows:
+            x["title"] = names[x["imdb"]]["title"]; x["minutes"] = round(x["minutes"])
+        for x in top_films:
+            x["title"] = names[x["imdb"]]["title"]; x["year"] = names[x["imdb"]]["year"]; x["minutes"] = round(x["minutes"])
+        mins = secs / 60
+        dnames = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"]
         top_day = max(days.items(), key=lambda x: x[1]) if days else None
-        top_hour = max(range(24), key=lambda h: hours[h]) if items else None
         return {
-            "year": year, "plays": len(items), "hours": round(mins / 60), "days": round(mins / 1440, 1),
-            "episodes": sum(s["episodes"] for s in shows.values()), "films": sum(f["plays"] for f in films.values()),
-            "topShows": sorted(shows.values(), key=lambda s: -s["minutes"])[:10],
-            "topFilms": sorted(films.values(), key=lambda f: -f["plays"])[:10],
-            "rewatched": [f for f in sorted(films.values(), key=lambda f: -f["plays"]) if f["plays"] > 1][:5],
-            "busiestDay": {"date": top_day[0], "hours": round(top_day[1] / 60, 1)} if top_day else None,
-            "favouriteNight": names[max(range(7), key=lambda d: weekdays[d])] if items else None,
-            "favouriteHour": top_hour, "byHour": hours, "byWeekday": weekdays,
-            "byMonth": [round(sum(m for d, m in days.items() if int(d[5:7]) == mo) / 60) for mo in range(1, 13)],
+            "year": year, "source": "ember", "plays": len(plays), "hours": round(mins / 60), "days": round(mins / 1440, 1),
+            "episodes": sum(1 for p in plays if p[2] == "series"), "films": sum(1 for p in plays if p[2] != "series"),
+            "topShows": top_shows, "topFilms": top_films,
+            "rewatched": [f for f in top_films if f["plays"] > 1][:5],
+            "busiestDay": {"date": top_day[0], "hours": round(top_day[1] / 3600, 1)} if top_day else None,
+            "favouriteNight": dnames[max(range(7), key=lambda d: weekdays[d])] if starts else None,
+            "favouriteHour": max(range(24), key=lambda h: hours[h]) if starts else None,
+            "byHour": hours, "byWeekday": weekdays,
+            "byMonth": [round(sum(m for d, m in days.items() if int(d[5:7]) == mo) / 3600) for mo in range(1, 13)],
+            "byDevice": {k: round(v / 3600, 1) for k, v in sorted(devices.items(), key=lambda x: -x[1])},
+            "devices": [{"name": k, "hours": round(v / 3600, 1)} for k, v in sorted(devices.items(), key=lambda x: -x[1]) if v >= 360],
         }
-    return cached(f"wrapped:{year}", 6 * 3600, build)
+    return cached(f"wrapped:{year}", 600, build)
 
 # ------------------------------------------------------------------ "What shall we watch?" swipe match
 # The TV or PC starts a session and shows a QR code; phones open /m/<code>, swipe the same deck, and anything
@@ -2132,10 +2211,84 @@ SERVICES = [("Netflix", "#3A0E0B"), ("Disney Plus", "#0F1A3D"), ("Amazon Prime V
 DIRECTORS = ["Denis Villeneuve", "Christopher Nolan", "Quentin Tarantino", "Greta Gerwig", "David Fincher", "Martin Scorsese",
              "Steven Spielberg", "Edgar Wright", "Ridley Scott", "Wes Anderson"]
 STUDIOS = ["Marvel Studios", "DC Studios", "Pixar", "Walt Disney Animation Studios", "Studio Ghibli", "A24", "Lucasfilm", "Blumhouse Productions"]
-COLLECTIONS = ["Star Wars Collection", "Harry Potter Collection", "The Lord of the Rings Collection", "James Bond Collection",
-               "Mission: Impossible Collection", "The Dark Knight Collection", "Jurassic Park Collection", "Toy Story Collection",
-               "Indiana Jones Collection", "Fast & Furious Collection"]
 DECADES = [2020, 2010, 2000, 1990, 1980, 1970]
+
+# Franchises: only proper film series (FRANCHISE_MIN films or more, counting the ones out so far). Shorter ones in your
+# lists (Toy Story, Indiana Jones...) are left out, and these, when TMDB has six or more out and you don't already have
+# them, are added. (TMDB search, the tile's name, its Wikipedia article for the logo.)
+FRANCHISE_MIN = 6
+BIG_SERIES = [("James Bond Collection", "007", "James Bond"), ("Star Wars Collection", "Star Wars", "Star Wars"),
+              ("Harry Potter Collection", "Harry Potter", "Harry Potter"),
+              ("The Fast and the Furious Collection", "Fast & Furious", "Fast & Furious"),
+              ("Mission: Impossible Collection", "Mission: Impossible", "Mission: Impossible"),
+              ("Jurassic Park Collection", "Jurassic Park", "Jurassic Park"), ("X-Men Collection", "X-Men", "X-Men (film series)"),
+              ("Transformers Collection", "Transformers", "Transformers (film series)"),
+              ("Alien Collection", "Alien", "Alien (franchise)"), ("Predator Collection", "Predator", "Predator (franchise)"),
+              ("The Terminator Collection", "Terminator", "Terminator (franchise)"), ("Rocky Collection", "Rocky", "Rocky (franchise)"),
+              ("Star Trek: The Original Series Collection", "Star Trek", "Star Trek"),
+              ("Halloween Collection", "Halloween", "Halloween (franchise)"),
+              ("Friday the 13th Collection", "Friday the 13th", "Friday the 13th (franchise)"),
+              ("A Nightmare on Elm Street Collection", "A Nightmare on Elm Street", "A Nightmare on Elm Street (franchise)"),
+              ("Saw Collection", "Saw", "Saw (franchise)"), ("Scream Collection", "Scream", "Scream (franchise)"),
+              ("Final Destination Collection", "Final Destination", "Final Destination"),
+              ("Child's Play Collection", "Child's Play", "Child's Play (franchise)"),
+              ("Hellraiser Collection", "Hellraiser", "Hellraiser (franchise)"),
+              ("The Texas Chainsaw Massacre Collection", "The Texas Chainsaw Massacre", "The Texas Chainsaw Massacre (franchise)"),
+              ("Paranormal Activity Collection", "Paranormal Activity", "Paranormal Activity (franchise)"),
+              ("Resident Evil Collection", "Resident Evil", "Resident Evil (film series)"),
+              ("Underworld Collection", "Underworld", "Underworld (film series)"),
+              ("Insidious Collection", "Insidious", "Insidious (franchise)"),
+              ("The Purge Collection", "The Purge", "The Purge (franchise)"),
+              ("Hannibal Lecter Collection", "Hannibal Lecter", "Hannibal Lecter (franchise)"),
+              ("Pirates of the Caribbean Collection", "Pirates of the Caribbean", "Pirates of the Caribbean (franchise)"),
+              ("The Karate Kid Collection", "The Karate Kid", "The Karate Kid (franchise)"),
+              ("Ice Age Collection", "Ice Age", "Ice Age (franchise)"), ("Despicable Me Collection", "Despicable Me", "Despicable Me"),
+              ("The Land Before Time Collection", "The Land Before Time", "The Land Before Time"),
+              ("Pokémon Collection", "Pokémon", "Pokémon (film series)"),
+              ("American Pie Collection", "American Pie", "American Pie (film series)"),
+              ("Police Academy Collection", "Police Academy", "Police Academy (franchise)"),
+              ("The Pink Panther (Original) Collection", "The Pink Panther", "The Pink Panther"),
+              ("Home Alone Collection", "Home Alone", "Home Alone (franchise)"),
+              ("Carry On Collection", "Carry On", "Carry On (franchise)"),
+              ("Godzilla (Showa) Collection", "Godzilla", "Godzilla (franchise)"),
+              ("Planet of the Apes (Original) Collection", "Planet of the Apes", "Planet of the Apes")]
+
+
+def _norm_title(t):
+    t = re.sub(r"\b(collection|film series|franchise|saga|the)\b", "", str(t).lower().replace("&", "and"))
+    return re.sub(r"[^a-z0-9]+", "", t)
+
+
+def big_series():
+    """BIG_SERIES as TMDB has them: [{id, title, wiki, parts (released, oldest first), image}], 6+ films only. A week."""
+    def build():
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+
+        def one(row):
+            q, title, wiki = row
+            try:
+                res = _tmdb("/search/collection", query=q).get("results", [])
+                c = next((x for x in res if _norm_title(x.get("name")) == _norm_title(q)), res[0] if res else None)
+                if not c:
+                    return None
+                full = _tmdb(f"/collection/{c['id']}")
+                parts = sorted([p for p in full.get("parts", []) if (p.get("release_date") or "9999") <= today],
+                               key=lambda p: p["release_date"])
+                if len(parts) < FRANCHISE_MIN:
+                    return None
+                return {"id": c["id"], "title": title, "wiki": wiki, "parts": parts,
+                        "image": _img(full.get("backdrop_path") or c.get("backdrop_path"))}
+            except Exception as e:
+                print(f"[ember-feed] franchise {q} failed: {e}", flush=True)
+                return None
+        with concurrent.futures.ThreadPoolExecutor(6) as ex:
+            got = [x for x in ex.map(one, BIG_SERIES) if x]
+        seen, out = set(), []
+        for g in got:
+            if g["id"] not in seen:
+                seen.add(g["id"]); out.append(g)
+        return out
+    return cached("big-series", 7 * 86400, build)
 
 
 def _top_backdrop(**discover):
@@ -2184,15 +2337,7 @@ def _build_tmdb_tiles():
         except Exception:
             pass
     groups.append({"title": "Studios", "style": "studio", "tiles": studios})
-    cols = []
-    for name in COLLECTIONS:
-        try:
-            c = (_tmdb("/search/collection", query=name).get("results") or [None])[0]
-            if c:
-                cols.append({"kind": "collection", "id": c["id"], "title": c["name"].replace(" Collection", ""),
-                             "image": _img(c.get("backdrop_path"))})
-        except Exception:
-            pass
+    cols = [{"kind": "collection", "id": c["id"], "title": c["title"], "image": c["image"]} for c in big_series()]
     groups.append({"title": "Collections", "style": "art", "tiles": cols})
     groups.append({"title": "By decade", "style": "art", "tiles": [
         {"kind": "decade", "id": d, "title": f"{d}s", "image": _top_backdrop(**{"primary_release_date.gte": f"{d}-01-01",
@@ -2576,6 +2721,38 @@ def _build_tiles():
         t = tiles.setdefault((box, title), {"kind": "cat", "id": _slug(title), "title": title, "box": box, "cats": {}})
         t["cats"].setdefault(c["type"], []).append({"type": c["type"], "id": c["id"],
                                                      "skip": any(x.get("name") == "skip" for x in c.get("extra", []))})
+    # Franchises: film series of six or more only. A list with fewer films goes (Toy Story, Indiana Jones); the big
+    # series you don't have a list for come in from TMDB.
+    fr = [t for t in tiles.values() if t["box"] == "franchises" and t["cats"].get("movie")]
+    def film_ids(t):
+        ids = set()
+        for c in t["cats"]["movie"]:
+            ids |= {m.get("id") for m in _cat_metas(c) if m.get("id")}
+        return ids
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        fr_ids = list(ex.map(film_ids, fr))
+    have_ids, have_names = set(), set()
+    for t, ids in zip(fr, fr_ids):
+        if 0 < len(ids) < FRANCHISE_MIN:
+            print(f"[ember-feed] tiles: leaving out {t['title']} ({len(ids)} films)", flush=True)
+            del tiles[(t["box"], t["title"])]
+            continue
+        have_ids |= ids
+        have_names.add(_norm_title(t["title"]))
+    extra = []
+    if tmdb_ok:
+        try:
+            for c in big_series():
+                if _norm_title(c["title"]) in have_names or _norm_title(c["wiki"]) in have_names:
+                    continue
+                with concurrent.futures.ThreadPoolExecutor(6) as ex:
+                    imdbs = [x for x in ex.map(lambda p: _imdb_for("movie", p["id"]), c["parts"][:8]) if x]
+                if len(set(imdbs) & have_ids) >= 2:     # already one of yours under another name
+                    continue
+                extra.append({"kind": "collection", "id": c["id"], "title": c["title"], "box": "franchises", "cats": {},
+                              "types": ["movie"], "image": c["image"], "wiki": c["wiki"]})
+        except Exception as e:
+            print(f"[ember-feed] tiles: extra franchises failed: {e}", flush=True)
     # Artwork: the top title of each list (a different one per tile where possible), logos and faces from TMDB.
     tl = list(tiles.values())
     with concurrent.futures.ThreadPoolExecutor(8) as ex:
@@ -2617,7 +2794,7 @@ def _build_tiles():
                 if t["logo"]:
                     break
         elif t["box"] == "franchises":
-            for article in FRANCHISE_WIKI.get(t["title"].lower(), t["title"]).split("|"):
+            for article in (t.get("wiki") or FRANCHISE_WIKI.get(t["title"].lower(), t["title"])).split("|"):
                 t["logo"] = _wikidata_logo(article)
                 if t["logo"]:
                     break
@@ -2645,12 +2822,16 @@ def _build_tiles():
             except Exception as e:
                 print(f"[ember-feed] logo for {t['title']} failed: {e}", flush=True)
 
+    tl += extra
     with concurrent.futures.ThreadPoolExecutor(8) as ex:
         list(ex.map(art, tl))
     groups = []
     for key, title, style in TILE_ORDER:
-        its = [{k: v for k, v in t.items() if k != "cats"} | {"types": [x for x in ("movie", "series") if x in t["cats"]]}
+        its = [{k: v for k, v in t.items() if k not in ("cats", "wiki")}
+               | {"types": t.get("types") or [x for x in ("movie", "series") if x in t["cats"]]}
                for t in tl if t["box"] == key]
+        if key == "franchises":
+            its.sort(key=lambda t: re.sub(r"^(the|a) ", "", t["title"].lower()))
         if its:
             groups.append({"title": title, "style": style, "tiles": its})
     _TILE_CATS.clear()
