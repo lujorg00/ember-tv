@@ -636,7 +636,6 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .sc-mc.hi { background: #3bb54a; } .sc-mc.mid { background: #e2a800; color: #1a1206; } .sc-mc.lo { background: #e0352b; }
 .sc-m em { font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: .5px; color: var(--faint); text-transform: uppercase; }
 .sc-n { display: none; }
-.sc-v:empty::before { content: "Metacritic"; font-size: 12px; font-weight: 500; color: var(--faint); }
 
 /* tiles: one full-size cell, so a logo's size (a % of the tile) works out and it sits in the middle */
 .tile.logo, .tile.art, .tile.brand { grid-template: 100% / 100%; }
@@ -678,3 +677,9 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 /* the drawn play triangle (the ▶ character shows as an emoji on the Chromecast) */
 .pl { width: .78em; height: .78em; fill: currentColor; display: inline-block; vertical-align: -0.06em; margin-right: .5em; flex: none; }
 .cw-label .pl { width: .7em; height: .7em; margin-right: .4em; }
+.sc-m .sc-tmdb { height: 12px; } .sc-m .sc-trakt, .sc-m .sc-metacritic { height: 17px; }
+
+/* New This Week: "and N more" opens the rest in the panel (it scrolls if it gets long) */
+.wk-more { all: unset; cursor: pointer; display: block; padding: 4px 8px; margin-top: 2px; border-radius: 8px; font-size: 13px; color: var(--accent); }
+.wk-more:hover, .tv .wk-more.tvf { background: rgba(240,160,75,.15); }
+.wk.open .wk-list { max-height: 46vh; overflow-y: auto; }

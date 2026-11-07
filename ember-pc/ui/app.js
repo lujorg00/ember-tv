@@ -1014,13 +1014,13 @@ function aioCatalogs() {
 }
 /** One score, small: IMDb 7.8, the tomato and 92%, Metacritic's coloured square, TMDB, Trakt. */
 function scoreChip(r) {
+  // each source's logo, then its score (Metacritic's in its coloured square)
   const v = esc(String(r.value || ""));
-  let mark = `<em>${esc(r.label)}</em>`, name = esc(r.label), val = v;
-  if (r.src === "imdb") { mark = `<img class="sc-imdb" src="brands/imdb.svg" alt="IMDb">`; name = ""; }
-  else if (r.src === "rt") { const n = parseInt(r.value, 10); mark = `<img class="sc-rt${n < 60 ? " rotten" : ""}" src="awards/tomato.svg" alt="">`; }
-  else if (r.src === "mc") { const n = parseInt(r.value, 10); mark = `<b class="sc-mc ${n >= 61 ? "hi" : n >= 40 ? "mid" : "lo"}">${v}</b>`; val = ""; }
-  else name = "";
-  return `<div class="sc"><span class="sc-m">${mark}</span><span class="sc-v">${val}</span><span class="sc-n">${name}</span></div>`;
+  const logo = { imdb: "brands/imdb.svg", mc: "brands/metacritic.svg", tmdb: "brands/tmdb.svg", trakt: "brands/trakt.svg" }[r.src];
+  let mark = logo ? `<img class="sc-${r.src === "mc" ? "metacritic" : r.src}" src="${logo}" alt="${esc(r.label)}">` : `<em>${esc(r.label)}</em>`, val = v;
+  if (r.src === "rt") { const n = parseInt(r.value, 10); mark = `<img class="sc-rt${n < 60 ? " rotten" : ""}" src="awards/tomato.svg" alt="Rotten Tomatoes">`; }
+  if (r.src === "mc") { const n = parseInt(r.value, 10); val = `<b class="sc-mc ${n >= 61 ? "hi" : n >= 40 ? "mid" : "lo"}">${v}</b>`; }
+  return `<div class="sc" title="${esc(r.label)}"><span class="sc-m">${mark}</span><span class="sc-v">${val}</span></div>`;
 }
 
 /** A Top list, 25 long: the service's own Top 10, then what was in it on recent days (kept by lucapi). */
@@ -1448,8 +1448,8 @@ async function weekCalendar() {
   };
   const box = h(`<aside class="wk fade-in"><div class="wk-h">New This Week</div><div class="wk-list"></div></aside>`);
   const list = $(".wk-list", box);
-  // Compact: a small picture, the show, and when
-  for (const e of eps.slice(0, 4)) {
+  // Compact: a small picture, the show, and when (the first 4; "and N more" opens the rest)
+  const addEp = (e) => {
     const it = h(`<div class="wk-ep"><div class="wk-art"></div><div class="wk-tx"><div class="wk-t">${esc(e.show)}</div>
       <div class="wk-s">${when(e)} · S${e.season} E${e.episode}</div></div></div>`);
     const art = $(".wk-art", it);
@@ -1463,8 +1463,20 @@ async function weekCalendar() {
       const better = (ep && ep.thumbnail) || m.background || "";
       if (better) art.style.backgroundImage = `url('${better}'), ${show}`;
     }).catch(() => {});
+    return it;
+  };
+  eps.slice(0, 4).forEach(addEp);
+  if (eps.length > 4) {
+    const more = h(`<button class="wk-more">and ${eps.length - 4} more</button>`);
+    more.onclick = () => {
+      more.remove();
+      box.classList.add("open");
+      const added = eps.slice(4).map(addEp);
+      marquee();
+      if (TV && window.emberTvFocus && added[0]) window.emberTvFocus(added[0]);
+    };
+    list.appendChild(more);
   }
-  if (eps.length > 4) list.appendChild(h(`<div class="wk-none">and ${eps.length - 4} more</div>`));
   // Names too long for the panel scroll slowly back and forth so you can read them.
   const marquee = () => box.querySelectorAll(".wk-t").forEach(t => {
     if (t.querySelector("span")) return;

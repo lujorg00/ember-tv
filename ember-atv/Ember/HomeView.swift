@@ -269,10 +269,11 @@ struct Backdrop: View {
 /// New This Week: a small panel at the bottom right of the hero. Each opens the show.
 struct WeekPanel: View {
     let eps: [Upcoming]
+    @State private var all = false      // "and N more" opens the rest
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("NEW THIS WEEK").font(.ember(15, .bold)).tracking(1.4).foregroundStyle(Theme.muted).padding(.leading, 8)
-            ForEach(eps.prefix(4)) { e in
+            ForEach(eps.prefix(all ? 10 : 4)) { e in
                 NavigationLink(value: Meta(["id": e.imdb, "type": "series", "name": e.show])) {
                     HStack(spacing: 14) {
                         RemoteImage(url: URL(string: "https://images.metahub.space/background/small/\(e.imdb)/img")) { Theme.card }
@@ -289,8 +290,12 @@ struct WeekPanel: View {
                 }
                 .buttonStyle(RowButtonStyle())
             }
-            if eps.count > 4 {
-                Text("and \(eps.count - 4) more").font(.ember(15)).foregroundStyle(Theme.muted).padding(.leading, 8)
+            if eps.count > 4 && !all {
+                Button { withAnimation(.easeOut(duration: 0.25)) { all = true } } label: {
+                    Text("and \(eps.count - 4) more").font(.ember(16, .semibold)).foregroundStyle(Theme.accent)
+                        .padding(.vertical, 4).padding(.horizontal, 8)
+                }
+                .buttonStyle(RowButtonStyle())
             }
         }
         .padding(14)

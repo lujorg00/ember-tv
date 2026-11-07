@@ -357,24 +357,25 @@ struct ScoreChips: View {
                 HStack(spacing: 12) {
                     Group {
                         switch r.src {
-                        case "imdb":
-                            Image("brand-imdb").resizable().scaledToFit().frame(height: 20)
+                        case "imdb": Image("brand-imdb").resizable().scaledToFit().frame(height: 20)
                         case "rt":
                             Image("award-tomato").resizable().scaledToFit().frame(height: 22)
                                 .hueRotation(.degrees((Int(r.value.filter(\.isNumber)) ?? 100) < 60 ? 70 : 0))
-                        case "mc":
-                            let n = Int(r.value) ?? 0
-                            Text(r.value).font(.ember(15, .bold)).foregroundStyle(n >= 40 && n < 61 ? Color.black : .white)
-                                .frame(width: 30, height: 24)
-                                .background(n >= 61 ? Color(red: 0.23, green: 0.71, blue: 0.29) : n >= 40 ? Color(red: 0.89, green: 0.66, blue: 0) : Color(red: 0.88, green: 0.21, blue: 0.17),
-                                            in: RoundedRectangle(cornerRadius: 5))
-                        default:
-                            Text(r.label.uppercased()).font(.ember(13, .bold)).tracking(0.6).foregroundStyle(Theme.muted)
+                        case "mc": Image("brand-metacritic").resizable().scaledToFit().frame(height: 22)
+                        case "tmdb": Image("brand-tmdb").resizable().scaledToFit().frame(height: 16)
+                        case "trakt": Image("brand-trakt").resizable().scaledToFit().frame(height: 22)
+                        default: Text(r.label.uppercased()).font(.ember(13, .bold)).tracking(0.6).foregroundStyle(Theme.muted)
                         }
                     }
                     .frame(width: 50, alignment: .leading)
-                    if r.src == "mc" { Text("Metacritic").font(.ember(16)).foregroundStyle(Theme.muted) }
-                    else { Text(r.value).font(.ember(20, .semibold)) }
+                    if r.src == "mc" {
+                        // Metacritic's score in its coloured square, after the logo like the others
+                        let n = Int(r.value) ?? 0
+                        Text(r.value).font(.ember(16, .bold)).foregroundStyle(n >= 40 && n < 61 ? Color.black : .white)
+                            .frame(width: 34, height: 26)
+                            .background(n >= 61 ? Color(red: 0.23, green: 0.71, blue: 0.29) : n >= 40 ? Color(red: 0.89, green: 0.66, blue: 0) : Color(red: 0.88, green: 0.21, blue: 0.17),
+                                        in: RoundedRectangle(cornerRadius: 5))
+                    } else { Text(r.value).font(.ember(20, .semibold)) }
                 }
             }
         }
