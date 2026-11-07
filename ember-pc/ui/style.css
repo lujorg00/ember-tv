@@ -728,3 +728,21 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .shuf-m { color: #E6D6C4; font-size: 15px; }
 .shuf-d { color: var(--muted); font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .shuf-in .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+/* ---- Ember TV: the poster the remote rests on opens out into the large card, in place (as on Apple TV) */
+.strip.tvspot .poster { height: 270px; aspect-ratio: auto; transition: width .24s cubic-bezier(.2,.7,.2,1), transform .15s, box-shadow .15s; }
+.strip.tvspot .poster.open { width: 480px; }
+.tv .strip.tvspot .poster.open.tvf { transform: scale(1.03); }
+.tvs { position: absolute; inset: 0; z-index: 1; border-radius: inherit; overflow: hidden; background: var(--card) center/cover;
+  opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+.tvs::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(10,8,6,.92) 0%, rgba(10,8,6,.55) 55%, rgba(10,8,6,.05) 100%),
+  linear-gradient(0deg, rgba(10,8,6,.6), transparent 50%); }
+.poster.open .tvs { opacity: 1; transition-delay: .08s; }
+.tvs-in { position: absolute; left: 20px; right: 24%; bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
+.tvs .ttl { min-height: 52px; }
+.tvs .ttl-logo { max-width: 250px; max-height: 70px; }
+.tvs .ttl-name { font: 700 24px/1.05 "Segoe UI Variable Display", "Segoe UI", sans-serif; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tvs .spot-m { font-size: 14px; }
+.tvs .spot-d { font-size: 13.5px; }
+.poster.open .wbadge, .poster.open .bmk, .poster.open .bar { z-index: 2; }
+.poster.open .rel, .poster.open .name { opacity: 0; }

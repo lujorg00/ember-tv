@@ -701,15 +701,59 @@ function spotCard(m, type) {
 /** The ordinary rows. On the TVs: the first title large, then the posters. On the PC: plain posters, and the one
  *  the mouse rests on opens out into that large card in place (and folds back when the mouse moves on). */
 function spotRow(title, metas, type) {
-  if (!TV) return hoverRow(title, metas, type);
-  if (metas.length < 4) return row(title, metas, type);
-  const r = row(title, metas.slice(1), type);
-  const sp = spotCard(metas[0], type);
-  sp.querySelector(".spot-k").textContent = "Top pick";
-  $(".strip", r).prepend(sp);
-  $(".strip", r).classList.add("spotted");
-  $("h2 small", r).textContent = metas.length;
+  return TV ? focusRow(title, metas, type) : hoverRow(title, metas, type);
+}
+
+/** Ember TV, as on Apple TV: rest on a poster and it opens out, in place, into the large card (picture, logo, a line
+ *  about it). It's the same poster underneath, so the remote never loses its place: OK opens it, hold OK for the menu. */
+function focusRow(title, metas, type) {
+  const r = row(title, metas, type);
+  const strip = $(".strip", r);
+  strip.classList.add("tvspot");
+  const byId = new Map(metas.map(m => [m.id, m]));
+  let timer = 0, open = null;
+  const shut = () => { if (open) { open.classList.remove("open"); open = null; } };
+  strip.addEventListener("focusin", (e) => {
+    const p = e.target.closest && e.target.closest(".poster");
+    if (!p || !strip.contains(p)) return;
+    clearTimeout(timer);
+    if (open && open !== p) shut();
+    const m = byId.get(p.dataset.wid);
+    if (!m) return;
+    logoFor(m, m.type || type);                       // logo and picture ready by the time it opens
+    if (backdrop(m)) new Image().src = backdrop(m);
+    timer = setTimeout(() => {
+      if (!p.classList.contains("tvf") || !p.isConnected) return;
+      if (!p.querySelector(".tvs")) p.appendChild(spotFace(m, type));
+      p.classList.add("open"); open = p;
+      setTimeout(() => {                              // keep the opened card in view at the right-hand end
+        if (open !== p) return;
+        const a = p.getBoundingClientRect(), b = strip.getBoundingClientRect();
+        if (a.right > b.right - 50) strip.scrollBy({ left: a.right - b.right + 70, behavior: "smooth" });
+      }, 300);
+    }, 450);
+  });
+  strip.addEventListener("focusout", () => setTimeout(() => {
+    if (!strip.contains(document.activeElement)) { clearTimeout(timer); shut(); }
+  }, 0));
   return r;
+}
+
+/** What a poster shows when it opens out on the TV. */
+function spotFace(m, type) {
+  const t = m.type || type;
+  const el = h(`<div class="tvs" style="background-image:url('${esc(backdrop(m))}')"><div class="tvs-in"><div class="spot-t"></div>
+    <div class="spot-m">${esc([m.releaseInfo, m.imdbRating && "★ " + m.imdbRating].filter(Boolean).join("  ·  "))}</div>
+    <div class="spot-d">${esc(m.description || "")}</div></div></div>`);
+  $(".spot-t", el).replaceWith(titleArt(m, t));
+  meta(t, m.id).then(full => {
+    if (!full) return;
+    const mm = { ...m, ...full };
+    if (!m.description && mm.description) $(".spot-d", el).textContent = mm.description;
+    $(".spot-m", el).textContent = [mm.releaseInfo || mm.year, mm.imdbRating && "★ " + mm.imdbRating, (mm.genres || []).slice(0, 2).join(", ")].filter(Boolean).join("  ·  ");
+    if (!m.background && mm.background) el.style.backgroundImage = `url('${mm.background}')`;
+  });
+  return el;
 }
 
 function hoverRow(title, metas, type) {
