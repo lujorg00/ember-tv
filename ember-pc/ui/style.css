@@ -174,11 +174,14 @@ input { font: inherit; color: var(--text); }
 .grid.tight { padding: 4px 0; }
 
 /* page name over the hero (Films / Series) */
+/* clear and solid, top left, on its own dark band so the picture never fights it; the title below keeps its space */
 .hero.named { padding-top: 26px; }
-.hero .pagename { position: relative; z-index: 1; font: 800 74px/0.9 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: -2px;
-  background: linear-gradient(180deg, #FFF4E6 10%, rgba(240,160,75,.85) 65%, rgba(240,160,75,0) 100%); -webkit-background-clip: text; background-clip: text;
-  color: transparent; text-shadow: none; filter: drop-shadow(0 6px 30px rgba(0,0,0,.45)); margin-bottom: -6px; }
-.hero.named h1 { margin-top: 14px; }
+.hero.named::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 190px; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(10,8,6,.78), rgba(10,8,6,.35) 60%, transparent); }
+.hero .pagename { position: relative; z-index: 2; margin: 0 0 22px; display: flex; align-items: center; gap: 14px;
+  font: 700 40px/1 "Segoe UI Variable Display", "Segoe UI", sans-serif; letter-spacing: -.5px; color: #FFF4E6; text-shadow: 0 2px 14px rgba(0,0,0,.6); }
+.hero .pagename::before { content: ""; width: 6px; height: 34px; border-radius: 3px; background: var(--accent); }
+.tv .hero .pagename { font-size: 34px; margin-bottom: 16px; }
 
 /* loading screen */
 #loader { position: fixed; inset: 0; z-index: 20; background: #0E0B09; display: grid; place-items: center; opacity: 0; transition: opacity .35s ease; }

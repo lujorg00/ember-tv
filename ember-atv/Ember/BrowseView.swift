@@ -199,6 +199,7 @@ struct TilePage: View {
     let type: String
     @State private var typ = "movie"
     @State private var sort = ""
+    @AppStorage("hideSeen") private var hideSeen = false     // every tile: leave out what you've watched (remembered)
     @State private var metas: [Meta] = []
     @State private var shown = 0
     @State private var page = 1
@@ -241,6 +242,8 @@ struct TilePage: View {
                                     chip(s.1, on: sort == s.0) { sort = s.0; reload() }
                                 }
                             }
+                            Spacer().frame(width: 30)
+                            chip("Hide watched", on: hideSeen) { hideSeen.toggle(); reload() }
                         }
                     }
                     .padding(.horizontal, 90).padding(.bottom, 20)
@@ -286,10 +289,13 @@ struct TilePage: View {
         let path = orig ? "/browse/originals/\(API.q(tile.title))?type=\(typ)&page=\(page)"
             : own ? "/browse/cat/\(tile.id)?type=\(typ)&skip=\(shown)&sort=\(sort)" : "/browse/\(tile.kind)/\(tile.id)?type=\(typ)&page=\(page)"
         let want = (typ, sort)
+        let hide = hideSeen
+        let full = hide && !orig ? path + "&unseen=1" : path
         Task {
             defer { busy = false }
-            guard let r = try? await API.feedGet(path, timeout: 60), want == (typ, sort) else { return }
-            let got = r.arr("metas").map { Meta($0, type: typ) }.filter { !$0.id.isEmpty }
+            guard let r = try? await API.feedGet(full, timeout: 90), want == (typ, sort), hide == hideSeen else { return }
+            var got = r.arr("metas").map { Meta($0, type: typ) }.filter { !$0.id.isEmpty }
+            if hide && orig { got = got.filter { store.watched[$0.id] != "done" } }
             let have = Set(metas.map(\.id))
             let fresh = got.filter { !have.contains($0.id) }
             metas += fresh

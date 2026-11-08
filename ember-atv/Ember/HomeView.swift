@@ -164,11 +164,17 @@ struct HeroView: View {
             .transition(.opacity)
 
             if let pageName {
-                // the page's name, big and faint at the top, blending into the picture (as on Ember PC)
-                Text(pageName).font(.ember(120, .heavy)).foregroundStyle(.white.opacity(0.10))
-                    .padding(.leading, 80).padding(.top, 150)   // below the tab bar
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // the page's name: clear and solid at the top left, on a dark band so the picture never fights it
+                LinearGradient(colors: [.black.opacity(0.7), .black.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 330).frame(maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
+                HStack(spacing: 18) {
+                    Capsule().fill(Theme.accent).frame(width: 7, height: 50)
+                    Text(pageName).font(.ember(58, .bold)).foregroundStyle(.white).shadow(color: .black.opacity(0.6), radius: 12)
+                }
+                .padding(.leading, 90).padding(.top, 150)   // below the tab bar
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .allowsHitTesting(false)
             }
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 24) {

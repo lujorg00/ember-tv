@@ -989,6 +989,7 @@ async function showTile(kind, id, title, image, typ, sort = "") {
   const both = own ? (info.types || []).length > 1 : ["service", "genre", "company"].includes(kind);
   typ = typ || (own && info.types ? info.types[0] : "movie");
   // a streaming service: its own shows and films too ("Netflix Originals")
+  const hideSeen = store.get("hideSeen", "0") === "1";   // every tile: leave out what you've watched (remembered)
   const hasOriginals = own && /^(netflix|prime video|amazon|disney\s*\+|apple tv\s*\+|hbo max|max|hulu|paramount\s*\+|peacock)\b/i.test(title || "");
   const origName = `${(title || "").replace(/\s*(shows?|series|films?|movies?)$/i, "").replace(/^prime video$/i, "Amazon")} Originals`;
   const v = $("#view");
@@ -996,12 +997,14 @@ async function showTile(kind, id, title, image, typ, sort = "") {
   const head = h(`<header class="tile-head" style="background-image:url('${esc(image)}')"><div class="shade"></div>
     <button class="back">‹ Back</button><h1>${esc(title)}</h1>
     <div class="tile-bar">${both ? `<div class="chips"><span class="chip btn-chip ${typ === "movie" ? "on" : ""}" data-t="movie">Films</span><span class="chip btn-chip ${typ === "series" ? "on" : ""}" data-t="series">Series</span></div>` : "<div></div>"}
-    ${own ? `<div class="chips sorts">${hasOriginals ? `<span class="chip btn-chip orig ${sort === "orig" ? "on" : ""}" data-s="${sort === "orig" ? "" : "orig"}">${esc(origName)}</span>` : ""}${TILE_SORTS.map(([k, l]) => `<span class="chip btn-chip ${k === sort ? "on" : ""}" data-s="${k}">${l}</span>`).join("")}</div>` : ""}</div></header>`);
+    ${own ? `<div class="chips sorts">${hasOriginals ? `<span class="chip btn-chip orig ${sort === "orig" ? "on" : ""}" data-s="${sort === "orig" ? "" : "orig"}">${esc(origName)}</span>` : ""}${TILE_SORTS.map(([k, l]) => `<span class="chip btn-chip ${k === sort ? "on" : ""}" data-s="${k}">${l}</span>`).join("")}</div>` : ""}
+    <div class="chips"><span class="chip btn-chip unseen ${hideSeen ? "on" : ""}">Hide watched</span></div></div></header>`);
   const grid = h(`<div class="grid fade-in"></div>`);
   const more = h(`<div class="btns" style="padding:0 48px 60px"><button class="btn">More</button></div>`);
   v.append(head, grid, more);
   $(".back", head).onclick = back;
   head.querySelectorAll("[data-t]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][4] = c.dataset.t; showTile(kind, id, title, image, c.dataset.t, sort); });
+  $(".unseen", head).onclick = () => { store.set("hideSeen", hideSeen ? "0" : "1"); showTile(kind, id, title, image, typ, sort); };
   head.querySelectorAll("[data-s]").forEach(c => c.onclick = () => { navStack[navStack.length - 1][1][5] = c.dataset.s; showTile(kind, id, title, image, typ, c.dataset.s); });
   let page = 1, pages = 1, shown = 0;
   const ids = new Set();
@@ -1012,8 +1015,10 @@ async function showTile(kind, id, title, image, typ, sort = "") {
     let r;
     const url = orig ? `${feed()}/browse/originals/${encodeURIComponent(title)}?type=${typ}&page=${page}`
       : own ? `${feed()}/browse/cat/${id}?type=${typ}&skip=${shown}&sort=${sort}` : `${feed()}/browse/${kind}/${id}?type=${typ}&page=${page}`;
-    try { r = await getJson(url, 60000); } catch (e) { toast("Couldn't load: " + e.message); return; }
+    const urlU = hideSeen && !orig ? url + "&unseen=1" : url;
+    try { r = await getJson(urlU, 90000); } catch (e) { toast("Couldn't load: " + e.message); return; }
     pages = r.pages || 1;
+    if (hideSeen && orig) r.metas = (r.metas || []).filter(m => !(watchedMap[m.id] === "done" || watchedMap[m.id] === true));
     if (own && sort && !orig && !shown) grid.innerHTML = "";
     if (orig && r.unsupported && !grid.children.length) grid.appendChild(h(`<div class="empty">No ${esc(origName)} list for ${typ === "movie" ? "films" : "series"} yet.</div>`));
     const fresh = (r.metas || []).filter(m => !ids.has(m.id));
@@ -1125,6 +1130,9 @@ async function showBrowse(type) {
     { name: `Disney+ Top ${kind}`, cat: find(/disney\s*\+/i, theirs, mine), top: true },
     { name: `Apple TV+ Top ${kind}`, cat: find(/apple tv\s*\+/i, theirs, mine), top: true },
     { name: `Amazon Top ${kind}`, cat: find(/prime video|amazon/i, theirs, mine), top: true },
+    // Hulu's chart when your addons have one; otherwise what's popular on Hulu now (not on Home)
+    find(/hulu/i, theirs, mine) ? { name: `Hulu Top ${kind}`, cat: find(/hulu/i, theirs, mine), top: true }
+      : { name: `Popular on Hulu`, cat: { type, id: "hulu-popular", name: "Hulu" }, top: true },
   ].filter(p => p.cat);
   const slots = plan.map(() => { const s = document.createElement("div"); rows.appendChild(s); return s; });
   const slotTiles = document.createElement("div"); rows.appendChild(slotTiles);

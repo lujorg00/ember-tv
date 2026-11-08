@@ -968,6 +968,18 @@ _tops_lock = threading.Lock()
 TOP_LEN = 25
 
 
+def service_popular(typ, provider, region="US"):
+    """When there's no Top 10 chart for a service (Hulu, say): its 25 most popular titles right now, from TMDB."""
+    k = "movie" if typ == "movie" else "tv"
+    def build():
+        res = []
+        for page in (1, 2):
+            res += _tmdb(f"/discover/{k}", with_watch_providers=provider, watch_region=region, sort_by="popularity.desc",
+                         **{"vote_count.gte": 30}, page=page).get("results", [])
+        return {"metas": _to_metas(res[:25], k)}
+    return cached(f"svc-popular:{typ}:{provider}:{region}", 6 * 3600, build)
+
+
 def toplist(typ, cid, aio):
     """A Top list stretched to 25 (as the Omni addon does for Netflix): today's order first, which is the
     service's own Top 10, then the titles that were in this list on recent days, the most recent days first.
@@ -2862,46 +2874,138 @@ SORTS = {"new": (lambda m: (_year(m) == 0, -_year(m))), "old": (lambda m: (_year
          "rating": (lambda m: -_rating(m)), "az": (lambda m: re.sub(r"^(the|a|an) ", "", (m.get("name") or "").lower()))}
 
 
-def browse_cat(tid, typ="movie", skip=0, sort=""):
-    """The titles behind one of your own tiles: its catalogues for that type, merged, without repeats.
+def _tile_meta(tid):
+    for g in browse_tiles().get("groups", []):
+        for t in g.get("tiles", []):
+            if t.get("id") == tid:
+                return t
+    return {}
+
+
+def _provider_id(name, k):
+    """A service's TMDB watch-provider id (and its region): GB first, then US (for Hulu, Peacock...)."""
+    want = SERVICE_NAMES.get(name.lower().strip(), name).lower()
+    def build():
+        for region in ("GB", "US"):
+            for x in _tmdb(f"/watch/providers/{k}", watch_region=region).get("results", []):
+                pn = x.get("provider_name", "").lower()
+                if pn == want or pn == name.lower() or pn.replace(" plus", "+") == name.lower():
+                    return [x["provider_id"], region]
+        return [0, ""]
+    return cached(f"provider:{k}:{want}", 7 * 86400, build)
+
+
+def _tile_more_params(tid, typ):
+    """TMDB filters to carry a tile on once your lists run out: a service by what's on it, a genre by its genre,
+    a decade by its years. None for tiles that are a fixed list (franchises, awards, people...)."""
+    t = _tile_meta(tid)
+    title, box = t.get("title", ""), t.get("box", "")
+    k = "movie" if typ == "movie" else "tv"
+    if box == "services":
+        pid, region = _provider_id(title, k)
+        return {"with_watch_providers": pid, "watch_region": region} if pid else None
+    if box in ("genres", "kids"):
+        for name, gid in GENRES[k] + ([("Science Fiction", 878), ("Mystery", 9648), ("Family", 10751), ("Western", 37), ("History", 36),
+                                        ("Music", 10402), ("Adventure", 12)] if k == "movie" else [("Family", 10751), ("Kids", 10762),
+                                        ("Western", 37), ("War", 10768), ("Fantasy", 10765), ("Thriller", 9648)]):
+            if re.search(r"\b" + re.escape(name.split()[0]) + r"\b", title, re.I):
+                return {"with_genres": gid, "vote_count.gte": 80}
+        if box == "kids":
+            return {"with_genres": 10751 if k == "movie" else 10762}
+        return None
+    if box == "decades":
+        m = re.search(r"(19|20)(\d)0", title)
+        if m:
+            y = int(m.group(1) + m.group(2) + "0")
+            f = "primary_release_date" if k == "movie" else "first_air_date"
+            return {f + ".gte": f"{y}-01-01", f + ".lte": f"{y + 9}-12-31", "vote_count.gte": 150}
+    return None
+
+
+_tile_lists = {}
+_tile_lists_lock = threading.Lock()
+PAGE = 100
+
+
+def _tile_list(tid, typ, cats, need):
+    """This tile's titles in order, at least `need` long where it can be: all of your lists' titles, then (once they
+    run out) TMDB's for the same service, genre or decade. Kept for an hour and grown as you page through."""
+    key = f"{tid}:{typ}"
+    with _tile_lists_lock:
+        st = _tile_lists.get(key)
+        if not st or time.time() - st["at"] > 3600:
+            st = _tile_lists[key] = {"at": time.time(), "list": [], "seen": set(), "lists_done": False, "tmdb_page": 0,
+                                     "done": False, "lock": threading.Lock()}
+    with st["lock"]:
+        if not st["lists_done"]:
+            for c in cats:
+                at = 0
+                while len(st["list"]) < 3000:
+                    page = _cat_metas(c, at)
+                    fresh = [m for m in page if m.get("id") not in st["seen"]]
+                    for m in fresh:
+                        st["seen"].add(m.get("id"))
+                        st["list"].append({**m, "type": m.get("type") or c["type"]})
+                    if not fresh or len(page) < 10:
+                        break
+                    at += len(page)
+            st["lists_done"] = True
+        more = None if st["done"] else _tile_more_params(tid, typ)
+        if more is None:
+            st["done"] = True
+        k = "movie" if typ == "movie" else "tv"
+        while not st["done"] and len(st["list"]) < need and st["tmdb_page"] < 40:
+            st["tmdb_page"] += 1
+            try:
+                r = _tmdb(f"/discover/{k}", sort_by="popularity.desc", page=st["tmdb_page"], **more)
+            except Exception:
+                st["done"] = True
+                break
+            for m in _to_metas(r.get("results", []), k):
+                if m["id"] not in st["seen"]:
+                    st["seen"].add(m["id"])
+                    st["list"].append(m)
+            if st["tmdb_page"] >= r.get("total_pages", 1):
+                st["done"] = True
+        return st["list"], st["done"]
+
+
+def browse_cat(tid, typ="movie", skip=0, sort="", unseen=False):
+    """The titles behind one of your own tiles: its catalogues for that type, merged, without repeats, and then more
+    from TMDB once they run out (services, genres, decades). unseen: leave out what you've watched.
     With a sort, the whole list (up to 600) is fetched and sorted, in one go."""
     if not _TILE_CATS:
         browse_tiles()
     cats = _TILE_CATS.get(tid, {}).get("movie" if typ == "movie" else "series", [])
     if not cats:
         return {"metas": [], "more": False}
+    seen_items = {}
+    if unseen:
+        try:
+            seen_items = watched_status().get("items", {})
+        except Exception:
+            seen_items = {}
+    keep = lambda m: not unseen or seen_items.get(m.get("id")) != "done"
 
     if sort in SORTS:
         def build_all():
-            out, seen = [], set()
-            for c in cats:
-                at = 0
-                while len(out) < 600:
-                    page = _cat_metas(c, at)
-                    fresh = [m for m in page if m.get("id") not in seen]
-                    for m in fresh:
-                        seen.add(m.get("id"))
-                        out.append({**m, "type": m.get("type") or c["type"]})
-                    if not fresh or len(page) < 10:
-                        break
-                    at += len(page)
+            out, _ = _tile_list(tid, typ, cats, 600)
+            out = list(out[:600])
             out.sort(key=SORTS[sort])
-            return {"metas": out, "more": False}
-        return cached(f"browse:cat:{tid}:{typ}:all:{sort}", 3600, build_all)
+            return out
+        return {"metas": [m for m in cached(f"browse:cat:{tid}:{typ}:all:{sort}", 3600, build_all) if keep(m)], "more": False}
 
-    def build():
-        # many lists page with skip= even when they don't say so: always ask for more, and offer More while a
-        # page comes back full (a list that ignores skip just repeats itself, and Ember then hides More)
-        out, seen, more = [], set(), False
-        for c in cats:
-            page = _cat_metas(c, skip)
-            for m in page:
-                if m.get("id") not in seen:
-                    seen.add(m.get("id"))
-                    out.append({**m, "type": m.get("type") or c["type"]})
-            more = more or len(page) >= 10
-        return {"metas": out, "more": more}
-    return cached(f"browse:cat:{tid}:{typ}:{skip}", 3600, build)
+    if not unseen:
+        lst, done = _tile_list(tid, typ, cats, skip + PAGE)
+        return {"metas": lst[skip:skip + PAGE], "more": skip + PAGE < len(lst) or not done}
+    # leaving out what you've watched: grow the list until there's a full page of the rest
+    need = skip + PAGE
+    while True:
+        lst, done = _tile_list(tid, typ, cats, need)
+        rest = [m for m in lst if keep(m)]
+        if len(rest) >= skip + PAGE or done:
+            return {"metas": rest[skip:skip + PAGE], "more": skip + PAGE < len(rest) or not done}
+        need = len(lst) + PAGE
 
 
 def _release_one(imdb):
@@ -3085,15 +3189,18 @@ def browse_tiles():
         t = cached("browse:tiles", 24 * 3600, _build_tiles)
     except Exception as e:
         return {"groups": [], "error": str(e)}
-    # Home runs: Trending, the Netflix Tops, then this time round's collections, then the rest. (The apps lift out
-    # continue watching, Trending and the Tops themselves, so the collections go first among what's left.)
+    # Home runs: Trending, the Netflix Tops, your "New ... For You" rows, this time round's collections, then the
+    # rest. (The apps lift out continue watching, Trending and the Tops themselves and keep the others in this order.)
     rot = rotation()
-    if rot and rot.get("rows") and isinstance(t.get("home"), list):
-        home = list(t["home"])
+    if isinstance(t.get("home"), list):
         lifted = lambda h: h.get("style") in ("top10", "continue") or \
             re.search(r"\btop\b|trending|pick up|left off|continue|all.?time", h.get("name", ""), re.I)
-        at = next((i for i, h in enumerate(home) if not lifted(h)), len(home))
-        home[at:at] = [{"type": r["type"], "id": r["id"], "name": r["name"], "style": "row"} for r in rot["rows"]]
+        foryou = lambda h: not lifted(h) and re.search(r"for you", h.get("name", ""), re.I)
+        home = [h for h in t["home"] if lifted(h)] + [h for h in t["home"] if foryou(h)] + \
+               [h for h in t["home"] if not lifted(h) and not foryou(h)]
+        at = len([h for h in home if lifted(h) or foryou(h)])
+        if rot and rot.get("rows"):
+            home[at:at] = [{"type": r["type"], "id": r["id"], "name": r["name"], "style": "row"} for r in rot["rows"]]
         t = dict(t, home=home)
     return t
 
@@ -3160,8 +3267,8 @@ def _keyword(name):
 
 
 def _unwatched(metas):
-    seen = watched_status().get("items", {})
-    return [m for m in metas if seen.get(m["id"]) != "done"]
+    """Collections include what you've already watched (it shows with its tick), so this keeps everything."""
+    return metas
 
 
 def _coll_theme(c):
@@ -3592,8 +3699,7 @@ def shuffle_pick(typ="both", genres="", decade="", vibe=""):
     with concurrent.futures.ThreadPoolExecutor(2) as ex:
         for lst in ex.map(one, kinds):
             picks += lst
-    picks = [m for m in picks if m["id"] not in seen]
-    random.shuffle(picks)
+    random.shuffle(picks)        # things you've seen can come up too (they show their watched tick)
     return {"metas": picks[:48]}
 
 
@@ -3795,7 +3901,7 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/browse/cat/[a-z0-9-]+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(browse_cat(path.split("/")[3], (q.get("type") or ["movie"])[0], int((q.get("skip") or [0])[0]),
-                                     (q.get("sort") or [""])[0]))
+                                     (q.get("sort") or [""])[0], (q.get("unseen") or ["0"])[0] == "1"))
             elif re.fullmatch(r"/browse/originals/[^/]+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(browse_originals(urllib.parse.unquote(path.split("/")[3]), (q.get("type") or ["movie"])[0],
@@ -3803,7 +3909,11 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/browse/(service|genre|company|decade|person|collection)/\d+", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 _, _, kind, tid = path.split("/")
-                self._json(browse_list(kind, tid, (q.get("type") or ["movie"])[0], int((q.get("page") or [1])[0])))
+                r = browse_list(kind, tid, (q.get("type") or ["movie"])[0], int((q.get("page") or [1])[0]))
+                if (q.get("unseen") or ["0"])[0] == "1":     # leave out what you've watched
+                    items = watched_status().get("items", {})
+                    r = dict(r, metas=[m for m in r.get("metas", []) if items.get(m.get("id")) != "done"])
+                self._json(r)
             elif path == "/upcoming":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(upcoming(days=int((q.get("days") or [7])[0])))
@@ -3852,7 +3962,11 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/toplist/(movie|series)/[^/]+\.json", path):
                 parts = path.split("/")
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                self._json(toplist(parts[2], urllib.parse.unquote(parts[3][:-5]), (q.get("aio") or ["0"])[0] == "1"))
+                cid = urllib.parse.unquote(parts[3][:-5])
+                if cid == "hulu-popular":     # Films / Series pages, when there's no Hulu chart: what's popular on it
+                    self._json(service_popular(parts[2], 15, "US"))
+                else:
+                    self._json(toplist(parts[2], cid, (q.get("aio") or ["0"])[0] == "1"))
             elif path == "/screensaver":
                 self._json(screensaver(self._base()))
             elif re.fullmatch(r"/addon/catalog/(movie|series)/ember-col-[^/]+\.json", path):

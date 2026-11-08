@@ -288,6 +288,10 @@ final class Store: ObservableObject {
             }
             return nil
         }
+        // Hulu's chart when your addons have one; otherwise what's popular on Hulu now (not on Home)
+        let huluChart = find("hulu", theirs, mine)
+        let huluPopular: JSON = ["type": type, "id": "hulu-popular", "name": "Hulu"]
+        let hulu: (String, JSON?, Bool) = huluChart != nil ? ("Hulu Top \(kind)", huluChart, true) : ("Popular on Hulu", huluPopular, true)
         let plan: [(String, JSON?, Bool)] = [
             ("Trending Today", find("trending", mine, theirs), false),
             ("New \(kind) For You", find("^new .*for you", mine), false),
@@ -296,6 +300,7 @@ final class Store: ObservableObject {
             ("Disney+ Top \(kind)", find("disney\\s*\\+", theirs, mine), true),
             ("Apple TV+ Top \(kind)", find("apple tv\\s*\\+", theirs, mine), true),
             ("Amazon Top \(kind)", find("prime video|amazon", theirs, mine), true),
+            hulu,
         ]
         let wanted = plan.compactMap { p in p.1.map { (p.0, $0, p.2) } }
         let built = await withTaskGroup(of: (Int, RowData?).self, returning: [RowData].self) { g in
