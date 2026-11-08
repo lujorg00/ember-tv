@@ -788,3 +788,11 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 /* AI search turned off (out of credit, or the key turned down): one quiet line above the results */
 .ai-note { margin: 4px 48px 0; padding: 10px 16px; border-radius: 12px; font-size: 14.5px; color: #F0C9A0;
   background: rgba(240,160,75,.1); border: 1px solid rgba(240,160,75,.25); width: fit-content; max-width: 900px; }
+
+/* Row titles (E1): the serif italic part glows like an ember; Netflix rows in red. Fraunces (OFL), bundled. */
+@font-face { font-family: "Ember Serif"; src: url("EmberSerif-Italic.ttf") format("truetype"); font-style: italic; font-weight: 500; font-display: swap; }
+.row h2 .acc { font-family: "Ember Serif", Georgia, serif; font-style: italic; font-weight: 500; font-size: 1.12em; letter-spacing: 0;
+  color: #FFB866; text-shadow: 0 0 14px rgba(240,140,50,.6), 0 0 32px rgba(240,120,40,.3); }
+.row h2 .acc.red { color: #FF7A6E; text-shadow: 0 0 14px rgba(229,83,75,.55), 0 0 32px rgba(229,83,75,.28); }
+.tv .row h2 .acc { text-shadow: 0 0 12px rgba(240,140,50,.55); }
+.tv .row h2 .acc.red { text-shadow: 0 0 12px rgba(229,83,75,.5); }

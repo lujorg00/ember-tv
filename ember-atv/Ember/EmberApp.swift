@@ -51,7 +51,7 @@ struct RootView: View {
                 BrowseView(type: "movie")
                     .tabItem { Label("Films", systemImage: "film") }
                 BrowseView(type: "series")
-                    .tabItem { Label("Series", systemImage: "tv") }
+                    .tabItem { Label("Series", systemImage: "play.rectangle.on.rectangle") }
                 SearchView()
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }
                 WhatToWatchView()

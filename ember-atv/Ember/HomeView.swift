@@ -374,14 +374,40 @@ struct TitleArt: View {
 
 // MARK: - rows
 
+/// Row titles (E1): bold sans with one part in a glowing serif italic ("Trending *today*", "Netflix *top series*",
+/// "New films *for you*", "Because you loved *Heat*"). Netflix rows glow red, the rest ember orange. The same rules as Ember PC.
+enum RowTitle {
+    static func split(_ name: String) -> (lead: String, accent: String) {
+        let t = name.trimmingCharacters(in: .whitespaces)
+        func m(_ p: String) -> [String]? {
+            guard let re = try? NSRegularExpression(pattern: p, options: [.caseInsensitive]),
+                  let r = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) else { return nil }
+            return (1..<r.numberOfRanges).map { i in Range(r.range(at: i), in: t).map { String(t[$0]) } ?? "" }
+        }
+        if let g = m("^(because you loved|more from|popular on)\\s+(.+)$") { return (g[0].prefix(1).uppercased() + g[0].dropFirst().lowercased(), g[1]) }
+        if let g = m("^(.*?)\\s*\\b(for you)$") { return (g[0], "for you") }
+        if let g = m("^(.+?)\\s+(top\\b.*)$") { return (g[0], g[1].lowercased()) }
+        if let g = m("^(.+?)\\s+(today|right now|now|this week|tonight)$") { return (g[0], g[1].lowercased()) }
+        if let g = m("^(.+)\\s+(\\S+)$") { return (g[0], g[1].lowercased()) }
+        return ("", t)
+    }
+}
+
 struct RowHeader: View {
     let title: String
     var kind: String? = nil
     var count: Int? = nil
     var leading: CGFloat = 90
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(title).font(.ember(34, .bold))
+        let parts = RowTitle.split(title)
+        let glow = title.range(of: "netflix", options: .caseInsensitive) != nil
+            ? Color(red: 1, green: 0.48, blue: 0.43) : Color(red: 1, green: 0.72, blue: 0.4)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            if !parts.lead.isEmpty { Text(parts.lead).font(.ember(34, .bold)) }
+            Text(parts.accent).font(.custom("EmberSerif-Italic", size: 39))
+                .foregroundStyle(glow)
+                .shadow(color: glow.opacity(0.55), radius: 8)
+                .shadow(color: glow.opacity(0.25), radius: 18)
             if let kind { Text(kind).font(.ember(24, .semibold)).foregroundStyle(Theme.accent) }
             if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }

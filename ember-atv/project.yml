@@ -27,10 +27,10 @@ targets:
       path: Ember/Info.plist
       properties:
         CFBundleDisplayName: Ember
-        CFBundleShortVersionString: "0.6.19"
+        CFBundleShortVersionString: "0.6.20"
         CFBundleVersion: "1"
         UILaunchScreen: {}
-        UIAppFonts: [Selawik-Light.ttf, Selawik-Semilight.ttf, Selawik-Regular.ttf, Selawik-Semibold.ttf, Selawik-Bold.ttf]
+        UIAppFonts: [Selawik-Light.ttf, Selawik-Semilight.ttf, Selawik-Regular.ttf, Selawik-Semibold.ttf, Selawik-Bold.ttf, EmberSerif-Italic.ttf]
         UIUserInterfaceStyle: Dark
         UIRequiredDeviceCapabilities: [arm64]
         NSAppTransportSecurity:

@@ -368,8 +368,26 @@ function card(m, type) {
   el.onclick = () => go("title", m.type || type, m.id, m);
   return el;
 }
+/** Row titles, E1: bold sans with one part in a glowing serif italic ("Trending *today*", "Netflix *top series*",
+ *  "New films *for you*", "Because you loved *Heat*"). Netflix rows glow red, the rest ember orange. */
+function splitTitle(name) {
+  const t = String(name || "").trim();
+  const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1).toLowerCase();
+  let m;
+  if ((m = t.match(/^(because you loved|more from|popular on)\s+(.+)$/i))) return [cap(m[1]), m[2], ""];
+  if ((m = t.match(/^(.*?)\s*\b(for you)$/i))) return [m[1], "for you", ""];
+  if ((m = t.match(/^(.+?)\s+(top\b.*)$/i))) return [m[1], m[2].toLowerCase(), ""];
+  if ((m = t.match(/^(.+?)\s+(today|right now|now|this week|tonight)$/i))) return [m[1], m[2].toLowerCase(), ""];
+  if ((m = t.match(/^(.+)\s+(\S+)$/))) return [m[1], m[2].toLowerCase(), ""];
+  return ["", t, ""];
+}
+function titleHtml(name, kind) {
+  const [lead, acc, tail] = splitTitle(name);
+  const red = /netflix/i.test(name) ? " red" : "";
+  return `${lead ? esc(lead) + " " : ""}<em class="acc${red}">${esc(acc)}</em>${tail ? " " + esc(tail) : ""}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
+}
 function row(title, metas, type, onPick) {
-  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const label = typeof title === "object" ? titleHtml(title.name, title.kind) : titleHtml(title);
   const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   metas.forEach(m => {
@@ -643,7 +661,7 @@ async function continueRow(cwCat) {
     try { for (const m of await catalogRow(c)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || c.type, m }); seen.add(m.id); } } catch (e) {}
   }
   if (!items.length) return null;
-  const r = h(`<section class="row fade-in"><h2>Continue watching <small>${items.length}</small></h2><div class="strip"></div></section>`);
+  const r = h(`<section class="row fade-in"><h2>Continue <em class="acc">watching</em> <small>${items.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   for (const it of items.slice(0, 20)) {
     const el = h(`<div class="cw" data-tid="${esc(it.id)}" data-ttype="${esc(it.type)}" data-tname="${esc((it.m && it.m.name) || "")}"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
@@ -827,7 +845,7 @@ function wallRow(title, metas, type) {
 /** Top 10: big rank numbers beside wide artwork. */
 /** Wide pictures with the title on them (no longer used for watchlists). */
 function wideRow(title, metas) {
-  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const label = typeof title === "object" ? titleHtml(title.name, title.kind) : titleHtml(title);
   const r = h(`<section class="row fade-in"><h2>${label} <small>${metas.length}</small></h2><div class="strip wide"></div></section>`);
   metas.forEach((m) => {
     const bm = watchlistIds.has(m.id);
@@ -840,7 +858,7 @@ function wideRow(title, metas) {
 }
 
 function top10Row(title, metas, onPick) {
-  const label = typeof title === "object" ? `${esc(title.name)} <span class="kind">${title.kind}</span>` : esc(title);
+  const label = typeof title === "object" ? titleHtml(title.name, title.kind) : titleHtml(title);
   const r = h(`<section class="row fade-in"><h2>${label}</h2><div class="strip top10"></div></section>`);
   metas.slice(0, 25).forEach((m, i) => {
     const bm = watchlistIds.has(m.id);
@@ -899,7 +917,7 @@ async function tileRows(hidden = new Set(), typ = "") {
     if (typ === "series" && (g.style === "person" || g.title === "Franchises")) continue; // directors and franchises are for films
     const list = g.tiles.filter(x => !typ || !x.types || x.types.includes(typ));
     if (!list.length) continue;
-    const r = h(`<section class="row fade-in"><h2>${esc(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
+    const r = h(`<section class="row fade-in"><h2>${titleHtml(g.title)}</h2><div class="strip tiles ${g.style}"></div></section>`);
     for (let tile of list) {
       if (tile.kind === "cat") tileInfo[tile.id] = tile;
       if (tile.logo && tile.logo.startsWith("/")) tile = { ...tile, logo: feed() + tile.logo }; // kept on the Pi
@@ -1496,7 +1514,7 @@ async function outThisWeek() {
   // one card per show: the newest episode that's out, otherwise the next one coming
   const byShow = new Map();
   for (const e of eps) { const cur = byShow.get(e.imdb); if (!cur || (e.out && (!cur.out || e.airs > cur.airs))) byShow.set(e.imdb, e); }
-  const r = h(`<section class="row fade-in"><h2>Out this week <span class="kind">Series</span> <small>${byShow.size}</small></h2><div class="strip"></div></section>`);
+  const r = h(`<section class="row fade-in"><h2>Out <em class="acc">this week</em> <span class="kind">Series</span> <small>${byShow.size}</small></h2><div class="strip"></div></section>`);
   for (const e of [...byShow.values()].sort((a, b) => (b.out - a.out) || (a.out ? b.airs.localeCompare(a.airs) : a.airs.localeCompare(b.airs)))) {
     const m = { id: e.imdb, type: "series", name: e.show };
     const c = card(m, "series");
