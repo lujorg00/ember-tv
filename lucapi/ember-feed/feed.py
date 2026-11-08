@@ -3089,8 +3089,12 @@ def browse_tiles():
     rot = rotation()
     if rot and rot.get("rows") and isinstance(t.get("home"), list):
         home = list(t["home"])
-        at = next((i + 1 for i, h in enumerate(home) if h.get("style") == "row" and re.search(r"for you|recommend", h.get("name", ""), re.I)),
-                  next((i + 1 for i, h in enumerate(home) if h.get("style") == "row"), len(home)))
+        # never above Trending Now or the Netflix Top rows (and after your first "For you" row, if it's below them)
+        tops = [i for i, h in enumerate(home) if h.get("style") in ("top10", "continue")
+                or re.search(r"trending|netflix|top\s*\d+|\btop\b", h.get("name", ""), re.I)]
+        start = (max(tops) + 1) if tops else 0
+        at = next((i + 1 for i, h in enumerate(home) if i >= start and h.get("style") == "row"
+                   and re.search(r"for you|recommend", h.get("name", ""), re.I)), start)
         home[at:at] = [{"type": r["type"], "id": r["id"], "name": r["name"], "style": "row"} for r in rot["rows"]]
         t = dict(t, home=home)
     return t
