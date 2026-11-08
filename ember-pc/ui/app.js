@@ -730,8 +730,7 @@ function focusRow(title, metas, type) {
     if (open && open !== p) shut();
     const m = byId.get(p.dataset.wid);
     if (!m) return;
-    logoFor(m, m.type || type);                       // logo and picture ready by the time it opens
-    if (backdrop(m)) new Image().src = backdrop(m);
+    // nothing is fetched while you're moving along a row - only once you rest on a poster (the Chromecast is slow)
     timer = setTimeout(() => {
       if (!p.classList.contains("tvf") || !p.isConnected) return;
       if (!p.querySelector(".tvs")) p.appendChild(spotFace(m, type));
@@ -741,7 +740,7 @@ function focusRow(title, metas, type) {
         const a = p.getBoundingClientRect(), b = strip.getBoundingClientRect();
         if (a.right > b.right - 50) strip.scrollBy({ left: a.right - b.right + 70, behavior: "smooth" });
       }, 300);
-    }, 450);
+    }, 650);
   });
   strip.addEventListener("focusout", () => setTimeout(() => {
     if (!strip.contains(document.activeElement)) { clearTimeout(timer); shut(); }

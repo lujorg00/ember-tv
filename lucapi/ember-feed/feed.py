@@ -3253,7 +3253,7 @@ def _build_rotation():
     def add(row):
         if row and len(row["metas"]) >= (6 if row["id"].startswith(("director-", "finish-")) else COLL_MIN) \
                 and not any(r["id"] == "ember-col-" + row["id"] for r in rows):
-            rows.append(dict(row, id="ember-col-" + row["id"], metas=row["metas"][:40]))
+            rows.append(dict(row, id="ember-col-" + row["id"], metas=row["metas"][:24]))
             return True
         return False
 

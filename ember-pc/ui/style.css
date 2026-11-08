@@ -765,7 +765,7 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .tv .shuf-bg { transition: opacity .6s; transform: none; }
 
 /* ---- Ember TV: the poster the remote rests on opens out into the large card, in place (as on Apple TV) */
-.strip.tvspot .poster { height: 270px; aspect-ratio: auto; transition: width .24s cubic-bezier(.2,.7,.2,1), transform .15s, box-shadow .15s; }
+.strip.tvspot .poster { height: 270px; aspect-ratio: auto; transition: transform .15s, box-shadow .15s; }
 .strip.tvspot .poster.open { width: 480px; }
 .tv .strip.tvspot .poster.open.tvf { transform: scale(1.03); }
 .tvs { position: absolute; inset: 0; z-index: 1; border-radius: inherit; overflow: hidden; background: var(--card) center/cover;
