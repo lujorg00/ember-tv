@@ -6,6 +6,7 @@ struct AmbientBackground: View {
     enum Mode { case day, evening, night }
     struct Particle { let x, y, r, s, p: Double }
 
+    @EnvironmentObject var store: Store
     @State private var mode: Mode = .night
     @State private var parts: [Particle] = []
     @State private var flakes: [Particle] = []     // December: light snow over whichever scene is showing
@@ -14,7 +15,9 @@ struct AmbientBackground: View {
         ZStack {
             Theme.bg
             glow
-            TimelineView(.animation(minimumInterval: 1.0 / 30)) { tl in
+            // stopped while something's playing: these pages are still there under the player, and drawing them took
+            // graphics time from the video (steppy playback)
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: store.playing != nil)) { tl in
                 Canvas { ctx, size in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let W = size.width, H = size.height

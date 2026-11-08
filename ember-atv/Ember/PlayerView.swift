@@ -150,7 +150,13 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if controls && now > controlsUntil && !paused { controls = false }
         if intro && now > introUntil { intro = false }
         creditsTick()
+        // once a minute while playing: how smoothly it's going (dropped and late frames), for the log on lucapi
+        ticks += 1
+        if started && !paused && ticks % 60 == 0 {
+            Diag.log("frames: \(String(format: "%.3f", core.double("container-fps")))fps on a \(String(format: "%.2f", core.double("display-fps")))Hz screen, dropped \(core.int("frame-drop-count")) + \(core.int("decoder-frame-drop-count")) decoding, late \(core.int("vo-delayed-frame-count")), mistimed \(core.int("mistimed-frame-count"))")
+        }
     }
+    private var ticks = 0
 
     /// Where the credits start, when the file's chapters say so ("Credits", "End Credits", "Outro"...).
     private func findCreditsChapter() -> Double? {

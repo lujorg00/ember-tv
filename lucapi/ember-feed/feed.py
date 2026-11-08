@@ -3465,16 +3465,32 @@ def smart_search(q):
     if len(q) < 3:
         return {"metas": [], "label": ""}
     def get():
+        note = ""
         if _anthropic_key():
             try:
                 return _smart_ai(q)
+            except urllib.error.HTTPError as e:
+                try:
+                    msg = json.loads(e.read()).get("error", {}).get("message", "")
+                except Exception:
+                    msg = ""
+                print(f"[ember-feed] smart search via Claude failed ({e.code} {msg}), reading it myself", flush=True)
+                if "credit" in msg.lower() or "billing" in msg.lower():
+                    note = "AI search is off: your Anthropic credit has run out. Top it up at platform.claude.com (Billing)."
+                elif e.code in (401, 403):
+                    note = "AI search is off: the Anthropic key was turned down. Make a new key and run anthropic-key.sh on lucapi."
             except Exception as e:
                 print(f"[ember-feed] smart search via Claude failed, reading it myself: {e}", flush=True)
-        return _smart_rules(q)
+        r = _smart_rules(q)
+        return dict(r, aiNote=note) if note else r
     try:
-        return cached(f"smart:{q.lower()}", 6 * 3600, get)
+        r = cached(f"smart:{q.lower()}", 6 * 3600, get)
     except Exception as e:
         return {"metas": [], "label": "", "error": str(e)}
+    if r.get("aiNote"):                  # don't hold on to it: once it's topped up, the next search uses Claude again
+        with _cache_lock:
+            _cache.pop(f"smart:{q.lower()}", None)
+    return r
 
 
 # ---- What to watch: the shuffle. A good pile of well-liked titles you haven't seen, matching the filters,

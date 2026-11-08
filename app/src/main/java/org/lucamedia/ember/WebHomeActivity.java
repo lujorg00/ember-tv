@@ -129,12 +129,14 @@ public class WebHomeActivity extends Activity {
     protected void onResume() {
         super.onResume();
         web.onResume();
-        web.evaluateJavascript("window.emberTvResumed && emberTvResumed()", null);
+        web.evaluateJavascript("window.emberTvResumed && emberTvResumed(); window.emberSky && emberSky.pause(false)", null);
     }
 
     @Override
     protected void onPause() {
-        // keep the page running while the player is up, so it notices when you come back
+        // keep the page running while the player is up, so it notices when you come back - but stop the moving
+        // background, so the Chromecast's graphics are all the video's (it made playback steppy)
+        web.evaluateJavascript("window.emberSky && emberSky.pause(true)", null);
         super.onPause();
     }
 

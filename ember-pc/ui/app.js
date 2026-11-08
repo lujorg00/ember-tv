@@ -1044,7 +1044,12 @@ async function showSearch(q = "") {
       smartSlot.innerHTML = `<div class="smart-wait">Looking for “${esc(term)}”…</div>`;
       getJson(`${feed()}/search/smart?q=${enc}`, 45000).then(r => {
         if (my !== gen) return;
-        if ((r.metas || []).length) smartSlot.replaceWith(row({ name: "✦ " + (r.label || term), kind: r.ai ? "picked by Claude" : "" }, r.metas, "movie"));
+        const note = r.aiNote ? h(`<div class="ai-note">${esc(r.aiNote)}</div>`) : null;
+        if ((r.metas || []).length) {
+          const rw = row({ name: "✦ " + (r.label || term), kind: r.ai ? "picked by Claude" : "" }, r.metas, "movie");
+          smartSlot.replaceWith(rw);
+          if (note) rw.before(note);
+        } else if (note) smartSlot.replaceWith(note);
         else smartSlot.remove();
         if (!s.length && !m.length && !(r.metas || []).length) out.appendChild(h(`<div class="empty">Nothing found for “${esc(term)}”.</div>`));
       }).catch(() => smartSlot.remove());
@@ -1921,6 +1926,7 @@ const sky = (() => {
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
   return { start, pause: (p) => { paused = p; } };
 })();
+window.emberSky = sky; // Ember TV stops the sky while its player is up, so the video gets the whole of the Chromecast
 
 // ---------------------------------------------------------------- full screen (button top right, or F11)
 

@@ -746,3 +746,7 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .tvs .spot-d { font-size: 13.5px; }
 .poster.open .wbadge, .poster.open .bmk, .poster.open .bar { z-index: 2; }
 .poster.open .rel, .poster.open .name { opacity: 0; }
+
+/* AI search turned off (out of credit, or the key turned down): one quiet line above the results */
+.ai-note { margin: 4px 48px 0; padding: 10px 16px; border-radius: 12px; font-size: 14.5px; color: #F0C9A0;
+  background: rgba(240,160,75,.1); border: 1px solid rgba(240,160,75,.25); width: fit-content; max-width: 900px; }

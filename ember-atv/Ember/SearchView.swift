@@ -10,6 +10,7 @@ struct SearchView: View {
     @State private var smart: [Meta] = []          // asking for something: Ember's picks for it
     @State private var smartLabel = ""
     @State private var smartBy = ""
+    @State private var aiNote = ""                 // AI search off: out of credit, or the key turned down
     @State private var asking = false
 
     var body: some View {
@@ -20,6 +21,12 @@ struct SearchView: View {
                 LazyVStack(alignment: .leading, spacing: 30) {
                     if asking && smart.isEmpty {
                         Text("Looking for “\(searched)”…").font(.ember(21)).foregroundStyle(Theme.muted).padding(.horizontal, 90)
+                    }
+                    if !aiNote.isEmpty {
+                        Label(aiNote, systemImage: "exclamationmark.circle").font(.ember(20)).foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 22).padding(.vertical, 12)
+                            .background(Theme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                            .padding(.horizontal, 90)
                     }
                     if !smart.isEmpty { PosterRow(row: RowData(id: "smart", title: "✦ " + smartLabel, kind: smartBy.isEmpty ? nil : smartBy, metas: smart, top: false)) }
                     if !series.isEmpty { PosterRow(row: RowData(id: "s", title: "Series", kind: nil, metas: series, top: false)) }
@@ -37,7 +44,7 @@ struct SearchView: View {
         }
         .task(id: q) {
             let term = q.trimmingCharacters(in: .whitespaces)
-            guard term.count >= 2 else { series = []; films = []; smart = []; searched = ""; asking = false; return }
+            guard term.count >= 2 else { series = []; films = []; smart = []; searched = ""; asking = false; aiNote = ""; return }
             let ask = term.contains(" ")
             try? await Task.sleep(nanoseconds: ask ? 800_000_000 : 400_000_000)   // wait for typing to pause
             if Task.isCancelled { return }
@@ -49,6 +56,7 @@ struct SearchView: View {
             films = rf
             searched = term
             smart = []
+            aiNote = ""
             guard ask else { asking = false; return }
             asking = true
             let r = try? await API.feedGet("/search/smart?q=\(API.q(term))", timeout: 45)
@@ -57,6 +65,7 @@ struct SearchView: View {
             let got = (r?.arr("metas") ?? []).map { Meta($0, type: $0.str("type") ?? "movie") }.filter { !$0.id.isEmpty }
             smartLabel = r?.str("label") ?? term
             smartBy = (r?["ai"] as? Bool) == true ? "picked by Claude" : ""
+            aiNote = r?.str("aiNote") ?? ""
             withAnimation(.easeOut(duration: 0.3)) { smart = got }
         }
     }
