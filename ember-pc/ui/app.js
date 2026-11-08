@@ -1653,11 +1653,16 @@ function showShuffle() {
   const f = (() => { try { return JSON.parse(store.get("shuffle", "{}")) || {}; } catch (e) { return {}; } })();
   f.type = f.type || "both"; f.genres = f.genres || []; f.vibe = SHUF.vibe.some(x => x[0] === f.vibe) ? f.vibe : ""; f.decade = f.decade || "";
   const isOn = (key, k) => key === "genres" ? (k ? f.genres.includes(k) : !f.genres.length) : f[key] === k;
-  const chips = (key, label, list) => `<div class="shuf-row"><span class="shuf-lab">${label}</span><div class="chips shuf-f" data-k="${key}">${list.map(([k, l]) =>
-    `<span class="chip btn-chip ${isOn(key, k) ? "on" : ""}" data-v="${k}">${esc(l)}</span>`).join("")}</div></div>`;
+  // four tidy selectors (what's chosen shows on each); pick one and its options open underneath
+  const FILTERS = [["type", "Watch", SHUF.type], ["vibe", "Vibe", SHUF.vibe], ["genres", "Genre", SHUF.genres], ["decade", "Era", SHUF.decade]];
+  const valueOf = (key, list) => key === "genres"
+    ? (f.genres.length ? f.genres.map(g => (list.find(x => x[0] === g) || [, g])[1]).join(", ") : "Any genre")
+    : (list.find(x => x[0] === f[key]) || list[0])[1];
+  const sel = ([key, label, list]) => `<button class="shuf-sel btn-chip" data-k="${key}"><span>${label}</span><b>${esc(valueOf(key, list))}</b><i></i></button>`;
   v.innerHTML = `<div class="page-h wtw-h"><h1>What shall we watch?</h1>${wtwModes(false)}</div>
     <div class="shuf fade-in">
-      <div class="shuf-panel">${chips("type", "Watch", SHUF.type)}${chips("vibe", "Vibe", SHUF.vibe)}${chips("genres", "Genre", SHUF.genres)}${chips("decade", "Era", SHUF.decade)}</div>
+      <div class="shuf-bar">${FILTERS.map(sel).join("")}</div>
+      <div class="shuf-opts"></div>
       <div class="shuf-stage idle">
         <div class="shuf-bg"></div>
         <div class="shuf-deck"><i></i><i></i><i></i></div>
@@ -1671,15 +1676,34 @@ function showShuffle() {
   const reel = $(".shuf-reel", v), stage = $(".shuf-stage", v), info = $(".shuf-info", v), note = $(".shuf-note", v), btn = $("#shufBtn", v), bg = $(".shuf-bg", v);
   let pile = null, used = 0, spinning = false;
   $("#sfxBtn", v).onclick = (e) => { const on = store.get("sfx", "1") !== "1"; store.set("sfx", on ? "1" : "0"); e.currentTarget.classList.toggle("on", on); };
-  v.querySelectorAll(".shuf-f").forEach(row => row.onclick = (e) => {
-    const c = e.target.closest(".chip"); if (!c) return;
-    const k = row.dataset.k, val = c.dataset.v;
-    if (k === "genres") f.genres = !val ? [] : f.genres.includes(val) ? f.genres.filter(x => x !== val) : [...f.genres, val];
-    else f[k] = val;
-    row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", isOn(k, x.dataset.v)));
-    store.set("shuffle", JSON.stringify(f));
-    pile = null; // new filters: a new pile next time
-  });
+  const opts = $(".shuf-opts", v);
+  let openKey = null;
+  const close = () => { openKey = null; opts.classList.remove("open"); opts.innerHTML = ""; v.querySelectorAll(".shuf-sel").forEach(b => b.classList.remove("open")); };
+  const refreshSel = (key) => { const F = FILTERS.find(x => x[0] === key); $(`.shuf-sel[data-k="${key}"] b`, v).textContent = valueOf(key, F[2]); };
+  const open = (key) => {
+    if (openKey === key) return close();
+    const [, label, list] = FILTERS.find(x => x[0] === key);
+    openKey = key;
+    v.querySelectorAll(".shuf-sel").forEach(b => b.classList.toggle("open", b.dataset.k === key));
+    opts.innerHTML = `<div class="shuf-opt-h">${key === "genres" ? "Pick as many genres as you like" : "Pick a " + label.toLowerCase()}</div>
+      <div class="chips shuf-f">${list.map(([k, l]) => `<span class="chip btn-chip ${isOn(key, k) ? "on" : ""}" data-v="${k}">${esc(l)}</span>`).join("")}
+      ${key === "genres" ? `<span class="chip btn-chip shuf-done">Done</span>` : ""}</div>`;
+    opts.classList.add("open");
+    $(".shuf-f", opts).onclick = (e) => {
+      const c = e.target.closest(".chip"); if (!c) return;
+      if (c.classList.contains("shuf-done")) { close(); if (TV && window.emberTvFocus) window.emberTvFocus($(`.shuf-sel[data-k="${key}"]`, v)); return; }
+      const val = c.dataset.v;
+      if (key === "genres") f.genres = !val ? [] : f.genres.includes(val) ? f.genres.filter(x => x !== val) : [...f.genres, val];
+      else f[key] = val;
+      opts.querySelectorAll(".chip[data-v]").forEach(x => x.classList.toggle("on", isOn(key, x.dataset.v)));
+      store.set("shuffle", JSON.stringify(f));
+      refreshSel(key);
+      pile = null; // new filters: a new pile next time
+      if (key !== "genres") { close(); if (TV && window.emberTvFocus) window.emberTvFocus($(`.shuf-sel[data-k="${key}"]`, v)); }
+    };
+    if (TV && window.emberTvFocus) window.emberTvFocus($(".shuf-f .chip.on", opts) || $(".shuf-f .chip", opts));
+  };
+  v.querySelectorAll(".shuf-sel").forEach(b => b.onclick = () => open(b.dataset.k));
   const big = () => stage.clientWidth < 760;
   const load = async () => {
     const q = new URLSearchParams({ type: f.type, genres: f.genres.join(","), vibe: f.vibe, decade: f.decade });
@@ -1690,6 +1714,7 @@ function showShuffle() {
   };
   const spin = async () => {
     if (spinning) return;
+    close();
     spinning = true; btn.disabled = true; note.textContent = "";
     stage.classList.remove("landed");
     if (!pile || used >= pile.length) {

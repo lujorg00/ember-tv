@@ -69,6 +69,28 @@ private struct ChipBody<L: View>: View {
     }
 }
 
+/// One of the four filter selectors: a soft card, orange-edged while open, white when the remote is on it.
+struct SelectorStyle: ButtonStyle {
+    let open: Bool
+    func makeBody(configuration: Configuration) -> some View { SelectorBody(label: configuration.label, open: open, pressed: configuration.isPressed) }
+}
+
+private struct SelectorBody<L: View>: View {
+    let label: L
+    let open: Bool
+    let pressed: Bool
+    @Environment(\.isFocused) private var focused
+    var body: some View {
+        label
+            .foregroundStyle(focused ? Theme.ink : .white)
+            .background(RoundedRectangle(cornerRadius: 20).fill(focused ? Color.white : open ? Theme.accent.opacity(0.16) : Color.white.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(open && !focused ? Theme.accent.opacity(0.6) : .white.opacity(0.08), lineWidth: open ? 2 : 1))
+            .scaleEffect(pressed ? 0.97 : focused ? 1.04 : 1)
+            .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 12, y: 6)
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
 // MARK: - sounds
 
 /// Little sounds, made on the spot: the reel ticking past (slowing with it), a chime when it lands, a ding for a match.
@@ -210,15 +232,26 @@ struct ShuffleBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
-            VStack(alignment: .leading, spacing: 4) {
-                chipRow("WATCH", Self.types, selected: { $0 == type }) { k in type = k; fresh() }
-                chipRow("VIBE", Self.vibes, selected: { $0 == vibe }) { k in vibe = k; fresh() }
-                chipRow("GENRE", Self.genreList, selected: { k in k.isEmpty ? genres.isEmpty : genreSet.contains(k) }) { k in toggleGenre(k) }
-                chipRow("ERA", Self.decades, selected: { $0 == decade }) { k in decade = k; fresh() }
+            // four tidy selectors showing what's chosen; pick one and its options open underneath
+            HStack(spacing: 24) {
+                selector("watch", "WATCH", name(Self.types, type))
+                selector("vibe", "VIBE", name(Self.vibes, vibe))
+                selector("genre", "GENRE", genres.isEmpty ? "Any genre" : genreSet.map { g in name(Self.genreList, g) }.joined(separator: ", "))
+                selector("era", "ERA", name(Self.decades, decade))
             }
-            .padding(.vertical, 14).padding(.horizontal, 24)
-            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 26))
-            .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.06)))
+            if let o = open {
+                Group {
+                    switch o {
+                    case "watch": chipRow(Self.types, selected: { $0 == type }) { k in type = k; fresh(); close() }
+                    case "vibe": chipRow(Self.vibes, selected: { $0 == vibe }) { k in vibe = k; fresh(); close() }
+                    case "genre": chipRow(Self.genreList, selected: { k in k.isEmpty ? genres.isEmpty : genreSet.contains(k) }, done: true) { k in toggleGenre(k) }
+                    default: chipRow(Self.decades, selected: { $0 == decade }) { k in decade = k; fresh(); close() }
+                    }
+                }
+                .padding(.vertical, 10).padding(.horizontal, 18)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 22))
+                .transition(.opacity.combined(with: .offset(y: -10)))
+            }
 
             stage.id("stage")
 
@@ -241,21 +274,51 @@ struct ShuffleBody: View {
 
     // MARK: filters
 
-    private func chipRow(_ label: String, _ list: [(String, String)], selected: @escaping (String) -> Bool,
-                         tap: @escaping (String) -> Void) -> some View {
-        HStack(alignment: .center, spacing: 18) {
-            Text(label).font(.ember(16, .bold)).tracking(2).foregroundStyle(Theme.muted).frame(width: 96, alignment: .leading)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(list.indices, id: \.self) { i in
-                        Button { tap(list[i].0) } label: { Text(list[i].1) }
-                            .buttonStyle(ChipStyle(on: selected(list[i].0)))
-                    }
+    @State private var open: String?
+    @FocusState private var focusSel: String?
+
+    private func name(_ list: [(String, String)], _ k: String) -> String { list.first { $0.0 == k }?.1 ?? list[0].1 }
+
+    private func close() {
+        let o = open
+        withAnimation(.easeOut(duration: 0.2)) { open = nil }
+        focusSel = o
+    }
+
+    private func selector(_ id: String, _ label: String, _ value: String) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { open = open == id ? nil : id }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label).font(.ember(15, .bold)).tracking(2).opacity(0.65)
+                    Text(value).font(.ember(23, .semibold)).lineLimit(1)
                 }
-                .padding(.vertical, 8).padding(.horizontal, 6)
+                Spacer(minLength: 8)
+                Image(systemName: open == id ? "chevron.up" : "chevron.down").font(.system(size: 18, weight: .semibold)).opacity(0.6)
             }
-            .scrollClipDisabled()
+            .padding(.horizontal, 24).padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(SelectorStyle(open: open == id))
+        .focused($focusSel, equals: id)
+    }
+
+    private func chipRow(_ list: [(String, String)], selected: @escaping (String) -> Bool, done: Bool = false,
+                         tap: @escaping (String) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(list.indices, id: \.self) { i in
+                    Button { tap(list[i].0) } label: { Text(list[i].1) }
+                        .buttonStyle(ChipStyle(on: selected(list[i].0)))
+                }
+                if done {
+                    Button { close() } label: { Label("Done", systemImage: "checkmark") }.buttonStyle(ChipStyle(on: false))
+                }
+            }
+            .padding(.vertical, 8).padding(.horizontal, 6)
+        }
+        .scrollClipDisabled()
     }
 
     private func toggleGenre(_ k: String) {
@@ -338,6 +401,7 @@ struct ShuffleBody: View {
 
     private func spin() async {
         guard !spinning else { return }
+        open = nil
         spinning = true
         note = ""
         withAnimation(.easeOut(duration: 0.25)) { landed = false }
