@@ -696,38 +696,62 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .smart-wait { margin: 6px 48px 18px; font-size: 15px; color: var(--faint); animation: glIn .4s ease; }
 
 /* ---------------------------------------------------------------- what to watch: the shuffle */
-.wtw-modes { margin: 10px 0 4px; }
-.wtw-modes .chip { font-size: 15px; padding: 6px 16px; cursor: pointer; }
-.wtw-modes .chip.on, .shuf-f .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
-.shuf { padding: 6px 48px 60px; display: flex; flex-direction: column; gap: 18px; }
-.shuf-filters { display: flex; flex-direction: column; gap: 10px; }
-.shuf-f .chip { cursor: pointer; font-size: 14.5px; padding: 5px 13px; transition: background .15s, color .15s; }
+.wtw-h { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.wtw-h .muted { flex-basis: 100%; }
+.wtw-modes.seg { display: inline-flex; gap: 0; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }
+.wtw-modes.seg .chip { border: 0; background: transparent; font-size: 14.5px; padding: 7px 18px; cursor: pointer; color: var(--muted); }
+.wtw-modes.seg .chip.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.shuf { padding: 4px 48px 50px; display: flex; flex-direction: column; gap: 18px; }
+.shuf-panel { display: grid; gap: 10px; padding: 16px 20px; border-radius: 18px; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06); }
+.shuf-row { display: grid; grid-template-columns: 74px 1fr; align-items: start; gap: 12px; }
+.shuf-lab { padding-top: 7px; font-size: 12.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.shuf-f { flex-wrap: wrap; gap: 7px; }
+.shuf-f .chip { cursor: pointer; font-size: 14px; padding: 5px 13px; transition: background .15s, color .15s, border-color .15s; }
 .shuf-f .chip:hover { border-color: rgba(240,160,75,.5); }
-.shuf-go { display: flex; align-items: center; gap: 16px; }
-.shuf-go .btn { min-width: 180px; }
-.shuf-stage { position: relative; height: 260px; overflow: hidden; border-radius: 16px;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
-.shuf-reel { position: absolute; left: 0; top: 18px; display: flex; gap: 16px; will-change: transform; }
-.shuf-p { flex: none; width: 150px; height: 225px; border-radius: 10px; background: #1d150f center/cover; box-shadow: 0 10px 24px rgba(0,0,0,.45);
-  transition: transform .45s cubic-bezier(.2,.9,.3,1.3), box-shadow .45s, filter .45s; }
-.tv .shuf-p { width: 176px; height: 220px; }
-.tv .shuf-stage { height: 256px; }
-.shuf-stage.spinning .shuf-p { filter: brightness(.8); }
-.shuf-p.won { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent), 0 0 46px rgba(240,160,75,.55); }
-.shuf-frame { position: absolute; left: 50%; top: 6px; bottom: 6px; width: 3px; margin-left: -1.5px; border-radius: 2px;
-  background: linear-gradient(transparent, rgba(240,160,75,.85) 15%, rgba(240,160,75,.85) 85%, transparent); opacity: .0; transition: opacity .3s; }
-.shuf-stage.spinning .shuf-frame { opacity: .9; }
-.shuf-pick { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
-.shuf-pick.on { opacity: 1; transform: none; }
-.shuf-card { position: relative; border-radius: 18px; overflow: hidden; min-height: 300px; background: #1d150f center/cover; display: flex; }
-.shuf-card::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14,11,9,.96) 0%, rgba(14,11,9,.82) 42%, rgba(14,11,9,.2) 100%); }
-.shuf-in { position: relative; padding: 34px 40px; max-width: 640px; display: flex; flex-direction: column; gap: 12px; justify-content: flex-end; }
-.shuf-in .ttl { min-height: 60px; display: flex; align-items: flex-end; }
-.shuf-in .ttl-logo { max-height: 110px; max-width: 420px; object-fit: contain; object-position: left bottom; }
-.shuf-in .ttl-name { font-size: 38px; font-weight: 700; line-height: 1.1; }
+.shuf-f .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+
+.shuf-stage { position: relative; height: 410px; overflow: hidden; border-radius: 22px; background: rgba(0,0,0,.18); }
+.shuf-bg { position: absolute; inset: 0; background: center/cover; opacity: 0; transform: scale(1.04); transition: opacity .9s ease, transform 6s ease; }
+.shuf-bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14,11,9,.55) 0%, rgba(14,11,9,.35) 40%, rgba(14,11,9,.92) 62%, rgba(14,11,9,.96) 100%); }
+.shuf-stage.landed .shuf-bg { opacity: .55; transform: scale(1); }
+.shuf-reel { position: absolute; left: 0; top: 50%; margin-top: -135px; display: flex; gap: 18px; will-change: transform; }
+.shuf-p { flex: none; width: 180px; height: 270px; border-radius: 12px; background: #1d150f center/cover; box-shadow: 0 12px 28px rgba(0,0,0,.5);
+  transition: transform .55s cubic-bezier(.2,.9,.3,1.25), box-shadow .55s, opacity .5s, filter .5s; }
+.shuf-stage.spinning .shuf-p { filter: brightness(.85); }
+.shuf-stage::before, .shuf-stage::after { content: ""; position: absolute; top: 0; bottom: 0; width: 14%; z-index: 2; pointer-events: none; }
+.shuf-stage::before { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
+.shuf-stage::after { right: 0; background: linear-gradient(-90deg, var(--bg), transparent); }
+.shuf-stage.landed .shuf-p { opacity: .0; }
+.shuf-stage.landed .shuf-p.won { opacity: 1; transform: scale(1.3); z-index: 3; box-shadow: 0 0 0 3px var(--accent), 0 0 60px rgba(240,160,75,.5), 0 24px 50px rgba(0,0,0,.7); }
+/* before the first shuffle: a little fanned deck in the middle */
+.shuf-deck { position: absolute; left: 50%; top: 50%; width: 180px; height: 270px; margin: -135px 0 0 -90px; transition: opacity .3s; }
+.shuf-deck i { position: absolute; inset: 0; border-radius: 12px; background: linear-gradient(160deg, #3a2615, #1d140d); border: 1px solid rgba(240,160,75,.35);
+  box-shadow: 0 16px 34px rgba(0,0,0,.55); }
+.shuf-deck i::after { content: "?"; position: absolute; inset: 0; display: grid; place-items: center; font: 800 64px/1 "Segoe UI", sans-serif; color: rgba(240,160,75,.55); }
+.shuf-deck i:nth-child(1) { transform: rotate(-9deg) translateX(-34px); opacity: .6; }
+.shuf-deck i:nth-child(2) { transform: rotate(8deg) translateX(34px); opacity: .75; }
+.shuf-stage:not(.idle) .shuf-deck { opacity: 0; }
+/* the details, beside the pick */
+.shuf-info { position: absolute; z-index: 4; left: calc(50% + 150px); right: 7%; top: 50%; transform: translate(18px, -50%); opacity: 0;
+  display: flex; flex-direction: column; gap: 10px; transition: opacity .5s ease .25s, transform .5s ease .25s; pointer-events: none; }
+.shuf-stage.landed .shuf-info { opacity: 1; transform: translate(0, -50%); pointer-events: auto; }
+.shuf-info .ttl { min-height: 50px; display: flex; align-items: flex-end; }
+.shuf-info .ttl-logo { max-height: 96px; max-width: 360px; object-fit: contain; object-position: left bottom; }
+.shuf-info .ttl-name { font-size: 34px; font-weight: 700; line-height: 1.1; }
 .shuf-m { color: #E6D6C4; font-size: 15px; }
-.shuf-d { color: var(--muted); font-size: 15px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.shuf-in .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.shuf-d { color: var(--muted); font-size: 14.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.shuf-info .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.shuf-go { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.shuf-go .btn { min-width: 220px; }
+.shuf-snd { cursor: pointer; font-size: 13.5px; }
+.shuf-snd.on { background: transparent; border-color: rgba(240,160,75,.6); color: #F0C9A0; font-weight: 500; }
+.tv .shuf-stage { height: 380px; }
+.tv .shuf-p, .tv .shuf-deck { width: 160px; height: 240px; }
+.tv .shuf-reel { margin-top: -120px; }
+.tv .shuf-deck { margin: -120px 0 0 -80px; }
+.tv .shuf-stage.landed .shuf-p.won { transform: scale(1.32); }
+.tv .shuf-info { left: calc(50% + 135px); }
+.tv .shuf-bg { transition: opacity .6s; transform: none; }
 
 /* ---- Ember TV: the poster the remote rests on opens out into the large card, in place (as on Apple TV) */
 .strip.tvspot .poster { height: 270px; aspect-ratio: auto; transition: width .24s cubic-bezier(.2,.7,.2,1), transform .15s, box-shadow .15s; }

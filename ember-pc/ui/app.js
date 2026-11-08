@@ -1588,100 +1588,165 @@ let matchPoll = 0;
 // ---------------------------------------------------------------- what to watch: the shuffle
 const SHUF = {
   type: [["both", "Films & series"], ["movie", "Films"], ["series", "Series"]],
-  vibe: [["", "Any vibe"], ["feelgood", "Feel-good"], ["laugh", "Laugh"], ["edge", "Edge of your seat"], ["mindbending", "Mind-bending"],
-         ["cosy", "Cosy"], ["dark", "Dark"], ["epic", "Epic"], ["tearjerker", "Tearjerker"]],
+  vibe: [["", "Any vibe"], ["feelgood", "Feel-good"], ["laugh", "Make me laugh"], ["easy", "Easy watching"], ["cosy", "Cosy"],
+         ["romantic", "Romantic"], ["family", "Family night"], ["edge", "Edge of your seat"], ["adrenaline", "Adrenaline"],
+         ["scary", "Scare me"], ["dark", "Dark"], ["mindbending", "Mind-bending"], ["thoughtful", "Thought-provoking"],
+         ["weird", "Weird & wonderful"], ["epic", "Epic"], ["inspiring", "Inspiring"], ["tearjerker", "Tearjerker"],
+         ["nostalgic", "Nostalgic"], ["quick", "Short & sweet"]],
   genres: [["", "Any genre"], ["action", "Action"], ["comedy", "Comedy"], ["drama", "Drama"], ["scifi", "Sci-Fi"], ["thriller", "Thriller"], ["horror", "Horror"],
            ["crime", "Crime"], ["romance", "Romance"], ["animation", "Animation"], ["documentary", "Documentary"], ["fantasy", "Fantasy"], ["mystery", "Mystery"]],
   decade: [["", "Any time"], ["2020", "2020s"], ["2010", "2010s"], ["2000", "2000s"], ["1990", "90s"], ["1980", "80s"], ["older", "Older"]],
 };
+
+/** Little sounds, made on the spot (no files): the reel ticking past, a chime when it lands, a ding for a match. */
+const sfx = (() => {
+  let ac = null;
+  const on = () => store.get("sfx", "1") === "1";
+  const ctx = () => { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === "suspended") ac.resume(); } catch (e) {} return ac; };
+  const tone = (c, t, f, f2, len, vol, type) => {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + len * 0.6);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + len + 0.02);
+  };
+  const bell = (c, t, f, vol) => { tone(c, t, f, 0, 1.4, vol, "sine"); tone(c, t, f * 2.01, 0, 0.7, vol * 0.35, "sine"); tone(c, t, f * 3.02, 0, 0.35, vol * 0.12, "sine"); };
+  return {
+    /** clicks at these times (seconds from now), like a wheel slowing down */
+    ticks(times) { const c = on() && ctx(); if (!c) return; const t0 = c.currentTime + 0.03;
+      times.forEach((t, i) => tone(c, t0 + t, 2200 - Math.min(i, 30) * 25, 1100, 0.05, 0.11, "triangle")); },
+    land() { const c = on() && ctx(); if (!c) return; const t = c.currentTime + 0.02; bell(c, t, 784, 0.16); bell(c, t + 0.11, 1175, 0.14); },
+    ding() { const c = on() && ctx(); if (!c) return; const t = c.currentTime + 0.02; bell(c, t, 1047, 0.2); bell(c, t + 0.16, 1568, 0.16); },
+  };
+})();
+
+/** When each poster passes the middle, for the reel's ease-out curve (so the ticks slow down with it). */
+function reelTicks(n, dur, x1, y1, x2, y2) {
+  const bz = (u, a, b) => 3 * a * u * (1 - u) * (1 - u) + 3 * b * u * u * (1 - u) + u * u * u;
+  const out = []; let j = 1, last = -1;
+  for (let u = 0; u <= 1 && j <= n; u += 0.0005) {
+    while (j <= n && bz(u, y1, y2) >= (j - 0.5) / n) {
+      const t = bz(u, x1, x2) * dur;
+      if (t - last > 0.045) { out.push(t); last = t; }
+      j++;
+    }
+  }
+  return out;
+}
+
+function wtwModes(swipe) {
+  return `<div class="wtw-modes seg"><span class="chip btn-chip ${swipe ? "" : "on"}" data-mode="shuffle">Shuffle</span><span class="chip btn-chip ${swipe ? "on" : ""}" data-mode="swipe">Swipe together</span></div>`;
+}
+function wireModes(v, swipe) {
+  v.querySelectorAll(".wtw-modes .chip").forEach(c => c.onclick = () => {
+    const want = c.dataset.mode === "swipe";
+    if (want === swipe) return;
+    want ? showMatch(true) : showShuffle();
+    // stay on the switch (the remote must not lose its place and fall back to the menu)
+    const again = $(`.wtw-modes .chip[data-mode="${c.dataset.mode}"]`);
+    if (TV && again && window.emberTvFocus) window.emberTvFocus(again);
+  });
+}
+
 function showShuffle() {
   clearInterval(matchPoll);
   const v = $("#view");
   const f = (() => { try { return JSON.parse(store.get("shuffle", "{}")) || {}; } catch (e) { return {}; } })();
-  f.type = f.type || "both"; f.genres = f.genres || []; f.vibe = f.vibe || ""; f.decade = f.decade || "";
-  const chips = (key, list, multi) => `<div class="chips shuf-f" data-k="${key}">${list.map(([k, l]) =>
-    `<span class="chip btn-chip ${(multi ? (k ? f[key].includes(k) : !f[key].length) : f[key] === k) ? "on" : ""}" data-v="${k}">${esc(l)}</span>`).join("")}</div>`;
-  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
-      <div class="chips wtw-modes"><span class="chip btn-chip on">Shuffle</span><span class="chip btn-chip" id="toSwipe">Swipe together</span></div></div>
+  f.type = f.type || "both"; f.genres = f.genres || []; f.vibe = SHUF.vibe.some(x => x[0] === f.vibe) ? f.vibe : ""; f.decade = f.decade || "";
+  const isOn = (key, k) => key === "genres" ? (k ? f.genres.includes(k) : !f.genres.length) : f[key] === k;
+  const chips = (key, label, list) => `<div class="shuf-row"><span class="shuf-lab">${label}</span><div class="chips shuf-f" data-k="${key}">${list.map(([k, l]) =>
+    `<span class="chip btn-chip ${isOn(key, k) ? "on" : ""}" data-v="${k}">${esc(l)}</span>`).join("")}</div></div>`;
+  v.innerHTML = `<div class="page-h wtw-h"><h1>What shall we watch?</h1>${wtwModes(false)}</div>
     <div class="shuf fade-in">
-      <div class="shuf-filters">${chips("type", SHUF.type)}${chips("vibe", SHUF.vibe)}${chips("genres", SHUF.genres, true)}${chips("decade", SHUF.decade)}</div>
-      <div class="shuf-go"><button class="btn primary big" id="shufBtn">Shuffle</button><span class="muted shuf-note"></span></div>
-      <div class="shuf-stage"><div class="shuf-reel"></div><div class="shuf-frame"></div></div>
-      <div class="shuf-pick"></div>
+      <div class="shuf-panel">${chips("type", "Watch", SHUF.type)}${chips("vibe", "Vibe", SHUF.vibe)}${chips("genres", "Genre", SHUF.genres)}${chips("decade", "Era", SHUF.decade)}</div>
+      <div class="shuf-stage idle">
+        <div class="shuf-bg"></div>
+        <div class="shuf-deck"><i></i><i></i><i></i></div>
+        <div class="shuf-reel"></div>
+        <div class="shuf-info"></div>
+      </div>
+      <div class="shuf-go"><button class="btn primary big" id="shufBtn">Shuffle</button>
+        <span class="chip btn-chip shuf-snd ${store.get("sfx", "1") === "1" ? "on" : ""}" id="sfxBtn">Sound</span><span class="muted shuf-note"></span></div>
     </div>`;
-  $("#toSwipe", v).onclick = () => showMatch(true);
+  wireModes(v, false);
+  const reel = $(".shuf-reel", v), stage = $(".shuf-stage", v), info = $(".shuf-info", v), note = $(".shuf-note", v), btn = $("#shufBtn", v), bg = $(".shuf-bg", v);
+  let pile = null, used = 0, spinning = false;
+  $("#sfxBtn", v).onclick = (e) => { const on = store.get("sfx", "1") !== "1"; store.set("sfx", on ? "1" : "0"); e.currentTarget.classList.toggle("on", on); };
   v.querySelectorAll(".shuf-f").forEach(row => row.onclick = (e) => {
     const c = e.target.closest(".chip"); if (!c) return;
     const k = row.dataset.k, val = c.dataset.v;
-    if (k === "genres") {
-      f.genres = !val ? [] : f.genres.includes(val) ? f.genres.filter(x => x !== val) : [...f.genres, val];
-      row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.dataset.v ? f.genres.includes(x.dataset.v) : !f.genres.length));
-    }
-    else { f[k] = val; row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c)); }
+    if (k === "genres") f.genres = !val ? [] : f.genres.includes(val) ? f.genres.filter(x => x !== val) : [...f.genres, val];
+    else f[k] = val;
+    row.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", isOn(k, x.dataset.v)));
     store.set("shuffle", JSON.stringify(f));
     pile = null; // new filters: a new pile next time
   });
-  const reel = $(".shuf-reel", v), stage = $(".shuf-stage", v), pickBox = $(".shuf-pick", v), note = $(".shuf-note", v), btn = $("#shufBtn", v);
-  let pile = null, used = 0, spinning = false;
-  const W = TV ? 176 : 150, GAP = 16;
+  const big = () => stage.clientWidth < 760;
   const load = async () => {
     const q = new URLSearchParams({ type: f.type, genres: f.genres.join(","), vibe: f.vibe, decade: f.decade });
     const r = await getJson(`${feed()}/shuffle?${q}`, 45000);
     pile = (r.metas || []).filter(m => m.poster);
     used = 0;
-    pile.slice(0, 30).forEach(m => { new Image().src = m.poster; });
+    pile.slice(0, 36).forEach(m => { new Image().src = m.poster; });
   };
   const spin = async () => {
     if (spinning) return;
-    spinning = true; btn.disabled = true; note.textContent = ""; pickBox.innerHTML = ""; pickBox.classList.remove("on");
-    try { if (!pile || used >= pile.length) await load(); } catch (e) { note.textContent = "Couldn't reach lucapi: " + e.message; spinning = false; btn.disabled = false; return; }
+    spinning = true; btn.disabled = true; note.textContent = "";
+    stage.classList.remove("landed");
+    if (!pile || used >= pile.length) {
+      note.textContent = "Shuffling the deck…";
+      try { await load(); } catch (e) { note.textContent = "Couldn't reach lucapi: " + e.message; spinning = false; btn.disabled = false; return; }
+      note.textContent = "";
+    }
     if (!pile.length) { note.textContent = "Nothing matches all of those. Try fewer filters."; spinning = false; btn.disabled = false; return; }
     const pick = pile[used++];
-    // the reel: a long run of the others, the pick near the end; it whizzes past and slows to a stop on it
-    const others = pile.filter(m => m !== pick);
-    const mix = others.slice().sort(() => Math.random() - 0.5);
+    const mix = pile.filter(m => m !== pick).sort(() => Math.random() - 0.5);
     const run = []; for (let i = 0; i < 34; i++) run.push(mix.length ? mix[i % mix.length] : pick);
-    const at = run.length; run.push(pick, ...others.slice(0, 4));
+    const at = run.length; run.push(pick, ...mix.slice(0, 5));
+    stage.classList.remove("idle");
+    info.innerHTML = "";
     reel.style.transition = "none";
     reel.innerHTML = run.map(m => `<div class="shuf-p" style="background-image:url('${esc(m.poster)}')"></div>`).join("");
+    const W = reel.firstElementChild.offsetWidth, GAP = parseFloat(getComputedStyle(reel).gap) || 18;
     const mid = stage.clientWidth / 2 - W / 2;
     reel.style.transform = `translateX(${mid - 2 * (W + GAP)}px)`;
     void reel.offsetWidth;
     stage.classList.add("spinning");
-    reel.style.transition = `transform ${TV ? 3.2 : 3.6}s cubic-bezier(.12,.72,.14,1)`;
+    const dur = TV ? 3.4 : 3.8;
+    reel.style.transition = `transform ${dur}s cubic-bezier(.12,.72,.14,1)`;
     reel.style.transform = `translateX(${mid - at * (W + GAP)}px)`;
-    await new Promise(r => setTimeout(r, TV ? 3250 : 3650));
+    sfx.ticks(reelTicks(at - 2, dur, 0.12, 0.72, 0.14, 1));
+    await new Promise(r => setTimeout(r, dur * 1000 + 60));
     stage.classList.remove("spinning");
     reel.children[at].classList.add("won");
-    // the pick, large
-    pickBox.innerHTML = `<div class="shuf-card" style="background-image:url('${esc(pick.background || pick.poster)}')">
-      <div class="shuf-in"><div class="shuf-t"></div><div class="shuf-m">${esc([pick.type === "series" ? "Series" : "Film", pick.releaseInfo, pick.imdbRating && "★ " + pick.imdbRating].filter(Boolean).join("  ·  "))}</div>
+    sfx.land();
+    // the pick, front and centre: the others fade back, its picture fills the stage, the details sit beside it
+    bg.style.backgroundImage = `url('${esc(pick.background || pick.poster)}')`;
+    info.innerHTML = `<div class="shuf-t"></div>
+      <div class="shuf-m">${esc([pick.type === "series" ? "Series" : "Film", pick.releaseInfo, pick.imdbRating && "★ " + pick.imdbRating].filter(Boolean).join("  ·  "))}</div>
       <div class="shuf-d">${esc(pick.description || "")}</div>
-      <div class="btns"><button class="btn primary">${PLAY}Watch</button><button class="btn">Details</button><button class="btn" id="again2">Not this one</button></div></div></div>`;
-    $(".shuf-t", pickBox).replaceWith(titleArt(pick, pick.type));
-    const [w, d, again] = pickBox.querySelectorAll("button");
+      <div class="btns"><button class="btn primary">${PLAY}Watch</button><button class="btn">Details</button></div>`;
+    $(".shuf-t", info).replaceWith(titleArt(pick, pick.type));
+    const [w, d] = info.querySelectorAll("button");
     w.onclick = () => go("title", pick.type, pick.id, pick, { autoplay: true });
     d.onclick = () => go("title", pick.type, pick.id, pick);
-    again.onclick = spin;
-    requestAnimationFrame(() => pickBox.classList.add("on"));
+    requestAnimationFrame(() => stage.classList.add("landed"));
     spinning = false; btn.disabled = false; btn.textContent = "Shuffle again";
     if (TV && window.emberTvFocus) window.emberTvFocus(w);
   };
   btn.onclick = spin;
+  if (TV && window.emberTvFocus) window.emberTvFocus($(".wtw-modes .chip.on", v));
 }
 
 async function showMatch(swipe) {
   if (swipe !== true) return showShuffle();
   clearInterval(matchPoll);
   const v = $("#view");
-  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
-      <div class="chips wtw-modes"><span class="chip btn-chip" id="toShuffle">Shuffle</span><span class="chip btn-chip on">Swipe together</span></div></div><div class="empty">Shuffling the deck…</div>`;
-  $("#toShuffle", v).onclick = showShuffle;
+  v.innerHTML = `<div class="page-h wtw-h"><h1>What shall we watch?</h1>${wtwModes(true)}</div><div class="empty">Shuffling the deck…</div>`;
+  wireModes(v, true);
   let m;
   try { m = await (await fetch(`${feed()}/match/new`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); }
   catch (e) { $(".empty", v).textContent = "Couldn't reach lucapi: " + e.message; return; }
-  v.innerHTML = `<div class="page-h"><h1>What shall we watch?</h1>
-      <div class="chips wtw-modes"><span class="chip btn-chip" id="toShuffle">Shuffle</span><span class="chip btn-chip on">Swipe together</span></div>
+  v.innerHTML = `<div class="page-h wtw-h"><h1>What shall we watch?</h1>${wtwModes(true)}
       <div class="muted">Everyone swipes on their phone. Anything you all like appears here.</div></div>
     <div class="match fade-in">
       <div class="card2 qr"><img src="${feed()}/match/${m.code}/qr.png" alt="QR code" onerror="this.remove()">
@@ -1691,7 +1756,7 @@ async function showMatch(swipe) {
       <div class="matches"><h3>Matches</h3><div class="grid tight"><div class="muted">None yet. Needs at least two people.</div></div></div>
     </div>`;
   $("#again", v).onclick = () => showMatch(true);
-  $("#toShuffle", v).onclick = showShuffle;
+  wireModes(v, true);
   let shown = "";
   const tick = async () => {
     if (!document.body.contains($(".match", v))) return clearInterval(matchPoll);
@@ -1703,7 +1768,7 @@ async function showMatch(swipe) {
     const g = $(".matches .grid", v); g.innerHTML = "";
     if (!st.matches.length) g.innerHTML = `<div class="muted">None yet${st.people.length < 2 ? ". Needs at least two people." : "."}</div>`;
     st.matches.forEach(x => g.appendChild(card({ ...x }, x.type)));
-    if (st.matches.length) toast(`It's a match: ${st.matches[st.matches.length - 1].name}`);
+    if (st.matches.length) { toast(`It's a match: ${st.matches[st.matches.length - 1].name}`); sfx.ding(); }
   };
   tick(); matchPoll = setInterval(tick, 2000);
 }

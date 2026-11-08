@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// "What shall we watch?": everyone swipes on their phone (scan the code); whatever you all like shows up here.
-struct MatchView: View {
+/// (Part of the What to watch page, below its Shuffle | Swipe together switch.)
+struct MatchBody: View {
     @EnvironmentObject var store: Store
-    var toShuffle: () -> Void = {}
     @State private var code = ""
     @State private var people: [(String, Int)] = []
     @State private var deck = 0
@@ -12,14 +12,8 @@ struct MatchView: View {
     @State private var round = 0
 
     var body: some View {
-        NavigationStack {
-          ZStack {
-            AmbientBackground()
-            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 34) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("What shall we watch?").font(.ember(52, .bold))
-                        WTWModes(swipe: true, other: toShuffle).padding(.bottom, 6)
                         Text("Everyone swipes on their phone. Anything you all like appears here.").font(.ember(22)).foregroundStyle(Theme.muted)
                     }
                     HStack(alignment: .top, spacing: 60) {
@@ -61,12 +55,6 @@ struct MatchView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 90).padding(.top, 50).padding(.bottom, 80)
-            }
-            .scrollClipDisabled()
-          }
-            .navigationDestination(for: Meta.self) { m in DetailView(meta: m) }
-        }
         .task(id: round) {
             if code.isEmpty { await start() }
             var shown = ""
@@ -77,7 +65,7 @@ struct MatchView: View {
                     let ms = st.arr("matches").map { Meta($0, type: $0.str("type") ?? "movie") }
                     let key = ms.map(\.id).joined(separator: ",")
                     if key != shown {
-                        if ms.count > matches.count, let last = ms.last { store.say("It's a match: \(last.name)") }
+                        if ms.count > matches.count, let last = ms.last { store.say("It's a match: \(last.name)"); Sfx.shared.ding() }
                         matches = ms
                         shown = key
                     }

@@ -36,6 +36,7 @@ Config lives in config.json next to this file (see config.example.json).
 Needs: python3 -m pip install icalendar recurring-ical-events
 """
 import hashlib
+import io
 import json
 import os
 import random
@@ -3385,10 +3386,24 @@ def _smart_ai(q):
                   "with up to 30 real, well-matched titles, best matches first.",
         "messages": [{"role": "user", "content": q}],
     }).encode()
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
-        "x-api-key": _anthropic_key(), "anthropic-version": "2023-06-01", "content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=40) as r:
-        text = "".join(c.get("text", "") for c in json.loads(r.read()).get("content", []))
+    # The Console's own example now sends the 2026-10-21 version (its new sk-ant-usr- keys may need it); the older one
+    # is tried if that's turned down
+    resp = None
+    for ver in (CFG.get("anthropic_version") or "2026-10-21", "2023-06-01"):
+        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST", headers={
+            "x-api-key": _anthropic_key(), "anthropic-version": ver, "content-type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                resp = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            if e.code == 400 and b"version" in raw.lower() and ver != "2023-06-01":
+                print(f"[ember-feed] Claude turned down API version {ver}, trying the older one", flush=True)
+                continue
+            raise urllib.error.HTTPError(e.url, e.code, e.msg, e.headers, io.BytesIO(raw))
+    content = resp.get("content", []) if isinstance(resp, dict) else []
+    text = "".join(c.get("text", "") for c in content if isinstance(c, dict))
     j = json.loads(text[text.find("{"): text.rfind("}") + 1])
 
     def find(it):
@@ -3509,6 +3524,23 @@ _VIBES = {  # name -> (movie: with (any of), without), (tv: with, without)
     "dark": (("80|53|27", "10751,16,35"), ("80|9648", "35,10751,16")),
     "epic": (("12|14|36|10752", "35"), ("10765|10768|10759", "35")),
     "tearjerker": (("18,10749", "27,28"), ("18", "35")),
+    "scary": (("27", "35,10751,16"), ("9648|10765", "35,10751,16")),
+    "romantic": (("10749", "27,53,80"), ("18", "80,10765,10759,99")),
+    "adrenaline": (("28", "10751,16,99"), ("10759", "35,10751")),
+    "thoughtful": (("18|878|99", "28,35,10751,16"), ("18|99", "35,10751,16")),
+    "easy": (("35|10751|10402|10749", "27,53,80,10752"), ("35|10764", "80,18,10768")),
+    "family": (("10751|16", "27,53,80"), ("10751|16|10762", "80,10768")),
+    "inspiring": (("18|36|99", "27,53,80"), ("99|18", "27,80")),
+    "weird": (("14|878", "10751,10749"), ("10765", "10751")),
+    "nostalgic": (("35|12|10751|14|878", "27"), ("35|10759|10751", "80")),
+    "quick": (("35|53|27|28", ""), ("35", "")),
+}
+# a few vibes also need more than genres (a decade you pick still wins)
+_VIBE_EXTRA = {
+    "nostalgic": ({"primary_release_date.gte": "1980-01-01", "primary_release_date.lte": "2004-12-31"},
+                  {"first_air_date.gte": "1985-01-01", "first_air_date.lte": "2006-12-31"}),
+    "quick": ({"with_runtime.lte": 95, "with_runtime.gte": 70}, {"with_runtime.lte": 32}),
+    "weird": ({"vote_count.gte": 150}, {}),
 }
 
 
@@ -3535,11 +3567,15 @@ def shuffle_pick(typ="both", genres="", decade="", vibe=""):
             wo = [x for x in v[0 if k == "movie" else 1][1].split(",") if x not in mine]
             if wo:
                 p["without_genres"] = ",".join(wo)
+        if vibe in _VIBE_EXTRA:
+            p.update(_VIBE_EXTRA[vibe][0 if k == "movie" else 1])
         if re.fullmatch(r"(19|20)\d0", decade or ""):
+            p = {a: b for a, b in p.items() if "_date" not in a}
             y = int(decade)
             a, b = ("primary_release_date", "primary_release_date") if k == "movie" else ("first_air_date", "first_air_date")
             p[a + ".gte"], p[b + ".lte"] = f"{y}-01-01", f"{y + 9}-12-31"
         elif decade == "older":
+            p = {a: b for a, b in p.items() if "_date" not in a}
             p[("primary_release_date" if k == "movie" else "first_air_date") + ".lte"] = "1979-12-31"
         first = _tmdb(f"/discover/{k}", **p)
         if first.get("total_results", 0) < 20:  # a narrow mix (old westerns, say): loosen the quality floor
