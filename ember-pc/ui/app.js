@@ -583,7 +583,17 @@ async function showHome() {
   glance(hero.el);
   await loadProgress();
   const { rows: cats, hero: heroCats } = await homeCats();
-  if (!cats.length) { rows.appendChild(h(`<div class="empty">No rows yet. Check lucapi's address in Settings.</div>`)); return; }
+  if (!cats.length) {
+    // say which part isn't answering: lucapi itself, or your addon behind it
+    const msg = h(`<div class="empty">No rows yet…</div>`);
+    rows.appendChild(msg);
+    let st = null;
+    try { st = await getJson(`${feed()}/addon-status`, 15000); } catch (e) {}
+    msg.textContent = !st ? "No rows: Ember can't reach lucapi. Check lucapi's address in Settings."
+      : st.ok ? "No rows yet: your addon answered but sent no lists. Try again in a minute."
+      : `No rows: lucapi is fine, but your addon on it (port 7010) isn't answering${st.error ? " (" + st.error + ")" : ""}. Restart it on the Pi.`;
+    return;
+  }
   const heroList = Promise.all(heroCats.map(c => catalogRow(c).then(ms => ms.map(m => ({ ...m, type: m.type || c.type })))));
   const isContinue = (c) => /pick up|left off|continue/i.test(c.name || "");
   const isTop = (c) => /\btop\b/i.test(c.name || "");

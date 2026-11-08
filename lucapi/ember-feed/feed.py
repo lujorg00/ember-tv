@@ -3855,6 +3855,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(screensaver(self._base()))
             elif re.fullmatch(r"/addon/catalog/(movie|series)/ember-col-[^/]+\.json", path):
                 self._json({"metas": collection_metas(path.split("/")[4][:-5])})
+            elif path == "/addon-status":
+                # for Home's "no rows" message: lucapi answered, so is it your addon that isn't?
+                try:
+                    n = len(json.loads(http_get(CFG["addon_upstream"].rstrip("/") + "/manifest.json", timeout=12)).get("catalogs", []))
+                    self._json({"ok": n > 0, "lists": n})
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)[:200]})
             elif path == "/addon" or path.startswith("/addon/"):
                 self._addon(self.path[len("/addon"):] or "/")
             elif path.startswith("/photo/"):

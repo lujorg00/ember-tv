@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var store: Store
     @State private var path = NavigationPath()
+    @State private var noRows = "No rows yet…"
     @FocusState private var focusKey: String?
     @State private var lastKey: String?
 
@@ -41,8 +42,20 @@ struct HomeView: View {
                     if !store.homeLoaded {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 300)
                     } else if store.rows.isEmpty {
-                        Text("No rows yet. Check lucapi's address in Settings.")
-                            .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 300)
+                        Text(noRows).multilineTextAlignment(.center)
+                            .foregroundStyle(Theme.muted).frame(maxWidth: 1200).frame(maxWidth: .infinity).padding(.top, 300)
+                            .task {
+                                // say which part isn't answering: lucapi itself, or your addon behind it
+                                guard let st = try? await API.feedGet("/addon-status", timeout: 15) else {
+                                    noRows = "No rows: Ember can't reach lucapi. Check lucapi's address in Settings."; return
+                                }
+                                if (st["ok"] as? Bool) == true {
+                                    noRows = "No rows yet: your addon answered but sent no lists. Try again in a minute."
+                                } else {
+                                    let why = st.str("error").map { " (\($0))" } ?? ""
+                                    noRows = "No rows: lucapi is fine, but your addon on it (port 7010) isn't answering\(why). Restart it on the Pi."
+                                }
+                            }
                     }
                 }
                 .padding(.bottom, 80)
