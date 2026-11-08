@@ -3085,16 +3085,14 @@ def browse_tiles():
         t = cached("browse:tiles", 24 * 3600, _build_tiles)
     except Exception as e:
         return {"groups": [], "error": str(e)}
-    # the collections on Home this time round go in after your first recommendations row
+    # Home runs: Trending, the Netflix Tops, then this time round's collections, then the rest. (The apps lift out
+    # continue watching, Trending and the Tops themselves, so the collections go first among what's left.)
     rot = rotation()
     if rot and rot.get("rows") and isinstance(t.get("home"), list):
         home = list(t["home"])
-        # never above Trending Now or the Netflix Top rows (and after your first "For you" row, if it's below them)
-        tops = [i for i, h in enumerate(home) if h.get("style") in ("top10", "continue")
-                or re.search(r"trending|netflix|top\s*\d+|\btop\b", h.get("name", ""), re.I)]
-        start = (max(tops) + 1) if tops else 0
-        at = next((i + 1 for i, h in enumerate(home) if i >= start and h.get("style") == "row"
-                   and re.search(r"for you|recommend", h.get("name", ""), re.I)), start)
+        lifted = lambda h: h.get("style") in ("top10", "continue") or \
+            re.search(r"\btop\b|trending|pick up|left off|continue|all.?time", h.get("name", ""), re.I)
+        at = next((i for i, h in enumerate(home) if not lifted(h)), len(home))
         home[at:at] = [{"type": r["type"], "id": r["id"], "name": r["name"], "style": "row"} for r in rot["rows"]]
         t = dict(t, home=home)
     return t
