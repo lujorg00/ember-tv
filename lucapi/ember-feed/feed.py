@@ -1377,7 +1377,7 @@ def up_next():
                 out.append(dict(n, imdb=imdb, updated=r["updated"]))
         return out
     try:
-        return cached("up-next", 120, build)
+        return cached("up-next", 300, build)
     except Exception as e:
         print(f"[ember-feed] up next failed: {e}", flush=True)
         return []
@@ -3257,6 +3257,73 @@ def in_cinemas():
         return {"items": [], "error": str(e)}
 
 
+# ---------------------------------------------------------------- your addon's lists, kept warm
+
+_addon_copies = {}          # path -> (fetched at, body, content type)
+_addon_refreshing = set()
+_addon_lock = threading.Lock()
+
+
+def _addon_fetch(rest):
+    up = CFG["addon_upstream"].rstrip("/")
+    try:
+        req = urllib.request.Request(up + rest, headers={"User-Agent": "ember-feed/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            body, ctype, code = r.read(), r.headers.get("Content-Type", "application/json"), r.status
+    except urllib.error.HTTPError as e:
+        return e.read(), e.headers.get("Content-Type", "text/plain"), e.code
+    if code == 200:
+        with _addon_lock:
+            _addon_copies[rest] = (time.time(), body, ctype)
+    return body, ctype, code
+
+
+def addon_get(rest):
+    """A list (or the manifest) from your addon: the last copy at once if there is one - fetched again in the
+    background when it's over a minute old (half a minute for Continue watching) - else fetched now."""
+    if not (rest.startswith("/catalog/") or rest.startswith("/manifest.json")):
+        return _addon_fetch(rest)
+    with _addon_lock:
+        hit = _addon_copies.get(rest)
+    fresh = 30 if re.search(r"continue|pick|left", rest, re.I) else 60
+    if hit and time.time() - hit[0] < 12 * 3600:
+        if time.time() - hit[0] > fresh:
+            with _addon_lock:
+                go = rest not in _addon_refreshing
+                _addon_refreshing.add(rest)
+            if go:
+                def run():
+                    try:
+                        _addon_fetch(rest)
+                    except Exception:
+                        pass
+                    finally:
+                        with _addon_lock:
+                            _addon_refreshing.discard(rest)
+                threading.Thread(target=run, daemon=True).start()
+        return hit[1], hit[2], 200
+    return _addon_fetch(rest)
+
+
+def _keep_home_warm():
+    """Every few minutes: Home's lists, Continue watching's next episodes and the collections, fetched ahead,
+    so opening Home on any device doesn't wait for your addon or Trakt."""
+    time.sleep(30)
+    while True:
+        try:
+            up_next()
+            rotation()
+            for h in (browse_tiles().get("home") or []):
+                if h.get("id") and not str(h["id"]).startswith("ember-col-"):
+                    try:
+                        _addon_fetch(f"/catalog/{h['type']}/{urllib.parse.quote(h['id'])}.json")
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[ember-feed] keeping Home warm: {e}", flush=True)
+        time.sleep(180)
+
+
 def browse_tiles():
     try:
         t = cached("browse:tiles", 24 * 3600, _build_tiles)
@@ -4062,16 +4129,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _addon(self, rest):
         """Passes requests through to your Stremio addon, which only listens inside the Pi. The recommendation
-        rows (New ... For You, All Time Recommendations) are steered by your loves on the way through."""
+        rows (New ... For You, All Time Recommendations) are steered by your loves on the way through.
+        Lists are answered from the last copy straight away and refreshed behind the scenes (Home loads quicker)."""
         up = CFG["addon_upstream"].rstrip("/")
-        try:
-            req = urllib.request.Request(up + rest, headers={"User-Agent": "ember-feed/1.0", "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                body = r.read()
-                ctype = r.headers.get("Content-Type", "application/json")
-                code = r.status
-        except urllib.error.HTTPError as e:
-            body, ctype, code = e.read(), e.headers.get("Content-Type", "text/plain"), e.code
+        body, ctype, code = addon_get(rest)
         m = re.fullmatch(r"/catalog/(movie|series)/([^/]+)\.json", rest.split("?")[0])
         if m and code == 200:
             try:
@@ -4129,6 +4190,7 @@ def main():
         print("[ember-feed] no Trakt login found: progress store runs without Trakt", flush=True)
     start_jellyfin_proxy()
     threading.Thread(target=lambda: (time.sleep(20), rotation()), daemon=True).start()  # Home's collections, ready early
+    threading.Thread(target=_keep_home_warm, daemon=True).start()
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()

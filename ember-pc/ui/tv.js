@@ -212,6 +212,9 @@
 
   // Back (from Android): close the streams panel, else go back a page, else go Home.
   window.emberTvBack = () => {
+    // the stream loading screen: Back cancels it
+    const cancel = document.querySelector("#loader:not([hidden]) .ld-cancel:not([hidden])");
+    if (cancel && typeof cancelLoading === "function") { cancelLoading(); return true; }
     if (closeMenu()) return true;
     const dr = document.querySelector(".tp-drawer.open");
     if (dr) { dr.classList.remove("open"); setTimeout(() => setFocus(first()), 50); return true; }

@@ -3,7 +3,9 @@ import SwiftUI
 /// Full screen while a stream is found and tested, as on Ember PC: logo, the steps, what it's about to play.
 struct LoadingView: View {
     let state: LoadState
+    var cancel: () -> Void = {}
     @State private var pulse = false
+    @FocusState private var cancelFocused: Bool
 
     var body: some View {
         ZStack {
@@ -40,9 +42,15 @@ struct LoadingView: View {
                 if !state.note.isEmpty {
                     Text(state.note).font(.ember(20)).foregroundStyle(.white.opacity(0.75)).lineLimit(1).frame(maxWidth: 1100)
                 }
+                // pressed Play by mistake? Cancel (or Back) stops it
+                Button(action: cancel) { Label("Cancel", systemImage: "xmark") }
+                    .buttonStyle(EmberButtonStyle())
+                    .focused($cancelFocused)
+                    .padding(.top, 10)
             }
         }
-        .onAppear { pulse = true }
+        .onAppear { pulse = true; cancelFocused = true }
+        .onExitCommand(perform: cancel)
     }
 }
 

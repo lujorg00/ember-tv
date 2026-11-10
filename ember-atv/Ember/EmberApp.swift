@@ -64,7 +64,7 @@ struct RootView: View {
             }
             // Back (the remote's Back / Menu button) on any page but Home takes you to Home; on Home it works as usual
             .onExitCommand(perform: tab == 0 ? nil : { withAnimation { tab = 0 } })
-            if let l = store.loading { LoadingView(state: l).transition(.opacity).zIndex(2) }
+            if let l = store.loading { LoadingView(state: l, cancel: { store.cancelLoading() }).transition(.opacity).zIndex(2) }
             NoticeOverlay().zIndex(4)
             if let t = store.toast {
                 VStack {

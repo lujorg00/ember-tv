@@ -801,3 +801,6 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 .tp-eps-head .seasons { flex-wrap: wrap; gap: 8px; }
 .tp-eps-head .seasons .chip { cursor: pointer; }
 .tp-eps-head .seasons .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+
+/* Cancel on the loading screen (pressed Play by mistake) */
+.ld-cancel { margin-top: 18px; min-width: 150px; }

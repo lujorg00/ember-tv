@@ -194,6 +194,8 @@ const loader = (() => {
       $(".ld-steps", el).innerHTML = steps.map(t => `<div>${esc(t)}</div>`).join("");
       $(".ld-note", el).textContent = "";
       el.hidden = false; requestAnimationFrame(() => el.classList.add("show"));
+      $(".ld-cancel", el).hidden = !o.steps || !o.steps.length;   // only while starting a stream
+      if (TV && o.steps && o.steps.length && window.emberTvFocus) setTimeout(() => window.emberTvFocus($(".ld-cancel", el)), 60);
       this.step(0);
     },
     step(i, label) {
@@ -203,6 +205,7 @@ const loader = (() => {
       });
     },
     note(t) { $(".ld-note", el).textContent = t || ""; },
+    showing() { return !el.hidden && el.classList.contains("show"); },
     hide(delay = 0) {
       clearTimeout(hideTimer);
       hideTimer = setTimeout(() => { el.classList.remove("show"); setTimeout(() => { if (!el.classList.contains("show")) el.hidden = true; }, 380); }, delay);
@@ -1471,8 +1474,17 @@ async function playBest(mm, season, episode, epTitle, start) {
   picking = true;
   try { return await playBestInner(mm, season, episode, epTitle, start); } finally { setTimeout(() => { picking = false; }, 1500); }
 }
+// Cancel on the loading screen (or Esc / Back): whatever was being found or started stops
+let playGen = 0;
+function cancelLoading() {
+  playGen++; attempt = null; picking = false; loader.hide();
+}
+$("#ldCancel").onclick = cancelLoading;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && loader.showing() && !$("#ldCancel").hidden) { e.preventDefault(); cancelLoading(); } }, true);
+
 async function playBestInner(mm, season, episode, epTitle, start) {
   if (!aioBase()) { go("settings"); return toast("Add your AIOStreams link first."); }
+  const gen = ++playGen;
   const full = { ...(await meta(mm.type, mm.id)), ...mm };
   loader.show({ art: backdrop(full), logo: full.logo, title: full.name,
     sub: season ? `S${season} · E${episode}${epTitle ? " · " + epTitle : ""}${start ? "  ·  from " + fmt(start) : ""}` : (start ? "from " + fmt(start) : ""),
@@ -1484,8 +1496,9 @@ async function playBestInner(mm, season, episode, epTitle, start) {
   try {
     res = await getJson(`${feed()}/pick/${mm.type}/${encodeURIComponent(id)}?aio=${encodeURIComponent(store.get("aio"))}` +
       `&quality=${store.get("quality", "4k")}&runtime=${runtime}&passthrough=${store.get("passthrough", "0")}`, 60000);
-  } catch (e) { clearTimeout(t2); loader.hide(); return toast("Couldn't ask lucapi for the best stream: " + e.message); }
+  } catch (e) { clearTimeout(t2); if (gen !== playGen) return; loader.hide(); return toast("Couldn't ask lucapi for the best stream: " + e.message); }
   clearTimeout(t2);
+  if (gen !== playGen) return;   // cancelled while it looked
   const ranked = (res.ranked || []).filter(x => !x.probe || x.probe.ok);
   if (!ranked.length) { loader.hide(); return toast("No working streams found for this one."); }
   attempt = { mm, season, episode, epTitle, ranked, n: 0 };
@@ -1514,6 +1527,9 @@ async function tryNext(why) {
   loader.show({ art: backdrop(full), logo: full.logo, title: full.name, sub: `That stream ${why}`,
     steps: [`Switching to the next best (${a.n + 1} of ${Math.min(4, a.ranked.length)})`, "Starting playback"] });
   loader.note((a.ranked[a.n].filename || a.ranked[a.n].title.split("\n")[0]).slice(0, 80));
+  const gen = ++playGen;
+  await new Promise(r => setTimeout(r, 700));
+  if (gen !== playGen) return true;   // cancelled
   await play(a.ranked[a.n].url, a.mm, a.season, a.episode, a.epTitle, start, a.ranked[a.n], true);
   return true;
 }

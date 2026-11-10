@@ -77,6 +77,14 @@ final class Store: ObservableObject {
     @Published var homeLoaded = false
     @Published var toast: String?
     @Published var loading: LoadState?
+    private var loadGen = 0     // bumped by Cancel on the loading screen: whatever was being started stops
+
+    /// Cancel on the loading screen (or Back): stop finding or starting the stream and go back where you were.
+    func cancelLoading() {
+        loadGen += 1
+        withAnimation(.easeOut(duration: 0.25)) { loading = nil }
+        playing = nil
+    }
     @Published var playing: PlaySession?
     @Published var progressVersion = 0                  // bumps after playback, so open pages refresh
     @Published var release: [String: Release] = [:]
@@ -453,6 +461,8 @@ final class Store: ObservableObject {
         guard !picking else { return }
         guard !aio.isEmpty else { say("No AIOStreams link yet: open Ember PC once, it shares the link through lucapi."); return }
         picking = true
+        loadGen += 1
+        let gen = loadGen
         Task {
             defer { picking = false }
             let full = await MetaCache.shared.full(m)
@@ -468,14 +478,16 @@ final class Store: ObservableObject {
                 return
             }
             stepper.cancel()
+            guard gen == loadGen else { return }   // cancelled while it looked
             let ranked = res.arr("ranked").map(Ranked.init).filter { $0.ok && !$0.url.isEmpty }
             guard let best = ranked.first else { loading = nil; say("No working streams found for this one."); return }
             loading?.step = 2
             loading?.badges = best.badges
             loading?.note = (best.mbps.map { "tested \(Int($0)) Mbit/s · " } ?? "") + best.label
+            guard gen == loadGen else { return }
             playing = PlaySession(meta: full, season: season, episode: episode, epTitle: epTitle, start: start, ranked: ranked)
             try? await Task.sleep(nanoseconds: 1_400_000_000)
-            loading = nil
+            if gen == loadGen { loading = nil }
         }
     }
 
@@ -527,11 +539,14 @@ final class Store: ObservableObject {
             loading = LoadState(art: s.meta.backdropURL, logo: s.meta.logoURL, title: s.meta.name, sub: "That stream \(why)",
                                 steps: ["Switching to the next best (\(ns.n + 1) of \(limit))", "Starting playback"], step: 1,
                                 badges: ns.stream.badges, note: ns.stream.label)
+            loadGen += 1
+            let gen = loadGen
             Task {
                 try? await Task.sleep(nanoseconds: 700_000_000)
+                guard gen == loadGen else { return }   // cancelled
                 playing = ns
                 try? await Task.sleep(nanoseconds: 1_400_000_000)
-                loading = nil
+                if gen == loadGen { loading = nil }
             }
         }
     }
