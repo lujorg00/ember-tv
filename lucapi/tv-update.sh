@@ -28,8 +28,12 @@ enable_dimmer() {
   local svc="org.lucamedia.ember/.DimService" cur
   cur=$(adb -s "$DEV" shell settings get secure enabled_accessibility_services | tr -d '\r')
   [ "$cur" = "null" ] && cur=""
-  case ":$cur:" in *":$svc:"*) ;; *) cur="${cur:+$cur:}$svc";; esac
-  adb -s "$DEV" shell settings put secure enabled_accessibility_services "$cur" && \
+  # take it out, then put it back: after an update Android can leave it listed but not running
+  local others
+  others=$(printf '%s' "$cur" | tr ':' '\n' | grep -v -x "$svc" | paste -sd: -)
+  adb -s "$DEV" shell settings put secure enabled_accessibility_services "${others:-null}"
+  sleep 1
+  adb -s "$DEV" shell settings put secure enabled_accessibility_services "${others:+$others:}$svc" && \
   adb -s "$DEV" shell settings put secure accessibility_enabled 1
 }
 curl -fsSL -o /tmp/ember.apk https://github.com/lujorg00/ember-tv/releases/latest/download/ember.apk && \
