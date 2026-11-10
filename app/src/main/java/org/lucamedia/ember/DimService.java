@@ -127,6 +127,7 @@ public class DimService extends AccessibilityService {
         apply(prefs.dimLevel(), false);
         main.post(clock);
         main.postDelayed(catPoll, 3000);
+        note("overlay started, lucapi at " + prefs.feedUrl());
         if (!prefs.resumeNote().isEmpty()) main.post(resumeCheck);
     }
 

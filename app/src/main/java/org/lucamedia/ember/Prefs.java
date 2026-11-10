@@ -48,6 +48,8 @@ final class Prefs {
     /** Base URL of ember-feed on lucapi, e.g. http://192.168.4.141:8090 (empty = off). */
     String feedUrl() {
         String u = sp.getString(K_FEED, ctx.getString(R.string.default_feed_url)).trim();
+        // a blank or broken saved address quietly switched the overlay off (no cats, no calendar): use lucapi's usual one
+        if (!u.startsWith("http")) u = ctx.getString(R.string.default_feed_url).trim();
         while (u.endsWith("/")) u = u.substring(0, u.length() - 1);
         return u;
     }
