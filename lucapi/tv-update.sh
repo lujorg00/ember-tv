@@ -28,6 +28,8 @@ enable_dimmer() {
   local svc="org.lucamedia.ember/.DimService" cur
   cur=$(adb -s "$DEV" shell settings get secure enabled_accessibility_services | tr -d '\r')
   [ "$cur" = "null" ] && cur=""
+  # newer Android blocks accessibility services from sideloaded apps ("restricted settings") until allowed
+  adb -s "$DEV" shell appops set org.lucamedia.ember ACCESS_RESTRICTED_SETTINGS allow 2>/dev/null
   # take it out, then put it back: after an update Android can leave it listed but not running
   local others
   others=$(printf '%s' "$cur" | tr ':' '\n' | grep -v -x "$svc" | paste -sd: -)
