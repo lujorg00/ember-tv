@@ -933,12 +933,21 @@ def _omdb_key():
 
 def ratings(typ, imdb):
     """The scores for a film or show, small: IMDb, Rotten Tomatoes, Metacritic (OMDb), TMDB and Trakt."""
+    omdb_ok = [False]
+
     def get():
         out = []
         key = _omdb_key()
+        if not key:
+            print("[ember-feed] ratings: no OMDb key (run lucapi/omdb-key.sh) - no IMDb, Rotten Tomatoes or Metacritic", flush=True)
         if key:
             try:
                 j = json.loads(http_get(f"https://www.omdbapi.com/?i={imdb}&apikey={urllib.parse.quote(key)}", timeout=10))
+                if j.get("Response") == "False":
+                    # e.g. "Invalid API key!" (not activated yet: OMDb emails a link to click) or "Request limit reached!"
+                    print(f"[ember-feed] OMDb said no for {imdb}: {j.get('Error')}", flush=True)
+                else:
+                    omdb_ok[0] = True
                 if j.get("imdbRating") not in (None, "", "N/A"):
                     out.append({"src": "imdb", "label": "IMDb", "value": j["imdbRating"]})
                 for r in j.get("Ratings", []):
@@ -965,7 +974,11 @@ def ratings(typ, imdb):
     if not re.fullmatch(r"tt\d+", imdb or ""):
         return {"items": []}
     try:
-        return cached(f"ratings:{typ}:{imdb}", 24 * 3600, get)
+        r = cached(f"ratings:{typ}:{imdb}", 24 * 3600, get)
+        if _omdb_key() and not any(x["src"] in ("imdb", "rt", "mc") for x in r.get("items", [])) and not omdb_ok[0]:
+            with _cache_lock:     # OMDb didn't answer: don't keep that for a day, try again next time
+                _cache.pop(f"ratings:{typ}:{imdb}", None)
+        return r
     except Exception:
         return {"items": []}
 
