@@ -379,8 +379,7 @@ function splitTitle(name) {
   if ((m = t.match(/^(.*?)\s*\b(for you)$/i))) return [m[1], "for you", ""];
   if ((m = t.match(/^(.+?)\s+(top\b.*)$/i))) return [m[1], m[2].toLowerCase(), ""];
   if ((m = t.match(/^(.+?)\s+(today|right now|now|this week|tonight)$/i))) return [m[1], m[2].toLowerCase(), ""];
-  if ((m = t.match(/^(.+)\s+(\S+)$/))) return [m[1], m[2].toLowerCase(), ""];
-  return ["", t, ""];
+  return [t, "", ""];   // no natural phrase to pick out: plain bold, no italic
 }
 function titleHtml(name, kind) {
   let [lead, acc, tail] = splitTitle(name);
@@ -388,6 +387,7 @@ function titleHtml(name, kind) {
   if (kind && lead && !/\b(films?|movies?|series|shows?)\b/i.test(name) && /^(today|right now|now|this week|tonight|for you)$/i.test(acc))
     lead += " " + kind.toLowerCase();
   const red = /netflix/i.test(name) ? " red" : "";
+  if (!acc) return esc(lead);
   return `${lead ? esc(lead) + " " : ""}<em class="acc${red}">${esc(acc)}</em>${tail ? " " + esc(tail) : ""}`;
 }
 function row(title, metas, type, onPick) {

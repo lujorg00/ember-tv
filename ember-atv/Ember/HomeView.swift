@@ -388,8 +388,7 @@ enum RowTitle {
         if let g = m("^(.*?)\\s*\\b(for you)$") { return (g[0], "for you") }
         if let g = m("^(.+?)\\s+(top\\b.*)$") { return (g[0], g[1].lowercased()) }
         if let g = m("^(.+?)\\s+(today|right now|now|this week|tonight)$") { return (g[0], g[1].lowercased()) }
-        if let g = m("^(.+)\\s+(\\S+)$") { return (g[0], g[1].lowercased()) }
-        return ("", t)
+        return (t, "")   // no natural phrase to pick out: plain bold, no italic
     }
 }
 
@@ -409,10 +408,12 @@ struct RowHeader: View {
             ? Color(red: 1, green: 0.48, blue: 0.43) : Color(red: 1, green: 0.72, blue: 0.4)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             if !parts.lead.isEmpty { Text(parts.lead).font(.ember(34, .bold)) }
-            Text(parts.accent).font(.custom("EmberSerif-Italic", size: 39))
-                .foregroundStyle(glow)
-                .shadow(color: glow.opacity(0.55), radius: 8)
-                .shadow(color: glow.opacity(0.25), radius: 18)
+            if !parts.accent.isEmpty {
+                Text(parts.accent).font(.custom("EmberSerif-Italic", size: 39))
+                    .foregroundStyle(glow)
+                    .shadow(color: glow.opacity(0.55), radius: 8)
+                    .shadow(color: glow.opacity(0.25), radius: 18)
+            }
 
             if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }
