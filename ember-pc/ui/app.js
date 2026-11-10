@@ -316,6 +316,7 @@ function applyBookmarks(root = document) {
   });
 }
 loadWatchlist();
+setInterval(loadWatchlist, 4 * 60 * 1000);   // pick up what you add on other devices
 
 // Titles as their logos (the film's or show's own lettering), loaded once and remembered; the name only when
 // there's no logo. Either fades in, never pops.
@@ -382,9 +383,12 @@ function splitTitle(name) {
   return ["", t, ""];
 }
 function titleHtml(name, kind) {
-  const [lead, acc, tail] = splitTitle(name);
+  let [lead, acc, tail] = splitTitle(name);
+  // Films / Series goes into the phrase ("Trending films *today*"), not as a tag after the italic
+  if (kind && lead && !/\b(films?|movies?|series|shows?)\b/i.test(name) && /^(today|right now|now|this week|tonight|for you)$/i.test(acc))
+    lead += " " + kind.toLowerCase();
   const red = /netflix/i.test(name) ? " red" : "";
-  return `${lead ? esc(lead) + " " : ""}<em class="acc${red}">${esc(acc)}</em>${tail ? " " + esc(tail) : ""}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
+  return `${lead ? esc(lead) + " " : ""}<em class="acc${red}">${esc(acc)}</em>${tail ? " " + esc(tail) : ""}`;
 }
 function row(title, metas, type, onPick) {
   const label = typeof title === "object" ? titleHtml(title.name, title.kind) : titleHtml(title);
@@ -758,7 +762,7 @@ function focusRow(title, metas, type) {
         const a = p.getBoundingClientRect(), b = strip.getBoundingClientRect();
         if (a.right > b.right - 50) strip.scrollBy({ left: a.right - b.right + 70, behavior: "smooth" });
       }, 300);
-    }, 650);
+    }, 1500);   // only once you've rested on it, so you can skip along a row quickly
   });
   strip.addEventListener("focusout", () => setTimeout(() => {
     if (!strip.contains(document.activeElement)) { clearTimeout(timer); shut(); }
@@ -1336,17 +1340,23 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     const seasons = [...new Set(eps.map(e => e.season))];
     let season = cur ? cur.season : seasons[0];
     const drawEps = () => {
-      const opt = seasons.map(s => `<option value="${s}" ${s === season ? "selected" : ""}>Season ${s}</option>`).join("");
+      // seasons as buttons (a dropdown can't be worked with the Chromecast remote)
+      const opt = seasons.map(s => `<span class="chip btn-chip ${s === season ? "on" : ""}" data-season="${s}">${s === 0 ? "Specials" : "Season " + s}</span>`).join("");
       const count = eps.filter(e => e.season === season).length;
       const inSeason = eps.filter(e => e.season === season && aired(e));
       const seasonDone = inSeason.length && inSeason.every(e => isDone(e.season + ":" + e.episode));
       const allAired = eps.filter(aired);
       const showDone = allAired.length && allAired.every(e => isDone(e.season + ":" + e.episode));
-      epsBox.innerHTML = `<div class="tp-eps-head"><div class="select"><select>${opt}</select></div><span class="muted">${count} episodes</span>
+      epsBox.innerHTML = `<div class="tp-eps-head"><div class="chips seasons">${opt}</div><span class="muted">${count} episodes</span>
         <div class="grow"></div>
         <button class="btn sm ${seasonDone ? "done" : ""}" id="markSeason">${seasonDone ? "✓  Season watched" : "Mark season watched"}</button>
         <button class="btn sm ghost" id="markShow">${showDone ? "Mark show unwatched" : "Mark whole show watched"}</button></div><div class="ep-grid"></div>`;
-      $("select", epsBox).onchange = (e) => { season = +e.target.value; drawEps(); };
+      epsBox.querySelectorAll("[data-season]").forEach(c => c.onclick = () => {
+        if (+c.dataset.season === season) return;
+        season = +c.dataset.season; drawEps();
+        const again = $(`[data-season="${season}"]`, epsBox);
+        if (TV && again && window.emberTvFocus) window.emberTvFocus(again);
+      });
       $("#markSeason", epsBox).onclick = async () => {
         if (!inSeason.length) return toast("Nothing in this season has aired yet.");
         if (await mark(inSeason, !seasonDone)) { toast(seasonDone ? `Season ${season} is unwatched again.` : `Marked season ${season} as watched.`); drawEps(); }
@@ -1369,9 +1379,12 @@ async function showTitle(type, id, hint = {}, opts = {}) {
             <div class="d">${esc((e.released || "").slice(0, 10))}${sp && !sp.finished ? ` · <span class="acc">${fmt(sp.position)} in</span>` : ""}</div></div>`);
         const mk = $(".ep-mark", el);
         if (mk) mk.onclick = async (ev) => { ev.stopPropagation(); const done = isDone(e.season + ":" + e.episode); if (await mark([e], !done)) drawEps(); };
+        // clicking an episode plays it (no hunting for the Play button)
         el.onclick = () => { grid.querySelectorAll(".epc").forEach(x => x.classList.remove("sel")); el.classList.add("sel");
           cur = { season: e.season, episode: e.episode }; $("#resumeBtn", head).innerHTML = PLAY + esc(resumeLabel());
-          if (isOpen()) pick(e.season, e.episode, e.name || e.title || ""); };
+          if (soon) return toast("That episode isn't out yet.");
+          if (isOpen()) pick(e.season, e.episode, e.name || e.title || "");
+          else $("#resumeBtn", head).click(); };
         grid.appendChild(el);
       });
     };

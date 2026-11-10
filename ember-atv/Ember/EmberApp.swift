@@ -41,26 +41,29 @@ struct RootView: View {
     @EnvironmentObject var notices: Notices
     @Environment(\.scenePhase) private var phase
     @State private var lastCrash: [String]?
+    @State private var tab = 0
 
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
-            TabView {
+            TabView(selection: $tab) {
                 HomeView()
-                    .tabItem { Label("Home", systemImage: "house") }
+                    .tabItem { Label("Home", systemImage: "house") }.tag(0)
                 BrowseView(type: "movie")
-                    .tabItem { Label("Films", systemImage: "film") }
+                    .tabItem { Label("Films", systemImage: "film") }.tag(1)
                 BrowseView(type: "series")
-                    .tabItem { Label("Series", systemImage: "play.rectangle.on.rectangle") }
+                    .tabItem { Label("Series", systemImage: "play.rectangle.on.rectangle") }.tag(2)
                 SearchView()
-                    .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                    .tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(3)
                 WhatToWatchView()
-                    .tabItem { Label("What to watch?", systemImage: "heart") }
+                    .tabItem { Label("What to watch?", systemImage: "heart") }.tag(4)
                 YearView()
-                    .tabItem { Label("Your year", systemImage: "chart.bar") }
+                    .tabItem { Label("Your year", systemImage: "chart.bar") }.tag(5)
                 SettingsView()
-                    .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
+                    .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }.tag(6)
             }
+            // Back (the remote's Back / Menu button) on any page but Home takes you to Home; on Home it works as usual
+            .onExitCommand(perform: tab == 0 ? nil : { withAnimation { tab = 0 } })
             if let l = store.loading { LoadingView(state: l).transition(.opacity).zIndex(2) }
             NoticeOverlay().zIndex(4)
             if let t = store.toast {

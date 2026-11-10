@@ -215,9 +215,13 @@
     if (closeMenu()) return true;
     const dr = document.querySelector(".tp-drawer.open");
     if (dr) { dr.classList.remove("open"); setTimeout(() => setFocus(first()), 50); return true; }
-    if (typeof navStack !== "undefined" && navStack.length > 1) { back(); return true; }
-    const onHome = document.querySelector('#side .nav.on[data-page="home"]');
-    if (!onHome) { go("home"); return true; }
+    // anywhere but Home: straight back to Home (kept as you left it)
+    const top = typeof navStack !== "undefined" && navStack.length ? navStack[navStack.length - 1][0] : "home";
+    if (top !== "home") {
+      if (navStack.length && navStack[0][0] === "home") { navStack.splice(1); navStack.push(["", []]); back(); }
+      else go("home");
+      return true;
+    }
     if (cur && cur.closest("#side")) return false;
     setFocus(document.querySelector('#side .nav[data-page="home"]'));
     return true;

@@ -399,7 +399,12 @@ struct RowHeader: View {
     var count: Int? = nil
     var leading: CGFloat = 90
     var body: some View {
-        let parts = RowTitle.split(title)
+        let parts0 = RowTitle.split(title)
+        // Films / Series goes into the phrase ("Trending films *today*"), not as a tag after the italic
+        let hasKind = title.range(of: "\\b(films?|movies?|series|shows?)\\b", options: [.regularExpression, .caseInsensitive]) != nil
+        let timely = ["today", "right now", "now", "this week", "tonight", "for you"].contains(parts0.accent.lowercased())
+        let parts = (lead: (kind != nil && !parts0.lead.isEmpty && !hasKind && timely) ? parts0.lead + " " + kind!.lowercased() : parts0.lead,
+                     accent: parts0.accent)
         let glow = title.range(of: "netflix", options: .caseInsensitive) != nil
             ? Color(red: 1, green: 0.48, blue: 0.43) : Color(red: 1, green: 0.72, blue: 0.4)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -408,7 +413,7 @@ struct RowHeader: View {
                 .foregroundStyle(glow)
                 .shadow(color: glow.opacity(0.55), radius: 8)
                 .shadow(color: glow.opacity(0.25), radius: 18)
-            if let kind { Text(kind).font(.ember(24, .semibold)).foregroundStyle(Theme.accent) }
+
             if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }
         .padding(.leading, leading)
@@ -736,7 +741,7 @@ private struct SpotFace: View {
                 Task {
                     if full == nil { full = await MetaCache.shared.full(meta) }
                     if let b = m.backdropURL { _ = await ImageStore.shared.load(b) }
-                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)   // only once you've rested on it
                     guard resting, !open else { return }
                     withAnimation(.easeInOut(duration: 0.3)) { open = true }
                     opened()

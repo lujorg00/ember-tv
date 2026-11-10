@@ -1036,12 +1036,20 @@ def toplist(typ, cid, aio):
 
 
 def _watchlist_ids():
+    """Every title on your watchlist, page by page (Trakt hands it over in pages, so the newest additions were
+    being missed), by IMDb id and also as tmdb:<id> (some lists name new releases that way)."""
     ids = set()
     for kind in ("movies", "shows"):
-        for it in _trakt(f"/sync/watchlist/{kind}"):
-            i = (((it.get("movie") or it.get("show")) or {}).get("ids") or {}).get("imdb")
-            if i:
-                ids.add(i)
+        for page in range(1, 21):
+            got = _trakt(f"/sync/watchlist/{kind}?page={page}&limit=250") or []
+            for it in got:
+                x = (((it.get("movie") or it.get("show")) or {}).get("ids") or {})
+                if x.get("imdb"):
+                    ids.add(x["imdb"])
+                if x.get("tmdb"):
+                    ids.add(f"tmdb:{x['tmdb']}")
+            if len(got) < 250:
+                break
     return sorted(ids)
 
 
@@ -1050,7 +1058,7 @@ def watchlist():
     if not all(trakt_creds()):
         return {"items": [], "error": "no Trakt login"}
     try:
-        return {"items": cached("watchlist", 300, _watchlist_ids)}
+        return {"items": cached("watchlist", 120, _watchlist_ids)}
     except Exception as e:
         return {"items": [], "error": str(e)}
 
@@ -2427,9 +2435,9 @@ def _build_tmdb_tiles():
 # name become one tile (with Films / Series chips); several catalogues can share a tile through MERGE.
 # Whatever isn't a category (For you, Watchlist, Top 20, ...) stays a row on Home.
 
-TILE_ORDER = [("services", "Streaming services", "logo"), ("genres", "Genres", "art"), ("decades", "Decades", "art"),
-              ("people", "Filmmakers", "person"), ("franchises", "Franchises", "art"), ("studios", "Studios", "studio"),
-              ("animation", "Animation studios", "studio"), ("kids", "Kids", "art"), ("acclaim", "Awards & acclaim", "art")]
+TILE_ORDER = [("services", "Streaming services", "logo"), ("genres", "Genres", "art"), ("acclaim", "Awards & acclaim", "art"),
+              ("decades", "Decades", "art"), ("people", "Filmmakers", "person"), ("franchises", "Franchises", "art"),
+              ("studios", "Studios", "studio"), ("animation", "Animation studios", "studio"), ("kids", "Kids", "art")]
 HOME_WORDS = re.compile(r"\b(for you|recommend\w*|watchlist|trending|top|popular|pick up|left off|continue|new|releases|hero)\b", re.I)
 SERVICE_NAMES = {"netflix": "Netflix", "prime video": "Amazon Prime Video", "amazon prime": "Amazon Prime Video",
                  "apple tv+": "Apple TV", "apple tv": "Apple TV", "disney+": "Disney Plus", "hbo max": "HBO Max", "max": "Max",
@@ -2908,6 +2916,8 @@ def _build_tiles():
                for t in tl if t["box"] == key]
         if key == "franchises":
             its.sort(key=lambda t: re.sub(r"^(the|a) ", "", t["title"].lower()))
+        if key == "acclaim":   # Rotten Tomatoes first, the rest as they were
+            its.sort(key=lambda t: 0 if re.search(r"rotten|tomato", t["title"], re.I) else 1)
         if its:
             groups.append({"title": title, "style": style, "tiles": its})
     _TILE_CATS.clear()

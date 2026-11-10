@@ -302,8 +302,10 @@ public class DimService extends AccessibilityService {
                                         catsChanged(cats);
                                     }
                                 });
-                            } catch (Exception ignored) {
-                                // lucapi blipped; try again next time
+                            } catch (Exception e) {
+                                // lucapi blipped; try again next time (noted on lucapi, once in a while)
+                                long now = System.currentTimeMillis();
+                                if (now - catErrAt > 30 * 60_000) { catErrAt = now; note("cats: couldn't read " + url + ": " + e.getMessage()); }
                             }
                         }
                     });
@@ -398,8 +400,37 @@ public class DimService extends AccessibilityService {
         return (mins / 60) + "h " + String.format(Locale.UK, "%02d", mins % 60) + "m";
     }
 
+    private long catErrAt;
+
+    /** A line in lucapi's app log (GET /client/log), so the overlay's doings can be checked from the Pi. */
+    private void note(final String line) {
+        final String url = feed("/client/log");
+        if (url == null) return;
+        net.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                    c.setConnectTimeout(5000);
+                    c.setReadTimeout(5000);
+                    c.setDoOutput(true);
+                    c.setRequestMethod("POST");
+                    c.setRequestProperty("Content-Type", "application/json");
+                    JSONObject b = new JSONObject();
+                    b.put("device", "Ember TV overlay");
+                    b.put("lines", new JSONArray().put(line));
+                    c.getOutputStream().write(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    c.getResponseCode();
+                    c.disconnect();
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
     private void catsChanged(JSONArray cats) {
         if (cats == null) return;
+        if (!catsKnown) note("cats: watching the cat flap (" + cats.length() + " cats)");
         StringBuilder msg = new StringBuilder();
         for (int i = 0; i < cats.length(); i++) {
             JSONObject c = cats.optJSONObject(i);
@@ -413,7 +444,10 @@ public class DimService extends AccessibilityService {
             }
         }
         catsKnown = true;
-        if (msg.length() > 0) showCatNote(msg.toString());
+        if (msg.length() > 0) {
+            note("cats: showing \"" + msg + "\"");
+            showCatNote(msg.toString());
+        }
     }
 
     private String feed(String path) {
