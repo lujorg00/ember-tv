@@ -13,7 +13,7 @@ fi
 echo "Ember on the TV:   $(adb -s "$DEV" shell dumpsys package org.lucamedia.ember | awk -F= '/versionName/{print $2; exit}' | tr -d '\r')"
 on=$(adb -s "$DEV" shell settings get secure enabled_accessibility_services | tr -d '\r')
 case "$on" in *org.lucamedia.ember/.DimService*) echo "Overlay switched on: yes";; *) echo "Overlay switched on: NO";; esac
-if adb -s "$DEV" shell dumpsys accessibility 2>/dev/null | grep -q "org.lucamedia.ember/.DimService"; then
+if adb -s "$DEV" shell dumpsys accessibility 2>/dev/null | grep -q -E "org.lucamedia.ember/(org.lucamedia.ember)?.DimService"; then
   echo "Overlay running:     yes"; else echo "Overlay running:     NO (run tv-update.sh again to switch it off and on)"; fi
 echo "Recent overlay messages:"
 adb -s "$DEV" logcat -d -t 400 2>/dev/null | grep -i -E "EmberDim|DimService" | tail -8
