@@ -719,6 +719,13 @@ def report(body):
          "trakt_watched": 0, "episode_title": str(body.get("episodeTitle", ""))[:120]}
     prev = _get(d["key"])
     _upsert(d)
+    if state == "playing":   # watching it again brings it back to Continue watching, after a ✕ (on every device)
+        with _db_lock:
+            db().execute("CREATE TABLE IF NOT EXISTS dismissed (imdb TEXT PRIMARY KEY, at INTEGER)")
+            if db().execute("DELETE FROM dismissed WHERE imdb=? AND at<?", (d["imdb"], d["updated"] - 60)).rowcount:
+                db().commit()
+        with _cache_lock:
+            _cache.pop("up-next", None)
     try:
         _log_watch(prev, d, state)
     except Exception as e:
@@ -1316,6 +1323,58 @@ def _progress():
     return out
 
 
+def _next_after(imdb, season, episode):
+    """The episode after this one, if it's out: from TMDB's season lists (not Trakt). {} when there isn't one yet."""
+    def build():
+        f = _tmdb(f"/find/{imdb}", external_source="imdb_id").get("tv_results") or []
+        if not f:
+            return {}
+        tv = f[0]["id"]
+        today = datetime.now(TZ).date().isoformat()
+        for s, e in ((season, episode + 1), (season + 1, 1)):
+            try:
+                eps = _tmdb(f"/tv/{tv}/season/{s}").get("episodes", [])
+            except Exception:
+                continue
+            ep = next((x for x in eps if x.get("episode_number") == e), None)
+            if ep and ep.get("air_date") and ep["air_date"] <= today:
+                return {"season": s, "episode": e, "episodeTitle": ep.get("name") or ""}
+        return {}
+    return cached(f"next-after:{imdb}:{season}:{episode}", 12 * 3600, build)
+
+
+def up_next():
+    """Shows whose latest episode in Ember is finished, with the next one that's out: Continue watching's 'Next'
+    cards, worked out from what you watched in Ember itself, so they don't depend on Trakt or the addon's list."""
+    def build():
+        cutoff = time.time() - 120 * 86400
+        with _db_lock:
+            rows = [_row(r) for r in db().execute(
+                "SELECT * FROM positions WHERE type='series' AND updated>? ORDER BY updated DESC", (cutoff,)).fetchall()]
+        gone = _dismissed()
+        latest = {}
+        for r in rows:
+            latest.setdefault(r["imdb"], r)
+        out = []
+        for imdb, r in latest.items():
+            if not r["finished"] or r["season"] is None or gone.get(imdb, 0) >= r["updated"]:
+                continue
+            if len(out) >= 15:
+                break
+            try:
+                n = _next_after(imdb, int(r["season"]), int(r["episode"]))
+            except Exception:
+                n = {}
+            if n:
+                out.append(dict(n, imdb=imdb, updated=r["updated"]))
+        return out
+    try:
+        return cached("up-next", 120, build)
+    except Exception as e:
+        print(f"[ember-feed] up next failed: {e}", flush=True)
+        return []
+
+
 def progress():
     try:
         return {"items": cached("progress", 30, _progress)}
@@ -1335,7 +1394,11 @@ def title_positions(imdb):
 
 
 def next_episode(imdb):
-    """The next episode of a show you're watching (when you're not part-way through one)."""
+    """The next episode of a show you're watching (when you're not part-way through one): from what you finished in
+    Ember first, else Trakt."""
+    own = next((u for u in up_next() if u["imdb"] == imdb), None)
+    if own:
+        return {"season": own["season"], "episode": own["episode"], "episodeTitle": own["episodeTitle"]}
     def _n():
         p = _trakt(f"/shows/{imdb}/progress/watched?hidden=false&specials=false")
         ne = p.get("next_episode") or {}
@@ -4008,6 +4071,13 @@ class Handler(BaseHTTPRequestHandler):
                 if re.search(r"for you|all.?time|recommend", name, re.I):
                     j = json.loads(body)
                     j["metas"] = love_rerank(j.get("metas", []), m.group(1), new_only=not re.search(r"all.?time", name, re.I))
+                    body, ctype = json.dumps(j).encode(), "application/json"
+                elif m.group(1) == "series" and re.search(r"pick up|left off|continue", name, re.I):
+                    # shows you finished an episode of in Ember go first, whatever Trakt knows (the apps add 'Next · S E')
+                    j = json.loads(body)
+                    have = {x.get("id") for x in j.get("metas", [])}
+                    own = [{"id": u["imdb"], "type": "series", "name": ""} for u in up_next() if u["imdb"] not in have]
+                    j["metas"] = own + j.get("metas", [])
                     body, ctype = json.dumps(j).encode(), "application/json"
             except Exception as e:
                 print(f"[ember-feed] love steering skipped: {e}", flush=True)
