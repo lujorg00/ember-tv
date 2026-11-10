@@ -1355,10 +1355,12 @@ def up_next():
     """Shows whose latest episode in Ember is finished, with the next one that's out: Continue watching's 'Next'
     cards, worked out from what you watched in Ember itself, so they don't depend on Trakt or the addon's list."""
     def build():
-        cutoff = time.time() - 120 * 86400
+        # only what you've been watching in Ember lately (as Netflix or Omni would): not your older Trakt history
+        cutoff = time.time() - 14 * 86400
         with _db_lock:
             rows = [_row(r) for r in db().execute(
-                "SELECT * FROM positions WHERE type='series' AND updated>? ORDER BY updated DESC", (cutoff,)).fetchall()]
+                "SELECT * FROM positions WHERE type='series' AND source='ember' AND updated>? ORDER BY updated DESC",
+                (cutoff,)).fetchall()]
         gone = _dismissed()
         latest = {}
         for r in rows:
@@ -1367,7 +1369,7 @@ def up_next():
         for imdb, r in latest.items():
             if not r["finished"] or r["season"] is None or gone.get(imdb, 0) >= r["updated"]:
                 continue
-            if len(out) >= 15:
+            if len(out) >= 6:
                 break
             try:
                 n = _next_after(imdb, int(r["season"]), int(r["episode"]))
