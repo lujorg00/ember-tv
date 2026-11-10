@@ -3357,45 +3357,46 @@ ROTATE_DAYS = 3
 ROTATE_COUNT = 3
 COLL_MIN = 12
 # (id, name, type, (from MMDD, to MMDD) or None for any time, TMDB discover filters; "kw" = keyword names, any of)
+# The *starred* words are the ones the apps set in the glowing serif italic.
 COLLS = [
-    ("halloween", "Halloween Horror", "movie", ("1001", "1031"), {"kw": ["halloween"], "with_genres": "27"}),
-    ("haunted", "Ghosts and Haunted Houses", "movie", ("1001", "1031"), {"kw": ["haunted house", "ghost"], "with_genres": "27"}),
-    ("dark-nights", "Dark Nights In: British Crime", "series", ("1101", "1130"), {"with_origin_country": "GB", "with_genres": "80"}),
-    ("christmas", "Christmas Films", "movie", ("1125", "1231"), {"kw": ["christmas"]}),
-    ("christmas-family", "Christmas for All the Family", "movie", ("1201", "1231"), {"kw": ["christmas"], "with_genres": "10751|16"}),
-    ("valentines", "Romcoms for Valentine's", "movie", ("0201", "0214"), {"with_genres": "10749,35"}),
-    ("summer", "Summer Blockbusters", "movie", ("0615", "0831"), {"with_genres": "28|12", "vote_count.gte": 6000}),
-    ("heist", "Heist Films", "movie", None, {"kw": ["heist"]}),
-    ("time-travel", "Time Travel", "movie", None, {"kw": ["time travel"]}),
-    ("twist", "Twist Endings", "movie", None, {"kw": ["twist ending", "plot twist"]}),
-    ("one-place", "Set in One Place", "movie", None, {"kw": ["single location"]}),
-    ("road-trip", "Road Trips", "movie", None, {"kw": ["road trip"]}),
-    ("survival", "Survival", "movie", None, {"kw": ["survival"]}),
-    ("killer", "On the Trail of a Killer", "movie", None, {"kw": ["serial killer"]}),
-    ("space", "Lost in Space", "movie", None, {"kw": ["space", "outer space", "spacecraft"], "with_genres": "878"}),
-    ("ai", "Artificial Intelligence", "movie", None, {"kw": ["artificial intelligence (a.i.)", "artificial intelligence"]}),
-    ("dystopia", "Dystopian Futures", "movie", None, {"kw": ["dystopia"]}),
-    ("courtroom", "Courtroom Dramas", "movie", None, {"kw": ["courtroom", "lawyer"], "with_genres": "18"}),
-    ("spies", "Spies", "movie", None, {"kw": ["spy", "espionage"]}),
-    ("con", "Con Artists", "movie", None, {"kw": ["con artist", "con man"]}),
-    ("revenge", "Revenge", "movie", None, {"kw": ["revenge"], "with_genres": "28|53|80"}),
-    ("coming-of-age", "Coming of Age", "movie", None, {"kw": ["coming of age"]}),
-    ("true-story", "Based on a True Story", "movie", None, {"kw": ["based on true story"]}),
-    ("zombies", "Zombies", "movie", None, {"kw": ["zombie"]}),
-    ("mind-benders", "Mind-Benders", "movie", None, {"with_genres": "878,9648"}),
-    ("short", "Under 90 Minutes", "movie", None, {"with_runtime.gte": 70, "with_runtime.lte": 90, "vote_average.gte": 7}),
-    ("long", "Three Hours Plus", "movie", None, {"with_runtime.gte": 170}),
-    ("gems", "Hidden Gems", "movie", None, {"vote_average.gte": 7.3, "vote_count.gte": 250, "vote_count.lte": 2500, "sort_by": "vote_average.desc"}),
-    ("world", "Foreign-Language Favourites", "movie", None, {"with_original_language": "fr|es|ko|ja|it|de|da|sv|no|pt|zh", "vote_average.gte": 7.2}),
-    ("brit-comedy", "British Comedies", "movie", None, {"with_origin_country": "GB", "with_genres": "35"}),
-    ("brit-crime", "British Crime Dramas", "series", None, {"with_origin_country": "GB", "with_genres": "80"}),
-    ("nordic", "Nordic Noir", "series", None, {"with_origin_country": "DK|SE|NO|IS|FI", "with_genres": "80|9648"}),
-    ("miniseries", "Finish It in a Weekend", "series", None, {"with_type": "2"}),
-    ("sitcoms", "Sitcoms to Binge", "series", None, {"with_genres": "35", "with_type": "4", "vote_count.gte": 400}),
-    ("korean", "Korean Dramas", "series", None, {"with_original_language": "ko", "with_genres": "18"}),
-    ("anime", "Anime Series", "series", None, {"with_original_language": "ja", "with_genres": "16"}),
-    ("docuseries", "Docuseries", "series", None, {"with_genres": "99", "vote_count.gte": 60}),
-    ("true-crime", "True Crime", "series", None, {"with_genres": "99", "kw": ["true crime"], "vote_count.gte": 20}),
+    ("halloween", "*Halloween* Horror", "movie", ("1001", "1031"), {"kw": ["halloween"], "with_genres": "27"}),
+    ("haunted", "Ghosts and *Haunted Houses*", "movie", ("1001", "1031"), {"kw": ["haunted house", "ghost"], "with_genres": "27"}),
+    ("dark-nights", "Dark Nights In: *British Crime*", "series", ("1101", "1130"), {"with_origin_country": "GB", "with_genres": "80"}),
+    ("christmas", "*Christmas* Films", "movie", ("1125", "1231"), {"kw": ["christmas"]}),
+    ("christmas-family", "Christmas for *All the Family*", "movie", ("1201", "1231"), {"kw": ["christmas"], "with_genres": "10751|16"}),
+    ("valentines", "Romcoms for *Valentine's*", "movie", ("0201", "0214"), {"with_genres": "10749,35"}),
+    ("summer", "Summer *Blockbusters*", "movie", ("0615", "0831"), {"with_genres": "28|12", "vote_count.gte": 6000}),
+    ("heist", "*Heist* Films", "movie", None, {"kw": ["heist"]}),
+    ("time-travel", "*Time Travel*", "movie", None, {"kw": ["time travel"]}),
+    ("twist", "Twist *Endings*", "movie", None, {"kw": ["twist ending", "plot twist"]}),
+    ("one-place", "Set in *One Place*", "movie", None, {"kw": ["single location"]}),
+    ("road-trip", "Road *Trips*", "movie", None, {"kw": ["road trip"]}),
+    ("survival", "*Survival*", "movie", None, {"kw": ["survival"]}),
+    ("killer", "On the Trail of *a Killer*", "movie", None, {"kw": ["serial killer"]}),
+    ("space", "Lost in *Space*", "movie", None, {"kw": ["space", "outer space", "spacecraft"], "with_genres": "878"}),
+    ("ai", "Artificial *Intelligence*", "movie", None, {"kw": ["artificial intelligence (a.i.)", "artificial intelligence"]}),
+    ("dystopia", "Dystopian *Futures*", "movie", None, {"kw": ["dystopia"]}),
+    ("courtroom", "Courtroom *Dramas*", "movie", None, {"kw": ["courtroom", "lawyer"], "with_genres": "18"}),
+    ("spies", "*Spies*", "movie", None, {"kw": ["spy", "espionage"]}),
+    ("con", "Con *Artists*", "movie", None, {"kw": ["con artist", "con man"]}),
+    ("revenge", "*Revenge*", "movie", None, {"kw": ["revenge"], "with_genres": "28|53|80"}),
+    ("coming-of-age", "Coming of *Age*", "movie", None, {"kw": ["coming of age"]}),
+    ("true-story", "Based on *a True Story*", "movie", None, {"kw": ["based on true story"]}),
+    ("zombies", "*Zombies*", "movie", None, {"kw": ["zombie"]}),
+    ("mind-benders", "*Mind-Benders*", "movie", None, {"with_genres": "878,9648"}),
+    ("short", "Under *90 Minutes*", "movie", None, {"with_runtime.gte": 70, "with_runtime.lte": 90, "vote_average.gte": 7}),
+    ("long", "*Three Hours* Plus", "movie", None, {"with_runtime.gte": 170}),
+    ("gems", "Hidden *Gems*", "movie", None, {"vote_average.gte": 7.3, "vote_count.gte": 250, "vote_count.lte": 2500, "sort_by": "vote_average.desc"}),
+    ("world", "Foreign-Language *Favourites*", "movie", None, {"with_original_language": "fr|es|ko|ja|it|de|da|sv|no|pt|zh", "vote_average.gte": 7.2}),
+    ("brit-comedy", "British *Comedies*", "movie", None, {"with_origin_country": "GB", "with_genres": "35"}),
+    ("brit-crime", "British *Crime Dramas*", "series", None, {"with_origin_country": "GB", "with_genres": "80"}),
+    ("nordic", "Nordic *Noir*", "series", None, {"with_origin_country": "DK|SE|NO|IS|FI", "with_genres": "80|9648"}),
+    ("miniseries", "Finish It in *a Weekend*", "series", None, {"with_type": "2"}),
+    ("sitcoms", "Sitcoms to *Binge*", "series", None, {"with_genres": "35", "with_type": "4", "vote_count.gte": 400}),
+    ("korean", "Korean *Dramas*", "series", None, {"with_original_language": "ko", "with_genres": "18"}),
+    ("anime", "*Anime* Series", "series", None, {"with_original_language": "ja", "with_genres": "16"}),
+    ("docuseries", "*Docuseries*", "series", None, {"with_genres": "99", "vote_count.gte": 60}),
+    ("true-crime", "*True Crime*", "series", None, {"with_genres": "99", "kw": ["true crime"], "vote_count.gte": 20}),
 ]
 PERSONAL = ["loved", "director", "franchise"]
 
@@ -3481,7 +3482,7 @@ def _coll_personal(which, rnd):
             if done and len(done) < len(parts):
                 out += [m for m in parts if seen.get(m["id"]) != "done"][:6]
         if len(out) >= 6:
-            return {"id": "finish-franchise", "name": "Finish the Franchise", "type": "movie", "metas": out[:40]}
+            return {"id": "finish-franchise", "name": "Finish the *Franchise*", "type": "movie", "metas": out[:40]}
         return None
 
 

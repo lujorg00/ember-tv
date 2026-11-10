@@ -377,6 +377,19 @@ struct TitleArt: View {
 /// Row titles (E1): bold sans with one part in a glowing serif italic ("Trending *today*", "Netflix *top series*",
 /// "New films *for you*", "Because you loved *Heat*"). Netflix rows glow red, the rest ember orange. The same rules as Ember PC.
 enum RowTitle {
+    /// The words for the italic: a name that says which (*like this*), else the usual phrases. tail = words after it.
+    static func split3(_ name: String) -> (lead: String, accent: String, tail: String) {
+        if let a = name.firstIndex(of: "*"), let b = name[name.index(after: a)...].firstIndex(of: "*") {
+            return (String(name[..<a]).trimmingCharacters(in: .whitespaces), String(name[name.index(after: a)..<b]),
+                    String(name[name.index(after: b)...]).trimmingCharacters(in: .whitespaces))
+        }
+        let p = split(name)
+        return (p.lead, p.accent, "")
+    }
+
+    /// A name without its italic markers, for anywhere else it's shown.
+    static func plain(_ name: String) -> String { name.replacingOccurrences(of: "*", with: "") }
+
     static func split(_ name: String) -> (lead: String, accent: String) {
         let t = name.trimmingCharacters(in: .whitespaces)
         func m(_ p: String) -> [String]? {
@@ -398,12 +411,12 @@ struct RowHeader: View {
     var count: Int? = nil
     var leading: CGFloat = 90
     var body: some View {
-        let parts0 = RowTitle.split(title)
+        let parts0 = RowTitle.split3(title)
         // Films / Series goes into the phrase ("Trending films *today*"), not as a tag after the italic
         let hasKind = title.range(of: "\\b(films?|movies?|series|shows?)\\b", options: [.regularExpression, .caseInsensitive]) != nil
         let timely = ["today", "right now", "now", "this week", "tonight", "for you"].contains(parts0.accent.lowercased())
         let parts = (lead: (kind != nil && !parts0.lead.isEmpty && !hasKind && timely) ? parts0.lead + " " + kind!.lowercased() : parts0.lead,
-                     accent: parts0.accent)
+                     accent: parts0.accent, tail: parts0.tail)
         let glow = title.range(of: "netflix", options: .caseInsensitive) != nil
             ? Color(red: 1, green: 0.48, blue: 0.43) : Color(red: 1, green: 0.72, blue: 0.4)
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -414,6 +427,7 @@ struct RowHeader: View {
                     .shadow(color: glow.opacity(0.55), radius: 8)
                     .shadow(color: glow.opacity(0.25), radius: 18)
             }
+            if !parts.tail.isEmpty { Text(parts.tail).font(.ember(34, .bold)) }
 
             if let count { Text("\(count)").font(.ember(20)).foregroundStyle(Theme.muted) }
         }

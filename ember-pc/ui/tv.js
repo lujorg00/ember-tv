@@ -11,7 +11,8 @@
   let cur = null;
 
   const visible = (el) => {
-    if (!el.isConnected || el.closest("[hidden]") || el.closest("#loader") || el.disabled) return false;
+    if (!el.isConnected || el.closest("[hidden]") || el.disabled) return false;
+    if (el.closest("#loader") && !el.classList.contains("ld-cancel")) return false;   // only Cancel, on the loading screen
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) return false;
     const st = getComputedStyle(el);

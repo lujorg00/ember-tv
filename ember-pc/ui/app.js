@@ -378,6 +378,7 @@ function splitTitle(name) {
   const t = String(name || "").trim();
   const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1).toLowerCase();
   let m;
+  if ((m = t.match(/^(.*?)\*(.+?)\*(.*)$/))) return [m[1].trim(), m[2], m[3].trim()];   // the name says which words: *like this*
   if ((m = t.match(/^(because you loved|more from|popular on)\s+(.+)$/i))) return [cap(m[1]), m[2], ""];
   if ((m = t.match(/^(.*?)\s*\b(for you)$/i))) return [m[1], "for you", ""];
   if ((m = t.match(/^(.+?)\s+(top\b.*)$/i))) return [m[1], m[2].toLowerCase(), ""];
