@@ -804,3 +804,6 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 
 /* Cancel on the loading screen (pressed Play by mistake) */
 .ld-cancel { margin-top: 18px; min-width: 150px; }
+
+/* spoilers hidden (the default): pictures of episodes you haven't watched are blurred; titles stay readable */
+.nospoil .epc:not(.seen) .thumb::before { content: ""; position: absolute; inset: -24px; background: inherit; filter: blur(16px) brightness(.85); }

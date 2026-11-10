@@ -244,6 +244,7 @@ async function showApps() {
   }
   if (!list.length) box.innerHTML = `<div class="empty">No apps found.</div>`;
 }
+const spoilers = () => store.get("spoilers", "0") === "1";
 const hiddenRows = () => { try { return new Set(JSON.parse(store.get("hiddenRows", "[]"))); } catch (e) { return new Set(); } };
 const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]));
 const catKey = (c) => `cat:${c.type}:${c.id}`;
@@ -1354,7 +1355,15 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       epsBox.innerHTML = `<div class="tp-eps-head"><div class="chips seasons">${opt}</div><span class="muted">${count} episodes</span>
         <div class="grow"></div>
         <button class="btn sm ${seasonDone ? "done" : ""}" id="markSeason">${seasonDone ? "✓  Season watched" : "Mark season watched"}</button>
-        <button class="btn sm ghost" id="markShow">${showDone ? "Mark show unwatched" : "Mark whole show watched"}</button></div><div class="ep-grid"></div>`;
+        <button class="btn sm ghost" id="markShow">${showDone ? "Mark show unwatched" : "Mark whole show watched"}</button>
+        <button class="btn sm ghost" id="spoilBtn">${spoilers() ? "Spoilers shown" : "Spoilers hidden"}</button></div><div class="ep-grid"></div>`;
+      // spoilers: off by default, the pictures of episodes you haven't watched are blurred (titles stay)
+      epsBox.classList.toggle("nospoil", !spoilers());
+      $("#spoilBtn", epsBox).onclick = (ev) => {
+        store.set("spoilers", spoilers() ? "0" : "1");
+        epsBox.classList.toggle("nospoil", !spoilers());
+        ev.currentTarget.textContent = spoilers() ? "Spoilers shown" : "Spoilers hidden";
+      };
       epsBox.querySelectorAll("[data-season]").forEach(c => c.onclick = () => {
         if (+c.dataset.season === season) return;
         season = +c.dataset.season; drawEps();
@@ -1373,7 +1382,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
         const sp = saved[e.season + ":" + e.episode];
         const isCur = cur && cur.season === e.season && cur.episode === e.episode;
         const soon = !aired(e);
-        const el = h(`<div class="epc ${isCur ? "sel" : ""} ${soon ? "notyet" : ""}">
+        const el = h(`<div class="epc ${isCur ? "sel" : ""} ${soon ? "notyet" : ""} ${sp && sp.finished ? "seen" : ""}">
             <div class="thumb" style="background-image:url('${esc(e.thumbnail || "")}')">
               ${soon ? `<span class="rel soon">${e.released ? "Coming " + esc(relDate(e.released.slice(0, 10))) : "Coming soon"}</span>` : ""}
               ${aired(e) ? `<button class="ep-mark ${sp && sp.finished ? "on" : ""}" title="${sp && sp.finished ? "Watched (click to undo)" : "Mark as watched"}">✓</button>` : ""}

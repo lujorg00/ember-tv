@@ -7,6 +7,7 @@ struct DetailView: View {
     @State private var m: Meta?
     @State private var saved: [String: Position] = [:]   // "season:episode" ("" for a film)
     @State private var season = 1
+    @AppStorage("showSpoilers") private var showSpoilers = false   // off: pictures of episodes you haven't seen are blurred
     @State private var nextUp: (Int, Int)?
     @State private var similar: [Meta] = []
     @State private var scores: [Score] = []
@@ -178,6 +179,11 @@ struct DetailView: View {
                             .buttonStyle(TabTextStyle(selected: s == season))
                     }
                     Text("\(episodes.count) episodes").font(.ember(19)).foregroundStyle(Theme.muted).padding(.leading, 20).padding(.bottom, 12)
+                    Button { withAnimation(.easeInOut(duration: 0.3)) { showSpoilers.toggle() } } label: {
+                        Label(showSpoilers ? "Spoilers shown" : "Spoilers hidden", systemImage: showSpoilers ? "eye" : "eye.slash")
+                    }
+                    .buttonStyle(TabTextStyle(selected: false))
+                    .padding(.leading, 20)
                 }
                 .padding(.vertical, 14)
             }
@@ -203,6 +209,7 @@ struct DetailView: View {
                 ZStack(alignment: .bottomLeading) {
                     RemoteImage(url: v.thumbnail ?? mm.backdropURL) { Theme.card }
                     .frame(width: 320, height: 180)
+                    .blur(radius: !showSpoilers && sp?.finished != true ? 22 : 0, opaque: true)
                     .clipped()
                     if sp?.finished == true {
                         VStack { HStack { Spacer(); WatchBadge(state: "done") }; Spacer() }
