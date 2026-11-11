@@ -354,6 +354,7 @@ enum LogoTone {
             }
             if drew {
                 var sum = 0.0, n = 0, light = 0
+                var lums: [Double] = [], sats: [Double] = []
                 var i = 0
                 while i < px.count {
                     let a = Double(px[i + 3])
@@ -364,11 +365,19 @@ enum LogoTone {
                         sum += lum
                         n += 1
                         if lum > 150 { light += 1 }
+                        lums.append(lum)
+                        let mx = max(r, g, b)
+                        sats.append((mx - min(r, g, b)) / max(1, mx))
                     }
                     i += 4
                 }
-                if n > 20 && sum / Double(n) < 80 {
-                    result = Double(light) / Double(n) < 0.06 ? .dark : .glow
+                let mean = n > 0 ? sum / Double(n) : 255
+                if n > 20 && mean < 80 {
+                    // the same rule as lucapi's: only plain, even, uncoloured dark lettering goes white
+                    let detail = Double(lums.filter { abs($0 - mean) > 45 }.count) / Double(n)
+                    let sat = sats.reduce(0, +) / Double(n)
+                    let plain = Double(light) / Double(n) < 0.06 && detail < 0.12 && sat < 0.3
+                    result = plain ? .dark : .glow
                 }
             }
         }

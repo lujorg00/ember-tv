@@ -366,10 +366,17 @@ function checkLogo(img) {
       c.width = w; c.height = hh;
       const g = c.getContext("2d"); g.drawImage(probe, 0, 0, w, hh);
       const d = g.getImageData(0, 0, w, hh).data;
-      let sum = 0, n = 0, light = 0;
+      const L = [], S = [];
       for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 140) {
-        const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; sum += l; n++; if (l > 150) light++; }
-      const t = n > 20 && sum / n < 80 ? (light / n < 0.06 ? "dark" : "glow") : "";
+        const r = d[i], g = d[i + 1], b = d[i + 2], mx = Math.max(r, g, b);
+        L.push(0.2126 * r + 0.7152 * g + 0.0722 * b); S.push((mx - Math.min(r, g, b)) / Math.max(1, mx)); }
+      const n = L.length, mean = n ? L.reduce((a, b) => a + b, 0) / n : 255;
+      let t = "";
+      if (n > 20 && mean < 80) {   // the same rule as lucapi's: only plain, even, uncoloured dark lettering goes white
+        const light = L.filter(l => l > 150).length / n, detail = L.filter(l => Math.abs(l - mean) > 45).length / n;
+        const sat = S.reduce((a, b) => a + b, 0) / n;
+        t = light < 0.06 && detail < 0.12 && sat < 0.3 ? "dark" : "glow";
+      }
       logoDark.set(u, t);
       apply(t);
     } catch (e) { logoDark.set(u, ""); }

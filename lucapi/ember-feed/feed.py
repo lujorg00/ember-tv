@@ -2784,21 +2784,24 @@ def logo_tone(url):
         from PIL import Image
         im = Image.open(io.BytesIO(http_get(url, timeout=12))).convert("RGBA")
         im.thumbnail((64, 64))
-        tot = n = light = 0
-        for r, g, b, a in im.getdata():
-            if a > 140:
-                lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-                tot += lum
-                n += 1
-                light += lum > 150
-        if n <= 20 or tot / n >= 80:
+        px = [(r, g, b) for r, g, b, a in im.getdata() if a > 140]
+        n = len(px)
+        if n <= 20:
             return {"dark": False, "glow": False}
-        # plain dark lettering (hardly anything light in it): shown white. Dark but detailed (Sonic 3: highlights,
-        # colours): keeps its colours, with a soft light glow round its edge.
-        plain = light / n < 0.06
-        return {"dark": plain, "glow": not plain}
+        lums = [0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in px]
+        mean = sum(lums) / n
+        if mean >= 80:
+            return {"dark": False, "glow": False}
+        light = sum(l > 150 for l in lums) / n
+        detail = sum(abs(l - mean) > 45 for l in lums) / n           # strong contrast inside it
+        sat = sum((max(p) - min(p)) / max(1, max(p)) for p in px) / n   # how colourful
+        # only plain, even, uncoloured dark lettering (black or grey) is shown white; anything with colour or
+        # detail in it (Sonic 3's blues and highlights) keeps its colours, with a soft light glow round its edge
+        plain = light < 0.06 and detail < 0.12 and sat < 0.3
+        return {"dark": plain, "glow": not plain, "why": {"mean": round(mean), "light": round(light, 3),
+                                                          "detail": round(detail, 3), "colour": round(sat, 2)}}
     try:
-        return cached("tone2:" + url, 30 * 86400, build)
+        return cached("tone3:" + url, 30 * 86400, build)
     except Exception:
         return {"dark": False, "glow": False}
 
