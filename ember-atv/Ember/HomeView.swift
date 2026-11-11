@@ -334,10 +334,10 @@ struct WeekPanel: View {
 /// The title's logo, or its name when there's no logo (shown straight away when it's been loaded before).
 /// Whether a logo is mostly dark, from a small copy of it (worked out once per picture and remembered).
 enum LogoTone {
-    enum Tone { case normal, dark, glow }
+    enum Tone: Equatable { case normal, dark, lift(Double) }
     private static var known: [ObjectIdentifier: Tone] = [:]
     static func isDark(_ img: UIImage) -> Bool { tone(img) == .dark }
-    /// dark = plain dark lettering (shown white); glow = dark but detailed (keeps colours, soft light edge).
+    /// dark = black or grey lettering (shown white); lift = dark colours, brightened by that much.
     static func tone(_ img: UIImage) -> Tone {
         let key = ObjectIdentifier(img)
         if let k = known[key] { return k }
@@ -373,11 +373,9 @@ enum LogoTone {
                 }
                 let mean = n > 0 ? sum / Double(n) : 255
                 if n > 20 && mean < 80 {
-                    // the same rule as lucapi's: only plain, even, uncoloured dark lettering goes white
-                    let detail = Double(lums.filter { abs($0 - mean) > 45 }.count) / Double(n)
+                    // the same rule as lucapi's: black/grey goes white, dark colours are brightened
                     let sat = sats.reduce(0, +) / Double(n)
-                    let plain = Double(light) / Double(n) < 0.06 && detail < 0.12 && sat < 0.3
-                    result = plain ? .dark : .glow
+                    result = sat < 0.3 ? .dark : .lift(min(0.42, max(0.18, (135 - mean) / 255)))
                 }
             }
         }
@@ -410,10 +408,8 @@ struct TitleArt: View {
                     switch LogoTone.tone(img) {
                     case .dark:
                         Image(uiImage: img).renderingMode(.template).resizable().scaledToFit().foregroundStyle(.white)
-                    case .glow:
-                        Image(uiImage: img).resizable().scaledToFit()
-                            .shadow(color: Color(red: 1, green: 0.96, blue: 0.9).opacity(0.75), radius: 1.5)
-                            .shadow(color: Color(red: 1, green: 0.93, blue: 0.82).opacity(0.35), radius: 14)
+                    case .lift(let amount):
+                        Image(uiImage: img).resizable().scaledToFit().brightness(amount)
                     case .normal:
                         Image(uiImage: img).resizable().scaledToFit()
                     }

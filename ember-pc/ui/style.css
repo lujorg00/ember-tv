@@ -811,8 +811,8 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 
 /* a title logo that's dark (black or navy lettering) would vanish on Ember's dark pages: it's shown in white */
 img.ttl-logo.dark, img.tp-logo.dark { filter: brightness(0) invert(1) drop-shadow(0 2px 10px #000a); }
-/* dark but detailed (colours and highlights inside): keeps its colours, with a soft light glow round its edge */
-img.ttl-logo.glow, img.tp-logo.glow { filter: drop-shadow(0 0 1.5px rgba(255,244,230,.75)) drop-shadow(0 0 14px rgba(255,236,210,.35)); }
+/* dark colours (navy, deep blue): kept, but brightened so they read clearly - no outline or halo */
+img.ttl-logo.lift, img.tp-logo.lift { filter: brightness(var(--lift, 2)) drop-shadow(0 2px 10px #0009); }
 
 /* lots of seasons: one button, and a grid of numbers under it */
 .season-pick { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }

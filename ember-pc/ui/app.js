@@ -351,11 +351,16 @@ const logoDark = new Map();
 function checkLogo(img) {
   const u = img.getAttribute("src");
   if (!u) return;
-  const apply = (t) => { img.classList.toggle("dark", t === "dark"); img.classList.toggle("glow", t === "glow"); };
+  const apply = (t) => {
+    img.classList.toggle("dark", t === "dark");
+    const lift = typeof t === "number" ? t : 0;
+    img.classList.toggle("lift", lift > 0);
+    if (lift > 0) img.style.setProperty("--lift", lift); else img.style.removeProperty("--lift");
+  };
   if (logoDark.has(u)) { apply(logoDark.get(u)); return; }
   // the logo sites don't let a page read their pictures, so lucapi works it out (and remembers it)
   const viaPi = () => getJson(`${feed()}/logo-tone?u=${encodeURIComponent(u)}`, 15000)
-    .then(r => { const t = r.dark ? "dark" : r.glow ? "glow" : ""; logoDark.set(u, t); apply(t); })
+    .then(r => { const t = r.dark ? "dark" : r.lift > 0 ? r.lift : ""; logoDark.set(u, t); apply(t); })
     .catch(() => {});
   if (!/^https?:/.test(u) || u.startsWith(feed())) { /* our own copy: read it here */ } else { viaPi(); return; }
   const probe = new Image();
@@ -372,10 +377,9 @@ function checkLogo(img) {
         L.push(0.2126 * r + 0.7152 * g + 0.0722 * b); S.push((mx - Math.min(r, g, b)) / Math.max(1, mx)); }
       const n = L.length, mean = n ? L.reduce((a, b) => a + b, 0) / n : 255;
       let t = "";
-      if (n > 20 && mean < 80) {   // the same rule as lucapi's: only plain, even, uncoloured dark lettering goes white
-        const light = L.filter(l => l > 150).length / n, detail = L.filter(l => Math.abs(l - mean) > 45).length / n;
+      if (n > 20 && mean < 80) {   // the same rule as lucapi's: black/grey goes white, dark colours are brightened
         const sat = S.reduce((a, b) => a + b, 0) / n;
-        t = light < 0.06 && detail < 0.12 && sat < 0.3 ? "dark" : "glow";
+        t = sat < 0.3 ? "dark" : Math.round(Math.min(3.2, Math.max(1.6, 140 / Math.max(mean, 1))) * 100) / 100;
       }
       logoDark.set(u, t);
       apply(t);

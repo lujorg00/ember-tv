@@ -2792,16 +2792,15 @@ def logo_tone(url):
         mean = sum(lums) / n
         if mean >= 80:
             return {"dark": False, "glow": False}
-        light = sum(l > 150 for l in lums) / n
-        detail = sum(abs(l - mean) > 45 for l in lums) / n           # strong contrast inside it
         sat = sum((max(p) - min(p)) / max(1, max(p)) for p in px) / n   # how colourful
-        # only plain, even, uncoloured dark lettering (black or grey) is shown white; anything with colour or
-        # detail in it (Sonic 3's blues and highlights) keeps its colours, with a soft light glow round its edge
-        plain = light < 0.06 and detail < 0.12 and sat < 0.3
-        return {"dark": plain, "glow": not plain, "why": {"mean": round(mean), "light": round(light, 3),
-                                                          "detail": round(detail, 3), "colour": round(sat, 2)}}
+        # black or grey lettering: shown white. Dark colours (The Odyssey's navy, Sonic's blue): kept, but brightened
+        # (lift = how much), so navy reads as a clear blue - no outline or halo
+        if sat < 0.3:
+            return {"dark": True, "glow": False, "lift": 0}
+        return {"dark": False, "glow": False, "lift": round(min(3.2, max(1.6, 140 / max(mean, 1))), 2),
+                "why": {"mean": round(mean), "colour": round(sat, 2)}}
     try:
-        return cached("tone3:" + url, 30 * 86400, build)
+        return cached("tone4:" + url, 30 * 86400, build)
     except Exception:
         return {"dark": False, "glow": False}
 
