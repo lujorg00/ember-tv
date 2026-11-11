@@ -916,6 +916,11 @@ def reviews(typ, imdb):
         return {"items": []}
 
 
+def _mdblist_key():
+    """MDBList's key (config.json "mdblist_key"): Rotten Tomatoes and Metacritic when OMDb hasn't got them."""
+    return CFG.get("mdblist_key") or os.environ.get("MDBLIST_API_KEY", "")
+
+
 def _omdb_key():
     """OMDb's key (IMDb, Rotten Tomatoes and Metacritic scores): config.json "omdb_key", else the addon's .env."""
     k = CFG.get("omdb_key") or os.environ.get("OMDB_API_KEY", "")
@@ -932,7 +937,7 @@ def _omdb_key():
 
 
 def ratings(typ, imdb):
-    """The scores for a film or show, small: IMDb, Rotten Tomatoes, Metacritic (OMDb), TMDB and Trakt."""
+    """The scores for a film or show, small: IMDb, Rotten Tomatoes, Metacritic (OMDb, then MDBList), TMDB and Trakt."""
     omdb_ok = [False]
 
     def get():
@@ -957,6 +962,31 @@ def ratings(typ, imdb):
                         out.append({"src": "mc", "label": "Metacritic", "value": r.get("Value", "").split("/")[0]})
             except Exception as e:
                 print(f"[ember-feed] omdb {imdb}: {e}", flush=True)
+        # OMDb often has no Rotten Tomatoes (most series, many newer films): MDBList fills the gaps
+        have = {x["src"] for x in out}
+        mkey = _mdblist_key()
+        if mkey and not ({"rt", "mc"} <= have):
+            try:
+                j = json.loads(http_get(f"https://api.mdblist.com/imdb/{'movie' if typ == 'movie' else 'show'}/{imdb}"
+                                        f"?apikey={urllib.parse.quote(mkey)}", timeout=10))
+                for r in j.get("ratings") or []:
+                    src, v = str(r.get("source", "")).lower(), r.get("value")
+                    if v in (None, "", 0):
+                        continue
+                    n = float(v)
+                    if src in ("tomatoes", "rottentomatoes", "rotten_tomatoes") and "rt" not in have:
+                        out.append({"src": "rt", "label": "Rotten Tomatoes", "value": f"{round(n)}%"})
+                        have.add("rt")
+                    elif src == "metacritic" and "mc" not in have:
+                        out.append({"src": "mc", "label": "Metacritic", "value": str(round(n))})
+                        have.add("mc")
+                    elif src == "imdb" and "imdb" not in have:
+                        out.insert(0, {"src": "imdb", "label": "IMDb", "value": f"{n:.1f}"})
+                        have.add("imdb")
+                if j.get("error"):
+                    print(f"[ember-feed] MDBList said no for {imdb}: {j.get('error')}", flush=True)
+            except Exception as e:
+                print(f"[ember-feed] mdblist {imdb}: {e}", flush=True)
         try:
             f = _tmdb(f"/find/{imdb}", external_source="imdb_id")
             hit = ((f.get("movie_results") if typ == "movie" else f.get("tv_results")) or f.get("movie_results") or f.get("tv_results") or [None])[0]
