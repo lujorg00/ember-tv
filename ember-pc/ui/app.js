@@ -345,10 +345,35 @@ function logoFor(m, type) {
   return p;
 }
 /** The title for a card: <div class="ttl"> holding the logo, or the name if there isn't one. */
+/** Is this logo mostly dark? (black or navy lettering vanishes on Ember's dark pages; such logos are shown white.)
+ *  Worked out once per picture from a small copy of it; the answer is remembered. */
+const logoDark = new Map();
+function checkLogo(img) {
+  const u = img.getAttribute("src");
+  if (!u) return;
+  if (logoDark.has(u)) { img.classList.toggle("dark", logoDark.get(u)); return; }
+  const probe = new Image();
+  probe.crossOrigin = "anonymous";
+  probe.onload = () => {
+    try {
+      const c = document.createElement("canvas"), w = 48, hh = Math.max(8, Math.round(48 * probe.naturalHeight / Math.max(1, probe.naturalWidth)));
+      c.width = w; c.height = hh;
+      const g = c.getContext("2d"); g.drawImage(probe, 0, 0, w, hh);
+      const d = g.getImageData(0, 0, w, hh).data;
+      let sum = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 140) { sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; n++; }
+      const dark = n > 20 && sum / n < 80;
+      logoDark.set(u, dark);
+      img.classList.toggle("dark", dark);
+    } catch (e) { logoDark.set(u, false); }
+  };
+  probe.src = u;
+}
+
 function titleArt(m, type) {
   const box = h(`<div class="ttl"></div>`);
   const name = () => h(`<span class="ttl-name">${esc(m.name || "")}</span>`);
-  const logo = (u) => h(`<img class="ttl-logo" src="${esc(u)}" alt="${esc(m.name || "")}">`);
+  const logo = (u) => { const im = h(`<img class="ttl-logo" src="${esc(u)}" alt="${esc(m.name || "")}">`); checkLogo(im); return im; };
   if (logoReady.has(m.id)) { // known already: straight in, no fade
     const u = logoReady.get(m.id), el = u ? logo(u) : name();
     el.classList.add("on", "now"); box.appendChild(el); return box;
@@ -1217,7 +1242,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
     <div class="btns"><button class="btn primary big" id="resumeBtn">${PLAY}${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>${PLAY}Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
-  const logo = $(".tp-logo", head); if (logo) logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`));
+  const logo = $(".tp-logo", head); if (logo) { logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`)); checkLogo(logo); }
   // In cinemas / not out yet
   (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids: [id] }) }).then(r => r.json()).then(j => (relCache[id] = (j.items || {})[id] || { s: "" })))
@@ -1346,7 +1371,12 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     let season = cur ? cur.season : seasons[0];
     const drawEps = () => {
       // seasons as buttons (a dropdown can't be worked with the Chromecast remote)
-      const opt = seasons.map(s => `<span class="chip btn-chip ${s === season ? "on" : ""}" data-season="${s}">${s === 0 ? "Specials" : "Season " + s}</span>`).join("");
+      const sname = (s) => s === 0 ? "Specials" : "Season " + s;
+      // a few seasons: a button each; lots (Law & Order...): one "Season 9" button that opens a grid of numbers
+      const many = seasons.length > 8;
+      const opt = many
+        ? `<span class="chip btn-chip on season-pick" id="seasonPick">${sname(season)} <i class="caret"></i></span>`
+        : seasons.map(s => `<span class="chip btn-chip ${s === season ? "on" : ""}" data-season="${s}">${sname(s)}</span>`).join("");
       const count = eps.filter(e => e.season === season).length;
       const inSeason = eps.filter(e => e.season === season && aired(e));
       const seasonDone = inSeason.length && inSeason.every(e => isDone(e.season + ":" + e.episode));
@@ -1356,7 +1386,15 @@ async function showTitle(type, id, hint = {}, opts = {}) {
         <div class="grow"></div>
         <button class="btn sm ${seasonDone ? "done" : ""}" id="markSeason">${seasonDone ? "✓  Season watched" : "Mark season watched"}</button>
         <button class="btn sm ghost" id="markShow">${showDone ? "Mark show unwatched" : "Mark whole show watched"}</button>
-        <button class="btn sm ghost" id="spoilBtn">${spoilers() ? "Spoilers shown" : "Spoilers hidden"}</button></div><div class="ep-grid"></div>`;
+        <button class="btn sm ghost" id="spoilBtn">${spoilers() ? "Spoilers shown" : "Spoilers hidden"}</button></div>
+        ${many ? `<div class="season-grid" hidden>${seasons.map(s => `<span class="chip btn-chip ${s === season ? "on" : ""}" data-season="${s}">${s === 0 ? "Specials" : s}</span>`).join("")}</div>` : ""}
+        <div class="ep-grid"></div>`;
+      const sp = $("#seasonPick", epsBox), sg = $(".season-grid", epsBox);
+      if (sp) sp.onclick = () => {
+        sg.hidden = !sg.hidden;
+        sp.classList.toggle("open", !sg.hidden);
+        if (!sg.hidden && TV && window.emberTvFocus) window.emberTvFocus($(".chip.on", sg) || $(".chip", sg));
+      };
       // spoilers: off by default, the pictures of episodes you haven't watched are blurred (titles stay)
       epsBox.classList.toggle("nospoil", !spoilers());
       $("#spoilBtn", epsBox).onclick = (ev) => {
@@ -1367,7 +1405,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
       epsBox.querySelectorAll("[data-season]").forEach(c => c.onclick = () => {
         if (+c.dataset.season === season) return;
         season = +c.dataset.season; drawEps();
-        const again = $(`[data-season="${season}"]`, epsBox);
+        const again = $(`[data-season="${season}"]`, epsBox) || $("#seasonPick", epsBox);
         if (TV && again && window.emberTvFocus) window.emberTvFocus(again);
       });
       $("#markSeason", epsBox).onclick = async () => {

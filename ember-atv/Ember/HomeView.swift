@@ -332,6 +332,44 @@ struct WeekPanel: View {
 }
 
 /// The title's logo, or its name when there's no logo (shown straight away when it's been loaded before).
+/// Whether a logo is mostly dark, from a small copy of it (worked out once per picture and remembered).
+enum LogoTone {
+    private static var known: [ObjectIdentifier: Bool] = [:]
+    static func isDark(_ img: UIImage) -> Bool {
+        let key = ObjectIdentifier(img)
+        if let k = known[key] { return k }
+        var dark = false
+        if let cg = img.cgImage {
+            let w = 48, h = max(8, Int(48 * Double(cg.height) / Double(max(1, cg.width))))
+            var px = [UInt8](repeating: 0, count: w * h * 4)
+            let drew: Bool = px.withUnsafeMutableBytes { buf in
+                guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+                return true
+            }
+            if drew {
+                var sum = 0.0, n = 0
+                var i = 0
+                while i < px.count {
+                    let a = Double(px[i + 3])
+                    if a > 140 {
+                        // premultiplied: undo it before judging brightness
+                        let r = Double(px[i]) * 255 / a, g = Double(px[i + 1]) * 255 / a, b = Double(px[i + 2]) * 255 / a
+                        sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                        n += 1
+                    }
+                    i += 4
+                }
+                dark = n > 20 && sum / Double(n) < 80
+            }
+        }
+        known[key] = dark
+        return dark
+    }
+}
+
 struct TitleArt: View {
     let meta: Meta
     var height: CGFloat
@@ -351,7 +389,15 @@ struct TitleArt: View {
     var body: some View {
         Group {
             if let img {
-                Image(uiImage: img).resizable().scaledToFit().frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
+                // a dark logo (black or navy lettering) would vanish on Ember's dark pages: shown in white instead
+                Group {
+                    if LogoTone.isDark(img) {
+                        Image(uiImage: img).renderingMode(.template).resizable().scaledToFit().foregroundStyle(.white)
+                    } else {
+                        Image(uiImage: img).resizable().scaledToFit()
+                    }
+                }
+                    .frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
                     .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
                     .transition(.opacity)
             } else if meta.logoURL == nil || failed {

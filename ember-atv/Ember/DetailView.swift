@@ -174,9 +174,21 @@ struct DetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
-                    ForEach(seasons, id: \.self) { s in
-                        Button { season = s } label: { Text("Season \(s)") }
-                            .buttonStyle(TabTextStyle(selected: s == season))
+                    if seasons.count > 8 {
+                        // lots of seasons: one button that opens a list, not a long row
+                        Menu {
+                            ForEach(seasons, id: \.self) { s in
+                                Button { season = s } label: { Text(s == 0 ? "Specials" : "Season \(s)") }
+                            }
+                        } label: {
+                            Label(season == 0 ? "Specials" : "Season \(season)", systemImage: "chevron.down")
+                        }
+                        .buttonStyle(TabTextStyle(selected: true))
+                    } else {
+                        ForEach(seasons, id: \.self) { s in
+                            Button { season = s } label: { Text("Season \(s)") }
+                                .buttonStyle(TabTextStyle(selected: s == season))
+                        }
                     }
                     Text("\(episodes.count) episodes").font(.ember(19)).foregroundStyle(Theme.muted).padding(.leading, 20).padding(.bottom, 12)
                     Button { withAnimation(.easeInOut(duration: 0.3)) { showSpoilers.toggle() } } label: {

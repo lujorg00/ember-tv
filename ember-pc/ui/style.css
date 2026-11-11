@@ -80,11 +80,14 @@ input { font: inherit; color: var(--text); }
 
 /* title page */
 .tp { position: relative; min-height: 100%; }
-.tp-bd { position: absolute; left: 0; right: 0; top: 0; height: 86vh; background-size: cover; background-position: center 18%; opacity: 0; transition: opacity .8s; z-index: 0; }
+.tp-bd { position: absolute; left: 0; right: 0; top: 0; height: 86vh; background-size: cover; background-position: center 18%; opacity: 0; transition: opacity .8s; z-index: 0;
+  /* fades out to nothing at the bottom (no edge against the page's background glow) */
+  -webkit-mask-image: linear-gradient(180deg, #000 45%, rgba(0,0,0,.5) 72%, transparent 100%); mask-image: linear-gradient(180deg, #000 45%, rgba(0,0,0,.5) 72%, transparent 100%); }
 .tp-bd.show { opacity: .9; }
 .tp-scrim { position: absolute; left: 0; right: 0; top: 0; height: 86vh; z-index: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(14,11,9,.97) 0%, rgba(14,11,9,.88) 32%, rgba(14,11,9,.35) 62%, rgba(14,11,9,.15) 100%),
-              linear-gradient(0deg, #0E0B09 6%, rgba(14,11,9,.8) 34%, rgba(14,11,9,0) 70%); }
+              linear-gradient(0deg, rgba(14,11,9,.6) 6%, rgba(14,11,9,.4) 34%, rgba(14,11,9,0) 70%);
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%); mask-image: linear-gradient(180deg, #000 55%, transparent 100%); }
 .tp .back { position: relative; z-index: 2; margin: 20px 0 0 36px; color: #CDBBA9; padding: 6px 12px; border-radius: 8px; background: rgba(14,11,9,.5); }
 .tp .back:hover { color: var(--text); background: rgba(36,25,18,.85); }
 .tp-head { position: relative; z-index: 1; padding: 18px 48px 26px; max-width: 760px; min-height: 40vh; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -807,3 +810,16 @@ body.playing #sky, body.playing #glow, body.playing #view > * { visibility: hidd
 
 /* spoilers hidden (the default): pictures of episodes you haven't watched are blurred; titles stay readable */
 .nospoil .epc:not(.seen) .thumb::before { content: ""; position: absolute; inset: -24px; background: inherit; filter: blur(16px) brightness(.85); }
+
+/* a title logo that's dark (black or navy lettering) would vanish on Ember's dark pages: it's shown in white */
+img.ttl-logo.dark, img.tp-logo.dark { filter: brightness(0) invert(1) drop-shadow(0 2px 10px #000a); }
+
+/* lots of seasons: one button, and a grid of numbers under it */
+.season-pick { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.season-pick .caret { width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); margin-top: -4px; transition: transform .2s; }
+.season-pick.open .caret { transform: rotate(-135deg); margin-top: 3px; }
+.season-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 8px; max-width: 760px; margin: 2px 0 18px;
+  padding: 12px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.season-grid[hidden] { display: none; }
+.season-grid .chip { justify-content: center; text-align: center; cursor: pointer; padding: 6px 0; }
+.season-grid .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
