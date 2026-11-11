@@ -79,15 +79,13 @@ input { font: inherit; color: var(--text); }
 .muted { color: var(--muted); }
 
 /* title page */
-.tp { position: relative; min-height: 100%; }
-.tp-bd { position: absolute; left: 0; right: 0; top: 0; height: 86vh; background-size: cover; background-position: center 18%; opacity: 0; transition: opacity .8s; z-index: 0;
-  /* fades out to nothing at the bottom (no edge against the page's background glow) */
-  -webkit-mask-image: linear-gradient(180deg, #000 45%, rgba(0,0,0,.5) 72%, transparent 100%); mask-image: linear-gradient(180deg, #000 45%, rgba(0,0,0,.5) 72%, transparent 100%); }
+/* its own solid dark base, so the backdrop's fade meets plain dark, not the page's glow (no edge) */
+.tp { position: relative; min-height: 100%; min-height: 100vh; background: #0E0B09; }
+.tp-bd { position: absolute; left: 0; right: 0; top: 0; height: 86vh; background-size: cover; background-position: center 18%; opacity: 0; transition: opacity .8s; z-index: 0; }
 .tp-bd.show { opacity: .9; }
 .tp-scrim { position: absolute; left: 0; right: 0; top: 0; height: 86vh; z-index: 0; pointer-events: none;
   background: linear-gradient(90deg, rgba(14,11,9,.97) 0%, rgba(14,11,9,.88) 32%, rgba(14,11,9,.35) 62%, rgba(14,11,9,.15) 100%),
-              linear-gradient(0deg, rgba(14,11,9,.6) 6%, rgba(14,11,9,.4) 34%, rgba(14,11,9,0) 70%);
-  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%); mask-image: linear-gradient(180deg, #000 55%, transparent 100%); }
+              linear-gradient(0deg, #0E0B09 2%, rgba(14,11,9,.8) 34%, rgba(14,11,9,0) 70%); }
 .tp .back { position: relative; z-index: 2; margin: 20px 0 0 36px; color: #CDBBA9; padding: 6px 12px; border-radius: 8px; background: rgba(14,11,9,.5); }
 .tp .back:hover { color: var(--text); background: rgba(36,25,18,.85); }
 .tp-head { position: relative; z-index: 1; padding: 18px 48px 26px; max-width: 760px; min-height: 40vh; display: flex; flex-direction: column; justify-content: flex-end; }

@@ -352,6 +352,11 @@ function checkLogo(img) {
   const u = img.getAttribute("src");
   if (!u) return;
   if (logoDark.has(u)) { img.classList.toggle("dark", logoDark.get(u)); return; }
+  // the logo sites don't let a page read their pictures, so lucapi works it out (and remembers it)
+  const viaPi = () => getJson(`${feed()}/logo-tone?u=${encodeURIComponent(u)}`, 15000)
+    .then(r => { logoDark.set(u, !!r.dark); img.classList.toggle("dark", !!r.dark); })
+    .catch(() => {});
+  if (!/^https?:/.test(u) || u.startsWith(feed())) { /* our own copy: read it here */ } else { viaPi(); return; }
   const probe = new Image();
   probe.crossOrigin = "anonymous";
   probe.onload = () => {

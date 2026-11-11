@@ -2770,6 +2770,32 @@ def _logo_look(data):
 LOGO_VERSION = 4
 
 
+_TONE_HOSTS = ("images.metahub.space", "image.tmdb.org", "assets.fanart.tv", "live.metahub.space", "episodes.metahub.space")
+
+
+def logo_tone(url):
+    """Is a title logo mostly dark (black or navy lettering, which vanishes on Ember's dark pages)? The apps show
+    those in white. Worked out here because the logo sites don't let a page read their pictures. A month per logo."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    if not url.startswith("https://") or not any(host == h or host.endswith("." + h) for h in _TONE_HOSTS):
+        return {"dark": False}
+
+    def build():
+        from PIL import Image
+        im = Image.open(io.BytesIO(http_get(url, timeout=12))).convert("RGBA")
+        im.thumbnail((64, 64))
+        tot = n = 0
+        for r, g, b, a in im.getdata():
+            if a > 140:
+                tot += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                n += 1
+        return {"dark": n > 20 and tot / n < 80}
+    try:
+        return cached("tone:" + url, 30 * 86400, build)
+    except Exception:
+        return {"dark": False}
+
+
 def _logo(url, knockout=False, whiten_right=False):
     """Downloads a logo once and keeps it on the Pi (served at /logo/<key>), with how to show it (see _logo_look).
     knockout: it's an app icon; cut away its square background first."""
@@ -4042,6 +4068,8 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/picks/[A-Za-z0-9_=-]+/stream/(movie|series)/tt[0-9:]+\.json", path):
                 parts = path.split("/")
                 self._json(picks_streams(parts[2], parts[4], parts[5][:-5]))
+            elif path == "/logo-tone":
+                self._json(logo_tone((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("u") or [""])[0]))
             elif re.fullmatch(r"/logo/[0-9a-f]{20}", path):
                 f = LOGO_DIR / path.split("/")[2]
                 if not f.exists():
