@@ -22,6 +22,36 @@ local hits, out = {}, {}
 local mx, my = -1, -1
 local fullscreen = opts.fs
 
+-- The volume (and mute) you last chose, kept between videos: mpv starts afresh each time, so it lives in a file
+-- beside Ember's other player settings (the subtitle size) and is put back when the player opens.
+local setdir = (opts.statefile ~= "" and opts.statefile:match("^(.*)[/\\]")) or nil
+local volfile = setdir and (setdir .. "/volume.txt") or nil
+do
+    local f = volfile and io.open(volfile, "r")
+    if f then
+        local v, m = f:read("*l"), f:read("*l")
+        f:close()
+        v = tonumber(v)
+        if v and v >= 0 and v <= 130 then mp.set_property_number("volume", v) end
+        if m == "yes" then mp.set_property_bool("mute", true) end
+    end
+end
+local vol_save_timer = nil
+local function save_volume()
+    if not volfile then return end
+    if vol_save_timer then vol_save_timer:kill() end
+    vol_save_timer = mp.add_timeout(0.6, function()   -- once you've stopped dragging, not on every step
+        local f = io.open(volfile, "w")
+        if f then
+            f:write(tostring(math.floor(mp.get_property_number("volume", 100) + 0.5)) .. "\n"
+                .. (mp.get_property_bool("mute", false) and "yes" or "no") .. "\n")
+            f:close()
+        end
+    end)
+end
+mp.observe_property("volume", "number", function(_, v) if v then save_volume() end end)
+mp.observe_property("mute", "bool", function() save_volume() end)
+
 -- Full screen is Ember's window, not mpv's (mpv sits over Ember's page): ask Ember through a small file it watches.
 local function toggle_fullscreen()
     if opts.fsfile == "" then return end
