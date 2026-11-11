@@ -351,10 +351,11 @@ const logoDark = new Map();
 function checkLogo(img) {
   const u = img.getAttribute("src");
   if (!u) return;
-  if (logoDark.has(u)) { img.classList.toggle("dark", logoDark.get(u)); return; }
+  const apply = (t) => { img.classList.toggle("dark", t === "dark"); img.classList.toggle("glow", t === "glow"); };
+  if (logoDark.has(u)) { apply(logoDark.get(u)); return; }
   // the logo sites don't let a page read their pictures, so lucapi works it out (and remembers it)
   const viaPi = () => getJson(`${feed()}/logo-tone?u=${encodeURIComponent(u)}`, 15000)
-    .then(r => { logoDark.set(u, !!r.dark); img.classList.toggle("dark", !!r.dark); })
+    .then(r => { const t = r.dark ? "dark" : r.glow ? "glow" : ""; logoDark.set(u, t); apply(t); })
     .catch(() => {});
   if (!/^https?:/.test(u) || u.startsWith(feed())) { /* our own copy: read it here */ } else { viaPi(); return; }
   const probe = new Image();
@@ -365,12 +366,13 @@ function checkLogo(img) {
       c.width = w; c.height = hh;
       const g = c.getContext("2d"); g.drawImage(probe, 0, 0, w, hh);
       const d = g.getImageData(0, 0, w, hh).data;
-      let sum = 0, n = 0;
-      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 140) { sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; n++; }
-      const dark = n > 20 && sum / n < 80;
-      logoDark.set(u, dark);
-      img.classList.toggle("dark", dark);
-    } catch (e) { logoDark.set(u, false); }
+      let sum = 0, n = 0, light = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 140) {
+        const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; sum += l; n++; if (l > 150) light++; }
+      const t = n > 20 && sum / n < 80 ? (light / n < 0.06 ? "dark" : "glow") : "";
+      logoDark.set(u, t);
+      apply(t);
+    } catch (e) { logoDark.set(u, ""); }
   };
   probe.src = u;
 }

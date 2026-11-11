@@ -2778,22 +2778,29 @@ def logo_tone(url):
     those in white. Worked out here because the logo sites don't let a page read their pictures. A month per logo."""
     host = urllib.parse.urlparse(url).hostname or ""
     if not url.startswith("https://") or not any(host == h or host.endswith("." + h) for h in _TONE_HOSTS):
-        return {"dark": False}
+        return {"dark": False, "glow": False}
 
     def build():
         from PIL import Image
         im = Image.open(io.BytesIO(http_get(url, timeout=12))).convert("RGBA")
         im.thumbnail((64, 64))
-        tot = n = 0
+        tot = n = light = 0
         for r, g, b, a in im.getdata():
             if a > 140:
-                tot += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                tot += lum
                 n += 1
-        return {"dark": n > 20 and tot / n < 80}
+                light += lum > 150
+        if n <= 20 or tot / n >= 80:
+            return {"dark": False, "glow": False}
+        # plain dark lettering (hardly anything light in it): shown white. Dark but detailed (Sonic 3: highlights,
+        # colours): keeps its colours, with a soft light glow round its edge.
+        plain = light / n < 0.06
+        return {"dark": plain, "glow": not plain}
     try:
-        return cached("tone:" + url, 30 * 86400, build)
+        return cached("tone2:" + url, 30 * 86400, build)
     except Exception:
-        return {"dark": False}
+        return {"dark": False, "glow": False}
 
 
 def _logo(url, knockout=False, whiten_right=False):

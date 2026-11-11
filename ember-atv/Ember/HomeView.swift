@@ -334,11 +334,14 @@ struct WeekPanel: View {
 /// The title's logo, or its name when there's no logo (shown straight away when it's been loaded before).
 /// Whether a logo is mostly dark, from a small copy of it (worked out once per picture and remembered).
 enum LogoTone {
-    private static var known: [ObjectIdentifier: Bool] = [:]
-    static func isDark(_ img: UIImage) -> Bool {
+    enum Tone { case normal, dark, glow }
+    private static var known: [ObjectIdentifier: Tone] = [:]
+    static func isDark(_ img: UIImage) -> Bool { tone(img) == .dark }
+    /// dark = plain dark lettering (shown white); glow = dark but detailed (keeps colours, soft light edge).
+    static func tone(_ img: UIImage) -> Tone {
         let key = ObjectIdentifier(img)
         if let k = known[key] { return k }
-        var dark = false
+        var result = Tone.normal
         if let cg = img.cgImage {
             let w = 48, h = max(8, Int(48 * Double(cg.height) / Double(max(1, cg.width))))
             var px = [UInt8](repeating: 0, count: w * h * 4)
@@ -350,23 +353,27 @@ enum LogoTone {
                 return true
             }
             if drew {
-                var sum = 0.0, n = 0
+                var sum = 0.0, n = 0, light = 0
                 var i = 0
                 while i < px.count {
                     let a = Double(px[i + 3])
                     if a > 140 {
                         // premultiplied: undo it before judging brightness
                         let r = Double(px[i]) * 255 / a, g = Double(px[i + 1]) * 255 / a, b = Double(px[i + 2]) * 255 / a
-                        sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+                        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                        sum += lum
                         n += 1
+                        if lum > 150 { light += 1 }
                     }
                     i += 4
                 }
-                dark = n > 20 && sum / Double(n) < 80
+                if n > 20 && sum / Double(n) < 80 {
+                    result = Double(light) / Double(n) < 0.06 ? .dark : .glow
+                }
             }
         }
-        known[key] = dark
-        return dark
+        known[key] = result
+        return result
     }
 }
 
@@ -391,9 +398,14 @@ struct TitleArt: View {
             if let img {
                 // a dark logo (black or navy lettering) would vanish on Ember's dark pages: shown in white instead
                 Group {
-                    if LogoTone.isDark(img) {
+                    switch LogoTone.tone(img) {
+                    case .dark:
                         Image(uiImage: img).renderingMode(.template).resizable().scaledToFit().foregroundStyle(.white)
-                    } else {
+                    case .glow:
+                        Image(uiImage: img).resizable().scaledToFit()
+                            .shadow(color: Color(red: 1, green: 0.96, blue: 0.9).opacity(0.75), radius: 1.5)
+                            .shadow(color: Color(red: 1, green: 0.93, blue: 0.82).opacity(0.35), radius: 14)
+                    case .normal:
                         Image(uiImage: img).resizable().scaledToFit()
                     }
                 }
