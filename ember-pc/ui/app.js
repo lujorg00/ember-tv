@@ -475,7 +475,8 @@ async function relFlush() {
       for (const i of ids) relCache[i] = items[i] || { s: "" };
     } catch (e) { return; }
   }
-  document.querySelectorAll(".poster[data-wid]").forEach(relApply);
+  // every kind of card: posters, the wide Trending / Top cards, the spotlight
+  document.querySelectorAll(".poster[data-wid], .t10-art[data-wid], .spot[data-wid]").forEach(relApply);
 }
 function relScan() {
   if (watchlistIds.size) applyBookmarks(document.getElementById("view"));
