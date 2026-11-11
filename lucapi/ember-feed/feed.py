@@ -3166,10 +3166,17 @@ def _release_one(imdb):
     """{"s": "cinema" | "soon" | "", "d": "YYYY-MM-DD"} for one title, from TMDB's release dates (UK, else US).
     cinema: out at the cinema but not yet to watch at home (d = its digital date, if known)
     soon:   not out yet (d = when it comes out)"""
-    found = _tmdb(f"/find/{imdb}", external_source="imdb_id")
     today = datetime.now(TZ).date().isoformat()
-    tv = (found.get("tv_results") or [None])[0]
-    mv = (found.get("movie_results") or [None])[0]
+    if imdb.startswith("tmdb:"):   # upcoming titles in some lists only have a TMDB id
+        tid = imdb.split(":", 1)[1]
+        try:
+            mv, tv = _tmdb(f"/movie/{tid}"), None
+        except Exception:
+            mv, tv = None, _tmdb(f"/tv/{tid}")
+    else:
+        found = _tmdb(f"/find/{imdb}", external_source="imdb_id")
+        tv = (found.get("tv_results") or [None])[0]
+        mv = (found.get("movie_results") or [None])[0]
     if tv and not mv:
         first = tv.get("first_air_date") or ""
         return {"s": "soon", "d": first} if first and first > today else {"s": "", "d": ""}
@@ -3203,7 +3210,8 @@ def _release_one(imdb):
 
 def release_status(body):
     """For the labels on posters: {imdb: {"s", "d"}} for the ids asked about (recent titles only, kept for 12 hours)."""
-    ids = [i for i in (body.get("ids") or [])[:150] if isinstance(i, str) and i.startswith("tt") and i[2:].isdigit()]
+    ids = [i for i in (body.get("ids") or [])[:150] if isinstance(i, str) and
+           ((i.startswith("tt") and i[2:].isdigit()) or (i.startswith("tmdb:") and i[5:].isdigit()))]
     now = int(time.time())
     with _db_lock:
         db().execute("CREATE TABLE IF NOT EXISTS release_cache (imdb TEXT PRIMARY KEY, s TEXT, d TEXT, at INTEGER)")
