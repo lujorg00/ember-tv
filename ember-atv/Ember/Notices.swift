@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// Calendar and reminder alerts, new episodes, and the cats coming and going - the same pop-ups as Ember TV, from
 /// lucapi. tvOS doesn't let an app put anything over other apps, so these show while Ember is open (including
@@ -11,6 +12,10 @@ final class Notices: ObservableObject {
     @Published var top: (text: String, level: Int)? = nil
     @Published var cat: String? = nil
     @Published var glance: JSON = [:]
+    /// the cat flap camera (the Ring's live view), while lucapi says to show it
+    struct Cam: Equatable { let id: String; let title: String; let player: AVPlayer }
+    @Published var cam: Cam? = nil
+    private var camShownId = ""
 
     private var alerts: [Alert] = []
     private var alertsAt = Date.distantPast
@@ -29,11 +34,16 @@ final class Notices: ObservableObject {
         guard !running else { return }
         running = true
         Task {
+            var n = 0
             while true {
-                if Date().timeIntervalSince(alertsAt) > 300 { await fetchAlerts() }
-                showDue()
-                await pollCats()
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                if n % 4 == 0 {   // every 20 s, as before
+                    if Date().timeIntervalSince(alertsAt) > 300 { await fetchAlerts() }
+                    showDue()
+                    await pollCats()
+                }
+                await pollCam()   // every 5 s, so the camera comes up while the cat's still there
+                n += 1
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
     }
@@ -79,6 +89,27 @@ final class Notices: ObservableObject {
         }
         catsKnown = true
         if !msg.isEmpty { showCat(msg.joined(separator: "  ·  ")) }
+    }
+
+    private func pollCam() async {
+        guard let j = try? await API.feedGet("/cats", timeout: 4), let c = j["cam"] as? JSON,
+              let id = c.str("id"), let url = c.str("url").flatMap(URL.init(string:)), id != camShownId else { return }
+        camShownId = id
+        let secs = max(10, c.int("secs") ?? 45)
+        let p = AVPlayer(url: url)
+        p.isMuted = true
+        p.automaticallyWaitsToMinimizeStalling = false
+        p.play()
+        let shown = Cam(id: id, title: c.str("title") ?? "Cat flap", player: p)
+        Diag.log("camera: showing \(shown.title)")
+        withAnimation(.easeOut(duration: 0.35)) { cam = shown }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(secs) * 1_000_000_000)
+            guard cam?.id == id else { return }
+            withAnimation(.easeIn(duration: 0.35)) { cam = nil }
+            p.pause()
+            p.replaceCurrentItem(with: nil)
+        }
     }
 
     /// A calendar-style note, top right, one at a time (urgent ones jump the queue).
@@ -164,9 +195,49 @@ struct NoticeOverlay: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if let c = notices.cam {
+                // the cat flap camera: bottom right, muted, about 45 s
+                ZStack(alignment: .topLeading) {
+                    Theme.bg
+                    Text("Connecting to the camera…").font(.ember(18)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    CamLayer(player: c.player)
+                    HStack(spacing: 8) {
+                        Image(systemName: "pawprint.fill").font(.system(size: 16)).foregroundStyle(Theme.accent)
+                        Text(c.title).font(.ember(18, .semibold))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Theme.bg.opacity(0.8), in: Capsule())
+                    .padding(14)
+                }
+                .frame(width: 640, height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: 26))
+                .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.14)))
+                .shadow(color: .black.opacity(0.55), radius: 30, y: 10)
+                .padding(.trailing, 70).padding(.bottom, 56)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .allowsHitTesting(false)
         .ignoresSafeArea()
     }
+}
+
+/// The camera's picture (AVPlayerLayer: no controls, nothing to focus).
+struct CamLayer: UIViewRepresentable {
+    let player: AVPlayer
+    final class V: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var pl: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+    func makeUIView(context: Context) -> V {
+        let v = V()
+        v.pl.videoGravity = .resizeAspectFill
+        v.pl.player = player
+        return v
+    }
+    func updateUIView(_ v: V, context: Context) { v.pl.player = player }
 }
 
 /// Top right of Home, small, beside the tab bar: the cats on one line (green paw in, grey out), what's next below.

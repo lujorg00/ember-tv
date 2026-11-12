@@ -10,6 +10,7 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
+import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.os.Handler;
@@ -19,10 +20,19 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.TextureView;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -43,6 +53,7 @@ import java.util.concurrent.Executors;
  *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
  *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each,
  *    12h / 1h / 30 min before and getting more urgent; early shifts 9h before with when to be up).
+ *  - the cat flap camera: when a cat reaches the flap, the Ring's live view in a small window bottom right (muted).
  */
 public class DimService extends AccessibilityService {
 
@@ -51,7 +62,7 @@ public class DimService extends AccessibilityService {
     private static final int DIM_AT = 23 * 60 + 30, HEAVY_AT = 24 * 60, LIFT_AT = 8 * 60;
     private static final int EARLY_SHIFT_BEFORE = 10 * 60; // a shift before 10am counts as early
     private static final int EARLY_BY = 60;                // and brings the dimming forward an hour
-    private static final long CAT_POLL_MS = 20_000, NIGHT_POLL_MS = 15 * 60_000;
+    private static final long CAT_POLL_MS = 5_000, NIGHT_POLL_MS = 15 * 60_000;
     private static final long RESUME_NOTE_MS = 30_000, CAT_NOTE_MS = 5_000, ALERT_NOTE_MS = 10_000;
     private static final long ALERT_POLL_MS = 5 * 60_000;
 
@@ -296,11 +307,14 @@ public class DimService extends AccessibilityService {
                         @Override
                         public void run() {
                             try {
-                                final JSONArray cats = new JSONObject(AddonClient.get(url)).optJSONArray("cats");
+                                final JSONObject got = new JSONObject(AddonClient.get(url));
+                                final JSONArray cats = got.optJSONArray("cats");
+                                final JSONObject cam = got.optJSONObject("cam");
                                 main.post(new Runnable() {
                                     @Override
                                     public void run() {
                                         catsChanged(cats);
+                                        if (cam != null) showCam(cam);
                                     }
                                 });
                             } catch (Exception e) {
@@ -451,6 +465,122 @@ public class DimService extends AccessibilityService {
         }
     }
 
+    // ---------------------------------------------------------------- the cat flap camera
+
+    private String camShownId = "";
+    private ExoPlayer camPlayer;
+    private FrameLayout camBox;
+    private long camUntil;
+
+    /** The Ring's live view, small, bottom right, muted, for as long as lucapi says (about 45 s). */
+    private void showCam(JSONObject cam) {
+        String id = cam.optString("id"), url = cam.optString("url");
+        if (id.isEmpty() || url.isEmpty() || id.equals(camShownId) || !power.isInteractive()) return;
+        camShownId = id;
+        long ms = Math.max(10, cam.optInt("secs", 45)) * 1000L;
+        note("camera: showing \"" + cam.optString("title") + "\"");
+        ensureLayer();
+        if (layer == null) return;
+        stopCam();
+        float d = getResources().getDisplayMetrics().density;
+        final int w = Math.round(400 * d), h = Math.round(225 * d), r = Math.round(18 * d);
+
+        camBox = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xF01A1410);
+        bg.setCornerRadius(r);
+        bg.setStroke(Math.max(1, Math.round(d)), 0x33FFFFFF);
+        camBox.setBackground(bg);
+        camBox.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
+            }
+        });
+        camBox.setClipToOutline(true);
+        camBox.setElevation(12 * d);
+
+        TextureView video = new TextureView(this);
+        camBox.addView(video, new FrameLayout.LayoutParams(w, h));
+        final TextView wait = new TextView(this);
+        wait.setText("Connecting to the camera\u2026");
+        wait.setTextColor(0xB3F3E7D8);
+        wait.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        FrameLayout.LayoutParams wl = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        wl.gravity = Gravity.CENTER;
+        camBox.addView(wait, wl);
+        TextView title = pill(d);
+        title.setAlpha(1f);
+        title.setText("\uD83D\uDC3E  " + cam.optString("title", "Cat flap"));
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        tl.gravity = Gravity.TOP | Gravity.START;
+        tl.leftMargin = tl.topMargin = Math.round(10 * d);
+        camBox.addView(title, tl);
+
+        FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(w, h);
+        bp.gravity = Gravity.BOTTOM | Gravity.END;
+        bp.rightMargin = Math.round(40 * d);
+        bp.bottomMargin = Math.round(36 * d);
+        camBox.setAlpha(0f);
+        camBox.setTranslationY(40 * d);
+        layer.addView(camBox, bp);
+        camBox.animate().alpha(1f).translationY(0).setDuration(350).start();
+
+        try {
+            camPlayer = new ExoPlayer.Builder(this).build();
+            camPlayer.setVolume(0f);
+            camPlayer.setVideoTextureView(video);
+            camPlayer.addListener(new Player.Listener() {
+                @Override
+                public void onRenderedFirstFrame() {
+                    wait.setVisibility(View.GONE);
+                }
+
+                @Override
+                public void onPlayerError(PlaybackException e) {
+                    wait.setText("The camera didn't connect");
+                    note("camera: couldn't play: " + e.getErrorCodeName() + " " + e.getMessage());
+                }
+            });
+            camPlayer.setMediaItem(new MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1500).build()).build());
+            camPlayer.prepare();
+            camPlayer.play();
+        } catch (Exception e) {
+            note("camera: couldn't start the player: " + e);
+        }
+        camUntil = System.currentTimeMillis() + ms;
+        main.removeCallbacks(camEnd);
+        main.postDelayed(camEnd, ms);
+        scheduleDrop(ms + 1000);
+    }
+
+    private final Runnable camEnd = new Runnable() {
+        @Override
+        public void run() {
+            final FrameLayout box = camBox;
+            if (box == null) return;
+            box.animate().alpha(0f).setDuration(400).withEndAction(new Runnable() {
+                @Override
+                public void run() {
+                    stopCam();
+                    scheduleDrop(300);
+                }
+            }).start();
+        }
+    };
+
+    private void stopCam() {
+        if (camPlayer != null) {
+            try { camPlayer.release(); } catch (Exception ignored) { }
+            camPlayer = null;
+        }
+        if (camBox != null && layer != null) layer.removeView(camBox);
+        camBox = null;
+        camUntil = 0;
+    }
+
     private String feed(String path) {
         return prefs.feedConfigured() ? prefs.feedUrl() + path : null;
     }
@@ -482,14 +612,14 @@ public class DimService extends AccessibilityService {
         @Override
         public void run() {
             long now = System.currentTimeMillis();
-            if (prefs.dimLevel() == 0 && now >= noteUntil && now >= catUntil) removeLayer();
+            if (prefs.dimLevel() == 0 && now >= noteUntil && now >= catUntil && now >= camUntil) removeLayer();
         }
     };
 
     private void scheduleDrop(long ms) {
         main.removeCallbacks(dropIfIdle);
         long now = System.currentTimeMillis();
-        main.postDelayed(dropIfIdle, Math.max(ms, Math.max(noteUntil, catUntil) - now + 800));
+        main.postDelayed(dropIfIdle, Math.max(ms, Math.max(Math.max(noteUntil, catUntil), camUntil) - now + 800));
     }
 
     /** The dimmer's own short message, bottom centre. */
@@ -668,7 +798,8 @@ public class DimService extends AccessibilityService {
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT);
         try {
             wm.addView(layer, wp);
@@ -683,6 +814,7 @@ public class DimService extends AccessibilityService {
 
     private void removeLayer() {
         if (layer == null) return;
+        stopCam();
         try {
             wm.removeView(layer);
         } catch (Exception ignored) {

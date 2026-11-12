@@ -5,7 +5,8 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /screensaver  -> calendar events, Pi service status, Pi health, photo list
   GET /status       -> cards for the projects strip on Ember's Apps page
   GET /photo/<name> -> a photo from your photos folder
-  GET /cats         -> just the cats, in or out (polled often, for the pop-ups)
+  GET /cats         -> just the cats, in or out (polled often, for the pop-ups); "cam" while the Ring camera pop-up is on
+  GET /cam/test     -> pops the Ring camera up on Ember TV and Apple TV now, as if a cat were at the flap
   GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
@@ -376,7 +377,7 @@ def _cats():
             room = str(c.get("room") or "").lower()
             home = bool(zone) and "unreachable" not in zone and room not in outdoor
             since = _ago(c.get("since"))
-            out.append({"name": str(c.get("name", "?")), "home": home,
+            out.append({"name": str(c.get("name", "?")), "home": home, "room": room,
                         "detail": ("In" if home else "Out") + (f" \u00b7 {since}" if since else "")})
             continue
         state = str(c.get("state", c.get("status", ""))).lower()
@@ -430,6 +431,75 @@ def status_cards():
             pass
     return {"ticker": ticker, "lucapi": {"ok": not down, "text": text}, "cats": cats, "cards": cards[:5],
             "weather": weather()}
+
+
+# ------------------------------------------------------------------ the Ring camera by the cat flap
+# When a cat reaches the flap (the tracker puts it in the "cat_flap" room, or it goes in or out), Ember TV and Apple TV
+# pop up the Ring's live view for a while. lucapi's ring-mqtt (logged into Ring) turns the live view into a local stream
+# and go2rtc serves it as HLS, which both players can play. config.json: "ring": {"hls": "http://.../stream.m3u8?src=catflap",
+# "flap_rooms": ["cat_flap"], "secs": 45, "cooldown": 90}. Set up by lucapi/ring-setup.sh.
+_cam = {"at": 0.0, "names": [], "why": ""}
+_cam_lock = threading.Lock()
+
+
+def _ring():
+    return CFG.get("ring") or {}
+
+
+def cam_fire(names, why):
+    with _cam_lock:
+        now = time.time()
+        secs = float(_ring().get("secs", 45))
+        if now - _cam["at"] < secs:  # already up: add the other cat to it
+            for n in names:
+                if n not in _cam["names"]:
+                    _cam["names"].append(n)
+            return
+        if now - _cam["at"] < secs + float(_ring().get("cooldown", 90)) and why != "test":
+            return
+        _cam.update(at=now, names=list(names), why=why)
+    print(f"[ember-feed] camera pop-up: {', '.join(names)} ({why})", flush=True)
+
+
+def cam_now():
+    """What the apps get while the pop-up should be showing (else None)."""
+    r = _ring()
+    if not r.get("hls"):
+        return None
+    with _cam_lock:
+        if time.time() - _cam["at"] > float(r.get("secs", 45)):
+            return None
+        names, why, at = list(_cam["names"]), _cam["why"], _cam["at"]
+    who = " & ".join(names) if names else "Cat flap"
+    title = {"test": "Cat flap camera (test)", "in": f"{who} coming in", "out": f"{who} going out"}.get(why, f"{who} at the cat flap")
+    return {"id": str(int(at)), "title": title, "url": r["hls"], "secs": int(float(r.get("secs", 45)) - (time.time() - at))}
+
+
+def _flap_watch():
+    """Every few seconds: has a cat reached the flap, or gone in or out?"""
+    rooms_before, home_before = {}, {}
+    while True:
+        time.sleep(3)
+        r = _ring()
+        if not r.get("hls"):
+            continue
+        flap = [x.lower() for x in r.get("flap_rooms", ["cat_flap"])]
+        try:
+            cats = _cats()
+        except Exception:
+            continue
+        hit, why = [], ""
+        for c in cats:
+            n, room, home = c["name"], c.get("room", ""), c["home"]
+            if c.get("detail") == "Unknown":
+                continue
+            if n in rooms_before and room in flap and rooms_before[n] not in flap:
+                hit.append(n); why = why or "flap"
+            elif n in home_before and home != home_before[n]:
+                hit.append(n); why = why or ("in" if home else "out")
+            rooms_before[n], home_before[n] = room, home
+        if hit:
+            cam_fire(hit, why)
 
 
 def glance():
@@ -4060,9 +4130,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(status_cards())
             elif path == "/cats":
                 try:
-                    self._json({"cats": cached("cats", 15, _cats)})
+                    self._json({"cats": cached("cats", 3, _cats), "cam": cam_now()})
                 except Exception:
-                    self._json({"cats": []})
+                    self._json({"cats": [], "cam": cam_now()})
+            elif path == "/cam/test":
+                cam_fire([], "test")
+                self._json({"cam": cam_now() or "no camera set up (run lucapi/ring-setup.sh)"})
             elif path == "/night":
                 self._json(night())
             elif path == "/shuffle":
@@ -4282,6 +4355,7 @@ def main():
     start_jellyfin_proxy()
     threading.Thread(target=lambda: (time.sleep(20), rotation()), daemon=True).start()  # Home's collections, ready early
     threading.Thread(target=_keep_home_warm, daemon=True).start()
+    threading.Thread(target=_flap_watch, daemon=True).start()  # the Ring camera pop-up
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()
