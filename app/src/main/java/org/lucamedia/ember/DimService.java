@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.net.Uri;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
@@ -26,6 +27,7 @@ import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.media3.common.MediaItem;
@@ -55,6 +57,7 @@ import java.util.concurrent.Executors;
  *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
  *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each,
  *    12h / 1h / 30 min before and getting more urgent; early shifts 9h before with when to be up).
+ *  - watch together: another of your Ember devices starts watching together, and a card asks "join?" (OK joins).
  *  - the cat flap camera: when a cat reaches the flap, the Ring's live view in a small window bottom right (muted).
  */
 public class DimService extends AccessibilityService {
@@ -141,6 +144,7 @@ public class DimService extends AccessibilityService {
         main.post(clock);
         main.postDelayed(catPoll, 3000);
         try { camWaiter.start(); } catch (IllegalThreadStateException ignored) { } // already running
+        try { tgWaiter.start(); } catch (IllegalThreadStateException ignored) { }
         note("overlay started, lucapi at " + prefs.feedUrl());
         if (!prefs.resumeNote().isEmpty()) main.post(resumeCheck);
     }
@@ -149,6 +153,7 @@ public class DimService extends AccessibilityService {
     public void onDestroy() {
         if (live == this) live = null;
         camWaiter.interrupt();
+        tgWaiter.interrupt();
         main.removeCallbacksAndMessages(null);
         net.shutdownNow();
         try {
@@ -165,6 +170,16 @@ public class DimService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(KeyEvent e) {
         int code = e.getKeyCode();
+        if (tgCard != null) {   // the "join?" card: OK joins, Back says no; everything else carries on as normal
+            boolean ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
+            if (ok || code == KeyEvent.KEYCODE_BACK) {
+                if (e.getAction() == KeyEvent.ACTION_UP) {
+                    final JSONObject inv = tgInvite;
+                    main.post(() -> { tgHide(); if (ok && inv != null) tgJoin(inv); });
+                }
+                return true;
+            }
+        }
         if (prefs.dimLearning()) {
             if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) return false;
             if (e.getAction() == KeyEvent.ACTION_DOWN) {
@@ -633,6 +648,138 @@ public class DimService extends AccessibilityService {
         camUntil = 0;
     }
 
+    // ---------------------------------------------------------------- watch together
+
+    private FrameLayout tgCard;
+    private JSONObject tgInvite;
+
+    private String tgWho() {
+        String w = prefs.raw().getString("together_who", "");
+        if (w.isEmpty()) {
+            w = "tv-" + Long.toString(Math.abs(new java.util.Random().nextLong()), 36).substring(0, 8);
+            prefs.raw().edit().putString("together_who", w).apply();
+        }
+        return w;
+    }
+
+    /** One request always open to lucapi, answered when another of your devices starts watching together. */
+    private final Thread tgWaiter = new Thread(new Runnable() {
+        @Override
+        public void run() {
+            int after = -1;
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    String url = power != null && power.isInteractive()
+                            ? feed("/together/wait?who=" + Uri.encode(tgWho()) + "&name=Ember%20TV&after=" + after) : null;
+                    if (url == null) { Thread.sleep(5000); continue; }
+                    JSONObject j = new JSONObject(AddonClient.get(url));
+                    after = j.optInt("n", after);
+                    final JSONObject inv = j.optJSONObject("invite");
+                    if (inv != null && !PlayerActivity.active) main.post(() -> tgShow(inv));
+                } catch (InterruptedException e) {
+                    return;
+                } catch (Exception e) {
+                    try { Thread.sleep(5000); } catch (InterruptedException ie) { return; }
+                }
+            }
+        }
+    }, "ember-together");
+
+    private void tgShow(JSONObject inv) {
+        ensureLayer();
+        if (layer == null) return;
+        tgHide();
+        tgInvite = inv;
+        JSONObject m = inv.optJSONObject("meta");
+        String what = m != null && !m.optString("name").isEmpty() ? m.optString("name") : inv.optString("title", "something");
+        if (m != null && m.optInt("season") > 0) what += " S" + m.optInt("season") + " E" + m.optInt("episode");
+        note("together: " + inv.optString("name") + " invited us to " + what);
+        float d = getResources().getDisplayMetrics().density;
+        tgCard = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xF51A1410);
+        bg.setCornerRadius(20 * d);
+        bg.setStroke(Math.max(1, Math.round(d)), 0x33FFFFFF);
+        tgCard.setBackground(bg);
+        tgCard.setElevation(12 * d);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = Math.round(22 * d);
+        col.setPadding(p, Math.round(18 * d), p, Math.round(18 * d));
+        TextView k = new TextView(this);
+        k.setText("WATCH TOGETHER");
+        k.setLetterSpacing(0.1f);
+        k.setTextColor(0xFFF0A04B);
+        k.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        col.addView(k);
+        TextView t = new TextView(this);
+        t.setText(inv.optString("name", "Ember") + " is watching " + what);
+        t.setTextColor(0xFFF3E7D8);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        t.setPadding(0, Math.round(6 * d), 0, Math.round(10 * d));
+        col.addView(t);
+        TextView hint = new TextView(this);
+        hint.setText("Press OK to join in  \u00b7  Back for not now");
+        hint.setTextColor(0xB3F3E7D8);
+        hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        col.addView(hint);
+        tgCard.addView(col);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.round(420 * d), FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        lp.rightMargin = Math.round(40 * d);
+        lp.bottomMargin = Math.round(36 * d);
+        tgCard.setAlpha(0f);
+        tgCard.setTranslationY(30 * d);
+        layer.addView(tgCard, lp);
+        tgCard.animate().alpha(1f).translationY(0).setDuration(350).start();
+        catUntil = Math.max(catUntil, System.currentTimeMillis() + 60_000);
+        main.removeCallbacks(tgTimeout);
+        main.postDelayed(tgTimeout, 60_000);
+        scheduleDrop(61_000);
+    }
+
+    private final Runnable tgTimeout = new Runnable() {
+        @Override
+        public void run() { tgHide(); }
+    };
+
+    private void tgHide() {
+        main.removeCallbacks(tgTimeout);
+        if (tgCard != null && layer != null) layer.removeView(tgCard);
+        tgCard = null;
+        tgInvite = null;
+    }
+
+    /** Opens Ember's player on the same stream, at the host's spot, in the room. */
+    private void tgJoin(final JSONObject inv) {
+        final String base = feed("");
+        if (base == null) return;
+        final String code = inv.optString("code");
+        new Thread(() -> {
+            double start = inv.optDouble("expect", 0);
+            try { start = new JSONObject(AddonClient.get(base + "/together/" + code)).optDouble("expect", start); }
+            catch (Exception ignored) { }
+            JSONObject m = inv.optJSONObject("meta");
+            if (m == null) m = new JSONObject();
+            String opts = "ember-feed=" + base + ",ember-imdb=" + m.optString("id") + ",ember-type=" + m.optString("type", "movie")
+                    + ",ember-season=" + (m.optInt("season") > 0 ? m.optInt("season") : "")
+                    + ",ember-episode=" + (m.optInt("episode") > 0 ? m.optInt("episode") : "")
+                    + ",ember-device=Ember TV,ember_osc-next=no,ember-together=" + code + ",ember-who=" + tgWho()
+                    + ",ember-show=" + m.optString("name").replaceAll("[,=]", " ");
+            final Intent i = new Intent(this, PlayerActivity.class)
+                    .putExtra("url", inv.optString("url"))
+                    .putExtra("start", start + 2)   // (it takes a moment to start)
+                    .putExtra("opts", opts)
+                    .putExtra("title", inv.optString("title"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            main.post(() -> {
+                note("together: joining " + code);
+                try { startActivity(i); } catch (Exception e) { note("together: couldn't open the player: " + e); }
+            });
+        }).start();
+    }
+
     private String feed(String path) {
         return prefs.feedConfigured() ? prefs.feedUrl() + path : null;
     }
@@ -867,6 +1014,9 @@ public class DimService extends AccessibilityService {
     private void removeLayer() {
         if (layer == null) return;
         stopCam();
+        main.removeCallbacks(tgTimeout);
+        tgCard = null;
+        tgInvite = null;
         try {
             wm.removeView(layer);
         } catch (Exception ignored) {

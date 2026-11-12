@@ -47,6 +47,8 @@ struct PlaySession: Identifiable {
     let ranked: [Ranked]
     var n: Int = 0
     var trailer = false
+    /// watch together: "host" (start a room once it's playing) or the room's code (joining one)
+    var together = ""
     var stream: Ranked { ranked[n] }
     var next: Video? { (season != nil && episode != nil) ? meta.next(after: season!, episode!) : nil }
     var title: String {
@@ -96,6 +98,8 @@ final class Store: ObservableObject {
         playing = nil
     }
     @Published var playing: PlaySession?
+    /// The next thing played starts watching together (the Watch together button).
+    var togetherNext = false
     @Published var progressVersion = 0                  // bumps after playback, so open pages refresh
     @Published var release: [String: Release] = [:]
     @Published var watchlist: Set<String> = []
@@ -468,6 +472,8 @@ final class Store: ObservableObject {
 
     /// The best stream lucapi's picker finds (it tests the top few for speed); the next best if that one fails.
     func playBest(_ m: Meta, season: Int? = nil, episode: Int? = nil, epTitle: String = "", start: Double = 0) {
+        let together = togetherNext
+        togetherNext = false
         guard !picking else { return }
         guard !aio.isEmpty else { say("No AIOStreams link yet: open Ember PC once, it shares the link through lucapi."); return }
         picking = true
@@ -495,7 +501,9 @@ final class Store: ObservableObject {
             loading?.badges = best.badges
             loading?.note = (best.mbps.map { "tested \(Int($0)) Mbit/s · " } ?? "") + best.label
             guard gen == loadGen else { return }
-            playing = PlaySession(meta: full, season: season, episode: episode, epTitle: epTitle, start: start, ranked: ranked)
+            var ps = PlaySession(meta: full, season: season, episode: episode, epTitle: epTitle, start: start, ranked: ranked)
+            if together { ps.together = "host" }
+            playing = ps
             try? await Task.sleep(nanoseconds: 1_400_000_000)
             if gen == loadGen { loading = nil }
         }
@@ -513,6 +521,22 @@ final class Store: ObservableObject {
         let full = await MetaCache.shared.full(m)
         guard let r = try? await API.feedGet(pickPath(full, season, episode), timeout: 60) else { say("Couldn't reach lucapi for the streams."); return nil }
         return r.arr("ranked").map(Ranked.init).filter { !$0.url.isEmpty }
+    }
+
+    /// Joining another device's watch together: their stream, at their spot.
+    func joinTogether(_ inv: JSON) {
+        guard playing == nil, let code = inv.str("code"), let url = inv.str("url") else { return }
+        let m = inv["meta"] as? JSON ?? [:]
+        Task {
+            var start = inv.dbl("expect") ?? 0
+            if let j = try? await API.feedGet("/together/\(code)", timeout: 4), let e = j.dbl("expect") { start = e }
+            let base = Meta(["id": m.str("id") ?? "", "type": m.str("type") ?? "movie", "name": m.str("name") ?? inv.str("title") ?? ""])
+            let full = await MetaCache.shared.full(base)
+            var ps = PlaySession(meta: full, season: m.int("season"), episode: m.int("episode"), epTitle: m.str("epTitle") ?? "",
+                                 start: start + 2, ranked: [Ranked(["url": url, "name": "Watching together"])])
+            ps.together = code
+            playing = ps
+        }
     }
 
     /// One you picked: played as it is, no switching to another if it stalls.

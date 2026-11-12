@@ -249,6 +249,8 @@ const hiddenRows = () => { try { return new Set(JSON.parse(store.get("hiddenRows
 const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]));
 const catKey = (c) => `cat:${c.type}:${c.id}`;
 const deviceName = () => store.get("deviceName", TV ? "Ember TV" : "Ember PC") || (TV ? "Ember TV" : "Ember PC");
+/** This device for watch together: its own id (two PCs can share a name). */
+const deviceWho = () => { let w = store.get("who"); if (!w) { w = (TV ? "tv-" : "pc-") + Math.random().toString(36).slice(2, 10); store.set("who", w); } return w; };
 let navStack = [];
 // Home, Films and Series are kept when you leave them (for 10 minutes, or until something is played):
 // Back, or coming back to the tab, shows them again as they were, on the same row and item.
@@ -321,6 +323,7 @@ function applyBookmarks(root = document) {
 }
 loadWatchlist();
 setInterval(loadWatchlist, 4 * 60 * 1000);   // pick up what you add on other devices
+setTimeout(togetherListen, 3000);
 
 // Titles as their logos (the film's or show's own lettering), loaded once and remembered; the name only when
 // there's no logo. Either fades in, never pops.
@@ -1265,7 +1268,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     <div class="tp-meta">${esc([mm.releaseInfo || mm.year, mm.runtime, (mm.genres || []).slice(0, 3).join(", ")].filter(Boolean).join("   ·   "))}</div>
     ${p ? `<div class="tp-progress">${esc(progressLine(p))}</div>` : ""}
     <p class="tp-desc">${esc(mm.description || "")}</p>
-    <div class="btns"><button class="btn primary big" id="resumeBtn">${PLAY}${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>${PLAY}Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
+    <div class="btns"><button class="btn primary big" id="resumeBtn">${PLAY}${esc(resumeLabel())}</button><button class="btn big" id="chooseBtn">Choose stream</button><button class="btn big" id="togetherBtn" title="Play here and ask your other Ember devices to join in">Watch together</button><button class="btn big" id="wlBtn">＋  Watchlist</button><button class="btn big" id="trailerBtn" hidden>${PLAY}Watch trailer</button>${type === "movie" ? `<button class="btn big" id="markBtn"></button>` : ""}<button class="btn big" id="loveBtn"></button></div>`;
   const logo = $(".tp-logo", head); if (logo) { logo.onerror = () => logo.replaceWith(h(`<h1>${esc(mm.name)}</h1>`)); checkLogo(logo); }
   // In cinemas / not out yet
   (id in relCache ? Promise.resolve(relCache[id]) : fetch(`${feed()}/release`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -1280,6 +1283,7 @@ async function showTitle(type, id, hint = {}, opts = {}) {
     playBest(mm, cur ? cur.season : null, cur ? cur.episode : null, e ? e.name || e.title || "" : "", sp && !sp.finished && sp.position > 20 ? sp.position : 0);
   };
   $("#resumeBtn", head).onclick = startBest;
+  $("#togetherBtn", head).onclick = () => { together = "host"; startBest(); };
   // Watch trailer: Cinemeta's YouTube trailer, else TMDB's (from lucapi); the button only shows when there is one.
   {
     const tb = $("#trailerBtn", head);
@@ -1942,6 +1946,46 @@ function nextEpisode(mm, season, episode) {
   return i >= 0 && i + 1 < eps.length ? eps[i + 1] : null;
 }
 
+// ---------------------------------------------------------------- watch together
+// "host": the next thing played starts a room (the player makes it once the stream's playing); a code: joining one.
+// Kept while Ember tries other streams for the same thing, dropped when the player closes.
+let together = null;
+
+/** Waits (one request always open to lucapi) for another of your devices to start watching together. */
+async function togetherListen() {
+  if (TV || !invoke) return; // Ember TV's prompt comes from its overlay, over any app
+  let after = -1;
+  for (;;) {
+    try {
+      const j = await getJson(`${feed()}/together/wait?who=${encodeURIComponent(deviceWho())}&name=${encodeURIComponent(deviceName())}&after=${after}`, 20000);
+      after = j.n ?? after;
+      if (j.invite && !(await invoke("playing"))) offerJoin(j.invite);
+    } catch (e) { await new Promise(r => setTimeout(r, 5000)); }
+  }
+}
+
+function offerJoin(inv) {
+  document.querySelectorAll(".tg-invite").forEach(x => x.remove());
+  const m = inv.meta || {};
+  const what = (m.name || inv.title || "something") + (m.season ? ` S${m.season} E${m.episode}` : "");
+  const box = h(`<div class="tg-invite"><div class="tg-k">Watch together</div><div class="tg-t">${esc(inv.name)} is watching <b>${esc(what)}</b></div>
+    <div class="btns"><button class="btn primary" data-a="join">${PLAY}Join in</button><button class="btn" data-a="no">Not now</button></div></div>`);
+  document.body.appendChild(box);
+  const close = () => { box.classList.add("going"); setTimeout(() => box.remove(), 300); };
+  const t = setTimeout(close, 90000);
+  $("[data-a=no]", box).onclick = () => { clearTimeout(t); close(); };
+  $("[data-a=join]", box).onclick = async () => {
+    clearTimeout(t); close();
+    let start = inv.expect || 0;
+    try { start = (await getJson(`${feed()}/together/${inv.code}`, 4000)).expect ?? start; } catch (e) {}
+    together = inv.code;
+    attempt = null; // the host's stream, as it is: no switching to another
+    play(inv.url, { id: m.id, type: m.type || "movie", name: m.name || inv.title || "" }, m.season || null, m.episode || null,
+      m.epTitle || "", start, { url: inv.url, filename: "" }, true);
+  };
+  setTimeout(() => $("[data-a=join]", box).focus(), 50);
+}
+
 async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   forgetKept(); // Continue watching will have changed: Home is drawn fresh after this
   if (!chosen) attempt = null; // picked by hand: no automatic switching
@@ -1949,7 +1993,8 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   const embed = store.get("playMode", "window") === "window";
   const next = nextEpisode(mm, season, episode);
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
-    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`, `ember_osc-next=${next ? "yes" : "no"}`].join(",");
+    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`, `ember_osc-next=${next ? "yes" : "no"}`,
+    `ember-together=${together || ""}`, `ember-who=${deviceWho()}`, `ember-show=${String(mm.name || "").replace(/[,=]/g, " ")}`].join(",");
   const title = mm.name + (season ? `  ·  S${season} E${episode}${epTitle ? "  ·  " + epTitle : ""}` : "");
   try {
     await invoke("play", { url, start: start || 0, embed, passthrough: store.get("passthrough", "0") === "1", opts, title });
@@ -1968,7 +2013,7 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
         attempt = null;
         return playBest(mm, next.season, next.episode, next.name || next.title || "", 0);
       }
-      attempt = null; sky.pause(false);
+      attempt = null; sky.pause(false); together = null;
       const cur = navStack[navStack.length - 1];
       if (cur && cur[0] === "title" && cur[1][1] === mm.id) { navStack.pop(); go("title", ...cur[1].slice(0, 3)); } // refresh resume points
     }, 2000);

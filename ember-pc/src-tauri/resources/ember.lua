@@ -3,7 +3,8 @@
 local mp = require 'mp'
 local utils = require 'mp.utils'
 local msg = require 'mp.msg'
-local o = { feed = "", imdb = "", type = "movie", season = "", episode = "", device = "Ember PC", key = "", title = "" }
+local o = { feed = "", imdb = "", type = "movie", season = "", episode = "", device = "Ember PC", key = "", title = "",
+            together = "", who = "", show = "" }
 require('mp.options').read_options(o, "ember")
 if o.feed == "" or o.imdb == "" then
     msg.error("no Pi address or title given, so progress won't be saved (feed='" .. o.feed .. "', imdb='" .. o.imdb .. "')")
@@ -79,6 +80,106 @@ mp.register_event("end-file", function(e)
     post("stopped", true, e.reason == "eof")
 end)
 
+
+-- Watch together (ember-together=host: start a room once the stream's playing; =CODE: join that room).
+-- Pause / play / seek go to everyone in the room through lucapi; the host says where it is every 5 s, and
+-- anyone more than 2 s off jumps back in line.
+if o.together ~= "" and o.who ~= "" then
+    local room = o.together ~= "host" and o.together or nil
+    local since, quiet_until, made = nil, 0, false
+    local ready_at = math.huge -- nothing goes to the room until you've been in it a few seconds (start-up seeks aren't yours)
+    local function curl(method, path, body, cb)
+        local args = { "curl", "-s", "-m", "4" }
+        if method == "POST" then
+            for _, a in ipairs({ "-X", "POST", "-H", "Content-Type: application/json", "-d", utils.format_json(body) }) do table.insert(args, a) end
+        end
+        if o.key ~= "" then table.insert(args, "-H"); table.insert(args, "X-Ember-Key: " .. o.key) end
+        table.insert(args, o.feed .. path)
+        mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stdout = true },
+            function(ok, r)
+                if cb then cb(ok and r and r.status == 0 and r.stdout and utils.parse_json(r.stdout) or nil) end
+            end)
+    end
+    local function send(action)
+        if not room or mp.get_time() < quiet_until or mp.get_time() < ready_at then return end -- (from someone else, or start-up)
+        curl("POST", "/together/" .. room, { who = o.who, name = o.device, action = action, pos = pos or 0 })
+    end
+    local function quiet() quiet_until = mp.get_time() + 1.5 end
+    local function clock(t) return string.format("%d:%02d", math.floor(t / 60), math.floor(t % 60)) end
+    local function apply(ev)
+        quiet()
+        local far = ev.pos and math.abs((pos or 0) - ev.pos) > 2
+        if ev.action == "pause" then
+            mp.set_property_bool("pause", true)
+            if far then mp.commandv("seek", tostring(ev.pos), "absolute", "exact") end
+            mp.osd_message("Paused by " .. ev.name, 2)
+        elseif ev.action == "play" then
+            if far then mp.commandv("seek", tostring(ev.pos), "absolute", "exact") end
+            mp.set_property_bool("pause", false)
+            mp.osd_message("Playing (" .. ev.name .. ")", 2)
+        elseif ev.action == "seek" then
+            mp.commandv("seek", tostring(ev.pos), "absolute", "exact")
+            mp.osd_message(ev.name .. " jumped to " .. clock(ev.pos), 2)
+        elseif ev.action == "hello" then
+            mp.osd_message(ev.name .. " joined", 3)
+        elseif ev.action == "bye" then
+            mp.osd_message(ev.name .. " left", 3)
+        end
+    end
+    -- the room: made by the host once its stream is really playing (so the others get a link that works)
+    mp.add_periodic_timer(1, function()
+        if not room then
+            if made or not pos or pos < 1 then return end
+            made = true
+            local meta = { id = o.imdb, type = o.type, name = o.show, season = tonumber(o.season),
+                           episode = tonumber(o.episode), epTitle = o.title }
+            curl("POST", "/together/start", { who = o.who, name = o.device, url = mp.get_property("path"), pos = pos,
+                paused = mp.get_property_bool("pause"), meta = meta }, function(j)
+                if j and j.code then
+                    room = j.code
+                    mp.osd_message("Watching together: your other Ember devices are being asked to join", 4)
+                else
+                    mp.osd_message("Couldn't start watching together (lucapi didn't answer)", 4)
+                end
+            end)
+            return
+        end
+        if since == nil then
+            since = -1
+            curl("POST", "/together/" .. room, { who = o.who, name = o.device, action = "hello", pos = pos or 0 })
+            ready_at = mp.get_time() + 3
+        end
+        curl("GET", "/together/" .. room .. "?since=" .. math.max(since, 0) .. "&who=" .. o.who, nil, function(j)
+            if not j or j.gone then return end
+            if since == -1 then since = j.n -- don't replay what happened before you joined
+            else
+                since = j.n
+                for _, ev in ipairs(j.events or {}) do apply(ev) end
+            end
+            -- in step with the host: same pause state, and no more than 2 s apart
+            if not j.you_host and mp.get_time() >= quiet_until and pos then
+                if j.paused ~= mp.get_property_bool("pause") then quiet(); mp.set_property_bool("pause", j.paused) end
+                if math.abs(pos - j.expect) > 2 then
+                    quiet()
+                    mp.commandv("seek", tostring(j.expect + 0.3), "absolute", "exact")
+                end
+            end
+            if j.you_host and not mp.get_property_bool("pause") then
+                curl("POST", "/together/" .. room, { who = o.who, name = o.device, action = "tick", pos = pos or 0 })
+            end
+        end)
+    end)
+    mp.observe_property("pause", "bool", function(_, p)
+        if started and p ~= nil then send(p and "pause" or "play") end
+    end)
+    -- a seek made here (not one that came from the room): the others follow
+    mp.register_event("seek", function()
+        if mp.get_time() >= quiet_until then mp.add_timeout(0.3, function() send("seek") end) end
+    end)
+    mp.register_event("shutdown", function()
+        if room then curl("POST", "/together/" .. room, { who = o.who, name = o.device, action = "bye", pos = pos or 0 }) end
+    end)
+end
 
 -- Safety net: if the ModernZ controls didn't load, switch on mpv's own controls so you're never left without any.
 mp.add_timeout(3, function()

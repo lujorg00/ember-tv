@@ -49,6 +49,13 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var ticker: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
     private var switching = false        // the TV is changing mode (frame rate / HDR): playback held meanwhile
+    // watch together
+    @Published var tgNote: String?
+    private var tgRoom: String?
+    private var tgWantHost = false, tgMade = false, tgBusy = false
+    private var tgSince = -2              // -2: not said hello yet; -1: first look (don't replay what happened before)
+    private var tgQuietUntil = Date.distantPast, tgReadyAt = Date.distantFuture
+    private var tgLastPos: Double?, tgLastAt = Date()
 
     func begin(_ s: PlaySession, store: Store) {
         guard session == nil else { return }
@@ -57,6 +64,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         session = s
         self.store = store
         core.events = self
+        if s.together == "host" { tgWantHost = true } else if !s.together.isEmpty { tgRoom = s.together }
         openedAt = Date()
         ticker = Task { [weak self] in
             while !Task.isCancelled {
@@ -102,6 +110,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         stayAwake(!p && !done)
         if switching { return }
         if p && started && !done { report("paused") }
+        if started && !done { tgSend(p ? "pause" : "play") }
         if p { showControls(for: 3600) } else { showControls() }
     }
     func mpvBuffering(_ b: Bool) {
@@ -150,6 +159,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if controls && now > controlsUntil && !paused { controls = false }
         if intro && now > introUntil { intro = false }
         creditsTick()
+        togetherTick()
         // once a minute while playing: how smoothly it's going (dropped and late frames), for the log on lucapi
         ticks += 1
         if started && !paused && ticks % 60 == 0 {
@@ -412,6 +422,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     }
 
     private func finish(_ how: PlayEnd) {
+        if let room = tgRoom { API.fire("/together/\(room)", tgBody("bye")) }
         done = true
         stayAwake(false)
         Diag.log("player: closing (\(how))")
@@ -427,6 +438,111 @@ final class PlayerModel: ObservableObject, MPVEvents {
     }
 
     /// Where you are, to lucapi (the same report Ember PC and Ember TV send); lucapi passes it on to Trakt.
+    // MARK: watch together
+    // together "host": start a room once the stream's playing; a code: join it. Pause / play / seek go to everyone in
+    // the room through lucapi; the host says where it is every second, and anyone 2 s off jumps back in line.
+
+    static var togetherWho: String {
+        if let w = UserDefaults.standard.string(forKey: "togetherWho") { return w }
+        let w = "atv-" + String(UUID().uuidString.prefix(8)).lowercased()
+        UserDefaults.standard.set(w, forKey: "togetherWho")
+        return w
+    }
+
+    private func tgBody(_ action: String) -> JSON {
+        ["who": Self.togetherWho, "name": API.deviceName, "action": action, "pos": pos]
+    }
+
+    private func tgSend(_ action: String) {
+        guard let room = tgRoom, Date() >= tgQuietUntil, Date() >= tgReadyAt else { return }   // from the room, or start-up
+        API.fire("/together/\(room)", tgBody(action))
+    }
+
+    private func tgQuiet() { tgQuietUntil = Date().addingTimeInterval(1.5) }
+
+    private func tgSay(_ s: String) {
+        tgNote = s
+        Task { try? await Task.sleep(nanoseconds: 3_000_000_000); if tgNote == s { tgNote = nil } }
+    }
+
+    private func tgSeek(_ to: Double) {
+        tgQuiet()
+        core.seek(to: max(0, to))
+        tgLastPos = to
+    }
+
+    private func togetherTick() {
+        guard tgWantHost || tgRoom != nil, started, !done else { return }
+        // a skip made here (the position jumped): the others follow
+        let now = Date()
+        if let last = tgLastPos {
+            let expected = last + (paused ? 0 : now.timeIntervalSince(tgLastAt))
+            if abs(pos - expected) > 3 { tgSend("seek") }
+        }
+        tgLastPos = pos
+        tgLastAt = now
+        guard !tgBusy else { return }
+        guard let room = tgRoom else {   // hosting: make the room now the stream's really playing
+            guard !tgMade, pos >= 1, let s = session else { return }
+            tgMade = true
+            tgBusy = true
+            var meta: JSON = ["id": s.meta.id, "type": s.meta.isSeries ? "series" : "movie", "name": s.meta.name, "epTitle": s.epTitle]
+            if let se = s.season, let ep = s.episode { meta["season"] = se; meta["episode"] = ep }
+            var b = tgBody("start")
+            b["url"] = s.stream.url
+            b["paused"] = paused
+            b["meta"] = meta
+            b["title"] = s.title
+            Task {
+                let code = (try? await API.post("/together/start", b, timeout: 6))?.str("code")
+                tgBusy = false
+                if let code { tgRoom = code; tgSay("Watching together: your other Ember devices are being asked to join") }
+                else { tgSay("Couldn't start watching together (lucapi didn't answer)") }
+            }
+            return
+        }
+        let hello = tgSince == -2
+        if hello { tgSince = -1 }
+        let since = max(tgSince, 0)
+        tgBusy = true
+        Task {
+            if hello { _ = try? await API.post("/together/\(room)", tgBody("hello"), timeout: 4) }
+            let j = try? await API.feedGet("/together/\(room)?since=\(since)&who=\(API.q(Self.togetherWho))", timeout: 4)
+            tgBusy = false
+            if hello { tgReadyAt = Date().addingTimeInterval(3) }
+            if let j { tgApply(j) }
+        }
+    }
+
+    private func tgApply(_ j: JSON) {
+        guard !done, j["gone"] == nil else { return }
+        let n = j.int("n") ?? 0
+        if tgSince == -1 { tgSince = n }   // don't replay what happened before you joined
+        else {
+            tgSince = n
+            for ev in j.arr("events") {
+                let a = ev.str("action") ?? "", who = ev.str("name") ?? "Ember", p = ev.dbl("pos") ?? 0
+                let far = abs(pos - p) > 2
+                tgQuiet()
+                switch a {
+                case "pause": if far { tgSeek(p) }; core.pause(); tgSay("Paused by \(who)")
+                case "play": if far { tgSeek(p) }; core.play(); tgSay("Playing (\(who))")
+                case "seek": tgSeek(p); tgSay("\(who) skipped")
+                case "hello": tgSay("\(who) joined")
+                case "bye": tgSay("\(who) left")
+                default: break
+                }
+            }
+        }
+        let host = (j["you_host"] as? Bool) ?? false
+        if !host && Date() >= tgQuietUntil {   // in step with the host
+            let shouldPause = (j["paused"] as? Bool) ?? false
+            if shouldPause != paused { tgQuiet(); shouldPause ? core.pause() : core.play() }
+            if let e = j.dbl("expect"), abs(pos - e) > 2 { tgSeek(e + 0.3) }
+        }
+        if host && !paused { tgSend("tick") }
+    }
+
     func report(_ state: String, finished: Bool = false) {
         guard let s = session, !s.trailer, started, pos > 1 else { return }
         lastReport = Date()
@@ -510,7 +626,18 @@ struct PlayerScreen: View {
             if model.intro && !model.controls { introTitle.transition(.opacity) }
             if model.controls { controls.transition(.opacity) }
             if model.upNext { upNextCard.transition(.move(edge: .trailing).combined(with: .opacity)) }
+            if let note = model.tgNote {
+                // watch together: who paused, joined, skipped...
+                Label(note, systemImage: "person.2.fill").font(.ember(24, .semibold))
+                    .padding(.horizontal, 26).padding(.vertical, 14)
+                    .background(Theme.bg.opacity(0.88), in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 60)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: model.tgNote)
         .animation(.easeInOut(duration: 0.25), value: model.controls)
         .animation(.easeInOut(duration: 1.2), value: model.intro)
         .animation(.easeInOut(duration: 0.3), value: model.upNext)

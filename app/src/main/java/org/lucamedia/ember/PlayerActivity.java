@@ -34,6 +34,7 @@ import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.CaptionStyleCompat;
 import androidx.media3.ui.SubtitleView;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
@@ -53,6 +54,8 @@ import java.util.Map;
  */
 public class PlayerActivity extends Activity {
     private static final String TAG = "EmberPlayer";
+    /** Ember's player is open (the overlay doesn't offer to join a room this TV is already in). */
+    static volatile boolean active = false;
     private static final int EXIT_ERROR = 2, EXIT_STALL = 4, EXIT_NEXT = 5;
 
     private ExoPlayer player;
@@ -83,6 +86,7 @@ public class PlayerActivity extends Activity {
             if (i > 0) o.put(kv.substring(0, i).trim(), kv.substring(i + 1).trim());
         }
         hasNext = "yes".equals(o.get("ember_osc-next"));
+        active = true;
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -253,6 +257,16 @@ public class PlayerActivity extends Activity {
             }
 
             @Override
+            public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+                if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) tgSend(playWhenReady ? "play" : "pause");
+            }
+
+            @Override
+            public void onPositionDiscontinuity(Player.PositionInfo a, Player.PositionInfo b, int reason) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) h.postDelayed(() -> tgSend("seek"), 300);
+            }
+
+            @Override
             public void onPlayerError(PlaybackException e) {
                 Log.w(TAG, "playback error: " + e.getErrorCodeName() + " " + e.getMessage());
                 if (started && player.getCurrentPosition() > 60_000) report("stopped", false);
@@ -266,6 +280,10 @@ public class PlayerActivity extends Activity {
         player.setPlayWhenReady(true);
 
         h.postDelayed(tick, 1000);
+        if (!String.valueOf(o.get("ember-together")).isEmpty() && o.get("ember-together") != null) {
+            tgRoom = "host".equals(o.get("ember-together")) ? null : o.get("ember-together");
+            h.postDelayed(tgTick, 1000);
+        }
         // not started after 25 s: let Ember try the next stream
         h.postDelayed(() -> { if (!started && !done) finishWith(EXIT_STALL); }, 25_000);
     }
@@ -422,8 +440,159 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    // ---------------------------------------------------------------- watch together
+    // ember-together=host: start a room once the stream's playing; =CODE: join it. Pause / play / seek go to everyone
+    // in the room through lucapi; the host says where it is every second, and anyone 2 s off jumps back in line.
+
+    private String tgRoom;
+    private boolean tgMade = false, tgBusy = false;
+    private int tgSince = -2;   // -2: not said hello yet; -1: first look (don't replay what happened before)
+    private long tgQuietUntil = 0, tgReadyAt = Long.MAX_VALUE;
+
+    private JSONObject tgHttp(String path, JSONObject body) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(o.get("ember-feed") + path).openConnection();
+        c.setConnectTimeout(3000);
+        c.setReadTimeout(4000);
+        if (body != null) {
+            c.setRequestMethod("POST");
+            c.setDoOutput(true);
+            c.setRequestProperty("Content-Type", "application/json");
+            try (OutputStream out = c.getOutputStream()) { out.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
+        }
+        try (java.io.InputStream in = c.getInputStream()) {
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            for (int n; (n = in.read(buf)) > 0; ) b.write(buf, 0, n);
+            return new JSONObject(b.toString("UTF-8"));
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    private JSONObject tgBody(String action) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("who", o.get("ember-who"));
+        b.put("name", o.containsKey("ember-device") ? o.get("ember-device") : "Ember TV");
+        b.put("action", action);
+        b.put("pos", player == null ? 0 : player.getCurrentPosition() / 1000.0);
+        return b;
+    }
+
+    private void tgSend(String action) {
+        long now = System.currentTimeMillis();
+        if (tgRoom == null || player == null || now < tgQuietUntil || now < tgReadyAt) return; // from the room, or start-up
+        try {
+            final JSONObject b = tgBody(action);
+            final String room = tgRoom;
+            new Thread(() -> { try { tgHttp("/together/" + room, b); } catch (Exception e) { Log.w(TAG, "together: " + e); } }).start();
+        } catch (Exception ignored) { }
+    }
+
+    private void tgQuiet() { tgQuietUntil = System.currentTimeMillis() + 1500; }
+
+    private void tgSay(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_SHORT).show(); }
+
+    private void tgSeek(double secs) { tgQuiet(); player.seekTo(Math.max(0, (long) (secs * 1000))); }
+
+    private final Runnable tgTick = new Runnable() {
+        @Override
+        public void run() {
+            if (done || player == null) return;
+            h.postDelayed(this, 1000);
+            if (tgBusy) return;
+            final double pos = player.getCurrentPosition() / 1000.0;
+            final boolean paused = !player.getPlayWhenReady();
+            if (tgRoom == null) {   // hosting: make the room once the stream's really playing
+                if (tgMade || !started || pos < 1) return;
+                tgMade = true;
+                tgBusy = true;
+                new Thread(() -> {
+                    String code = null;
+                    try {
+                        JSONObject meta = new JSONObject();
+                        meta.put("id", o.get("ember-imdb"));
+                        meta.put("type", o.get("ember-type"));
+                        meta.put("name", o.get("ember-show"));
+                        if (o.get("ember-season") != null && !o.get("ember-season").isEmpty()) meta.put("season", Integer.parseInt(o.get("ember-season")));
+                        if (o.get("ember-episode") != null && !o.get("ember-episode").isEmpty()) meta.put("episode", Integer.parseInt(o.get("ember-episode")));
+                        JSONObject b = tgBody("start");
+                        b.put("url", getIntent().getStringExtra("url"));
+                        b.put("paused", paused);
+                        b.put("meta", meta);
+                        b.put("title", getIntent().getStringExtra("title"));
+                        code = tgHttp("/together/start", b).optString("code", null);
+                    } catch (Exception e) {
+                        Log.w(TAG, "together start: " + e);
+                    }
+                    final String got = code;
+                    h.post(() -> {
+                        tgBusy = false;
+                        if (got != null) { tgRoom = got; tgSay("Watching together: your other Ember devices are being asked to join"); }
+                        else tgSay("Couldn't start watching together (lucapi didn't answer)");
+                    });
+                }).start();
+                return;
+            }
+            final boolean hello = tgSince == -2;
+            if (hello) tgSince = -1;
+            final String room = tgRoom;
+            final int since = Math.max(tgSince, 0);
+            tgBusy = true;
+            new Thread(() -> {
+                JSONObject j = null;
+                try {
+                    if (hello) tgHttp("/together/" + room, tgBody("hello"));
+                    j = tgHttp("/together/" + room + "?since=" + since + "&who=" + Uri.encode(o.get("ember-who")), null);
+                } catch (Exception e) {
+                    Log.w(TAG, "together: " + e);
+                }
+                final JSONObject r = j;
+                h.post(() -> { tgBusy = false; if (hello) tgReadyAt = System.currentTimeMillis() + 3000; if (r != null) tgApply(r); });
+            }).start();
+        }
+    };
+
+    private void tgApply(JSONObject j) {
+        if (done || player == null || j.optBoolean("gone")) return;
+        int n = j.optInt("n");
+        if (tgSince == -1) tgSince = n; // don't replay what happened before you joined
+        else {
+            tgSince = n;
+            JSONArray evs = j.optJSONArray("events");
+            for (int i = 0; evs != null && i < evs.length(); i++) {
+                JSONObject ev = evs.optJSONObject(i);
+                String a = ev.optString("action"), who = ev.optString("name");
+                double p = ev.optDouble("pos", 0);
+                boolean far = Math.abs(player.getCurrentPosition() / 1000.0 - p) > 2;
+                tgQuiet();
+                if ("pause".equals(a)) { if (far) tgSeek(p); player.setPlayWhenReady(false); tgSay("Paused by " + who); }
+                else if ("play".equals(a)) { if (far) tgSeek(p); player.setPlayWhenReady(true); tgSay("Playing (" + who + ")"); }
+                else if ("seek".equals(a)) { tgSeek(p); tgSay(who + " skipped"); }
+                else if ("hello".equals(a)) tgSay(who + " joined");
+                else if ("bye".equals(a)) tgSay(who + " left");
+            }
+        }
+        long now = System.currentTimeMillis();
+        boolean host = j.optBoolean("you_host");
+        if (!host && now >= tgQuietUntil && started) {   // in step with the host
+            boolean paused = j.optBoolean("paused");
+            if (paused == player.getPlayWhenReady()) { tgQuiet(); player.setPlayWhenReady(!paused); }
+            double expect = j.optDouble("expect", 0);
+            if (Math.abs(player.getCurrentPosition() / 1000.0 - expect) > 2) tgSeek(expect + 0.3);
+        }
+        if (host && player.getPlayWhenReady()) tgSend("tick");
+    }
+
     private void finishWith(int code) {
         if (done) return;
+        if (tgRoom != null) {   // leaving the room
+            try {
+                final JSONObject b = tgBody("bye");
+                final String room = tgRoom;
+                new Thread(() -> { try { tgHttp("/together/" + room, b); } catch (Exception ignored) { } }).start();
+            } catch (Exception ignored) { }
+        }
+        active = false;
         done = true;
         h.removeCallbacksAndMessages(null);
         setResult(code == 0 ? RESULT_CANCELED : code);
@@ -509,6 +678,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        active = false;
         h.removeCallbacksAndMessages(null);
         if (player != null) {
             player.release();

@@ -15,6 +15,8 @@ final class Notices: ObservableObject {
     /// the cat flap camera (the Ring's live view), while lucapi says to show it
     struct Cam: Equatable { let id: String; let title: String; let player: AVPlayer }
     @Published var cam: Cam? = nil
+    /// watch together: another of your devices asking this one to join
+    @Published var invite: JSON? = nil
     private var camShownId = ""
 
     private var alerts: [Alert] = []
@@ -39,6 +41,19 @@ final class Notices: ObservableObject {
                 showDue()
                 await pollCats()
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+        // watch together: one request always open to lucapi, answered when another device starts watching together
+        Task {
+            var after = -1
+            while true {
+                let path = "/together/wait?who=\(API.q(PlayerModel.togetherWho))&name=\(API.q(API.deviceName))&after=\(after)"
+                if let j = try? await API.feedGet(path, timeout: 20) {
+                    after = j.int("n") ?? after
+                    if let inv = j["invite"] as? JSON { invite = inv }
+                } else {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
             }
         }
         // the camera: one request always open to lucapi, answered the moment a cat reaches the flap

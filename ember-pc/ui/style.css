@@ -823,3 +823,13 @@ img.ttl-logo.lift, img.tp-logo.lift { filter: brightness(var(--lift, 2)) drop-sh
 .season-grid[hidden] { display: none; }
 .season-grid .chip { justify-content: center; text-align: center; cursor: pointer; padding: 6px 0; }
 .season-grid .chip.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+
+/* watch together: another device asks you to join */
+.tg-invite { position: fixed; right: 36px; bottom: 36px; z-index: 60; width: 420px; padding: 22px 24px; border-radius: 18px;
+  background: rgba(26,20,16,.96); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 20px 60px #000a;
+  animation: tgIn .35s ease-out; transition: opacity .3s, transform .3s; }
+.tg-invite.going { opacity: 0; transform: translateY(20px); }
+.tg-invite .tg-k { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent, #F0A04B); margin-bottom: 6px; }
+.tg-invite .tg-t { font-size: 18px; line-height: 1.35; margin-bottom: 16px; }
+.tg-invite .btns { display: flex; gap: 10px; }
+@keyframes tgIn { from { opacity: 0; transform: translateY(24px); } }

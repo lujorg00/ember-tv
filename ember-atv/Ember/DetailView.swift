@@ -39,7 +39,7 @@ struct DetailView: View {
         return sp?.resumable == true ? "Resume · \(clock(sp!.position))" : "Play"
     }
 
-    enum Btn: Hashable { case play, stream, trailer, watchlist, love, watched, more }
+    enum Btn: Hashable { case play, stream, together, trailer, watchlist, love, watched, more }
     @FocusState private var btn: Btn?
     @State private var showMore = false
     @State private var ready = false
@@ -52,6 +52,7 @@ struct DetailView: View {
     private var caption: String {
         switch btn {
         case .stream: return "Choose stream"
+        case .together: return "Watch together: play here and ask your other Ember devices to join in"
         case .trailer: return "Watch trailer"
         case .watchlist: return store.watchlist.contains(mm.id) ? "On your watchlist" : "Add to watchlist"
         case .love: return store.loved.contains(mm.id) ? "Loved · select to take the love off" : "Love it: your recommendations lean towards what you love"
@@ -92,6 +93,8 @@ struct DetailView: View {
                             .buttonStyle(EmberButtonStyle(primary: true)).focused($btn, equals: .play)
                         Button { chooseStream() } label: { Image(systemName: "list.bullet") }
                             .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .stream)
+                        Button { store.togetherNext = true; play() } label: { Image(systemName: "person.2.fill") }
+                            .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .together)
                         if hasTrailer {
                             Button { store.playTrailer(mm) } label: { Image(systemName: "film") }
                                 .buttonStyle(EmberButtonStyle(round: true)).focused($btn, equals: .trailer)

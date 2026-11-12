@@ -7,6 +7,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /photo/<name> -> a photo from your photos folder
   GET /cats         -> just the cats, in or out (polled often, for the pop-ups); "cam" while the Ring camera pop-up is on
   GET /cam/wait?after=<id> -> answers as soon as a new camera pop-up starts (or after ~12 s): the TVs keep one open
+  POST /together/start, POST/GET /together/<code>, GET /together/wait -> watch together (see below)
   GET /cam/test     -> pops the Ring camera up on Ember TV and Apple TV now, as if a cat were at the flap
   GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
@@ -560,6 +561,116 @@ def _flap_watch():
                 _cam_warm(float(r.get("warm_secs", 60)))
         if hit:
             cam_fire(hit, why)
+
+
+# ------------------------------------------------------------------ watch together
+# Two (or more) of your Ember devices at home playing the same thing in step. The device you start it on makes a room
+# as soon as its stream is playing (so the others get a link that's known to work) and the others get a "join?"
+# prompt. In the room: pause / play / seek from anyone goes to everyone; the host (whoever started it, or the next one
+# in if they leave) says where it is every few seconds, and anyone more than ~2 s off jumps back in line.
+
+_rooms = {}
+_room_lock = threading.Lock()
+_room_cv = threading.Condition(_room_lock)
+_invites = []          # newest last: {"n", "code", "who", "name", "title", ...}
+_invite_n = [0]
+_listening = {}        # who -> (name, last seen): devices waiting for invites
+
+
+def _room_view(r, who=""):
+    now = time.time()
+    st = r["state"]
+    live = {w: m for w, m in r["members"].items() if now - m["seen"] < 15}
+    if r["host"] not in live and live:  # the host left: the longest-standing one carries on
+        r["host"] = min(live, key=lambda w: live[w]["since"])
+    return {"code": r["code"], "host": r["host"], "you_host": bool(who) and r["host"] == who,
+            "paused": st["paused"], "expect": round(st["pos"] + (0 if st["paused"] else now - st["at"]), 2),
+            "members": [m["name"] for w, m in live.items() if w != who], "n": r["n"],
+            "url": r["url"], "meta": r["meta"], "title": r["title"]}
+
+
+def together_start(body):
+    who = str(body.get("who", ""))[:60]
+    if not who or not str(body.get("url", "")).startswith("http"):
+        raise ValueError("who and url needed")
+    code = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
+    meta = body.get("meta") or {}
+    meta = {k: meta.get(k) for k in ("id", "type", "name", "season", "episode", "epTitle")}
+    name = str(body.get("name") or "Ember")[:40]
+    now = time.time()
+    with _room_cv:
+        for k in [k for k, v in _rooms.items() if now - v["touched"] > 6 * 3600]:
+            del _rooms[k]
+        _rooms[code] = {"code": code, "host": who, "url": body["url"], "meta": meta,
+                        "title": str(body.get("title") or meta.get("name") or "")[:200],
+                        "state": {"pos": float(body.get("pos") or 0), "paused": bool(body.get("paused")), "at": now},
+                        "n": 0, "events": [], "members": {who: {"name": name, "since": now, "seen": now}}, "touched": now}
+        _invite_n[0] += 1
+        _invites.append({"n": _invite_n[0], "code": code, "who": who, "name": name, "at": now})
+        del _invites[:-20]
+        _room_cv.notify_all()
+    print(f"[ember-feed] watch together: {name} started {code}: {meta.get('name')}", flush=True)
+    return {"code": code}
+
+
+def together_event(code, body):
+    action = body.get("action")
+    if action not in ("pause", "play", "seek", "tick", "hello", "bye"):
+        raise ValueError("unknown action")
+    who, name = str(body.get("who", ""))[:60], str(body.get("name") or "Ember")[:40]
+    now = time.time()
+    with _room_cv:
+        r = _rooms.get(code.upper())
+        if not r:
+            raise ValueError("no such room")
+        r["touched"] = now
+        m = r["members"].setdefault(who, {"name": name, "since": now, "seen": now})
+        m["seen"] = now
+        pos = float(body.get("pos") or 0)
+        st = r["state"]
+        if action == "bye":
+            r["members"].pop(who, None)
+        elif action == "tick":
+            if r["host"] == who:   # only the host's position counts (pause state isn't changed by a tick)
+                st.update(pos=pos, at=now)
+            return {"n": r["n"]}
+        elif action in ("pause", "play", "seek"):
+            st.update(pos=pos, at=now, paused={"pause": True, "play": False}.get(action, st["paused"]))
+        r["n"] += 1
+        r["events"] = (r["events"] + [{"n": r["n"], "who": who, "name": name, "action": action, "pos": pos}])[-50:]
+        _room_cv.notify_all()
+        return {"n": r["n"]}
+
+
+def together_get(code, since, who):
+    with _room_cv:
+        r = _rooms.get(code.upper())
+        if not r:
+            return {"gone": True}
+        if who in r["members"]:
+            r["members"][who]["seen"] = time.time()
+        out = _room_view(r, who)
+        out["events"] = [e for e in r["events"] if e["n"] > since and e["who"] != who]
+        return out
+
+
+def together_wait(who, name, after, secs=12.0):
+    """For devices not playing: answers when someone starts watching together (an invite), or after ~12 s."""
+    end = time.time() + secs
+    with _room_cv:
+        _listening[who] = (name, time.time())
+        if after < 0:   # first ask: just where the count is, so old invites aren't offered
+            return {"n": _invite_n[0]}
+        while True:
+            new = [i for i in _invites if i["n"] > after and i["who"] != who and time.time() - i["at"] < 300]
+            for i in reversed(new):
+                r = _rooms.get(i["code"])
+                if r and who not in r["members"]:
+                    v = _room_view(r)
+                    return {"n": _invite_n[0], "invite": dict(v, name=i["name"])}
+            if time.time() >= end:
+                return {"n": _invite_n[0]}
+            _room_cv.wait(max(0.1, end - time.time()))
 
 
 def glance():
@@ -4164,6 +4275,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(set_love(body))
             elif path == "/client/log":
                 self._json(client_log_add(body))
+            elif path == "/together/start":
+                self._json(together_start(body))
+            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
+                self._json(together_event(path.split("/")[2], body))
             elif path == "/pick/failed":
                 self._json(stream_failed(body))
             elif path == "/match/new":
@@ -4200,6 +4315,13 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": cached("cats", 3, _cats), "cam": cam_now()})
                 except Exception:
                     self._json({"cats": [], "cam": cam_now()})
+            elif path == "/together/wait":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(together_wait((q.get("who") or [""])[0][:60], (q.get("name") or ["Ember"])[0][:40],
+                                         int((q.get("after") or ["-1"])[0])))
+            elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json(together_get(path.split("/")[2], int((q.get("since") or ["0"])[0]), (q.get("who") or [""])[0]))
             elif path == "/cam/wait":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json({"cam": cam_wait((q.get("after") or [""])[0])})

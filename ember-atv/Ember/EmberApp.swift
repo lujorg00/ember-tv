@@ -43,6 +43,14 @@ struct RootView: View {
     @State private var lastCrash: [String]?
     @State private var tab = 0
 
+    private var inviteTitle: String {
+        guard let inv = notices.invite else { return "" }
+        let m = inv["meta"] as? JSON ?? [:]
+        var what = m.str("name") ?? inv.str("title") ?? "something"
+        if let se = m.int("season"), let ep = m.int("episode") { what += " S\(se) E\(ep)" }
+        return "\(inv.str("name") ?? "Ember") is watching \(what)"
+    }
+
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
@@ -85,6 +93,14 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { lastCrash != nil }, set: { if !$0 { lastCrash = nil } })) {
             CrashReport(lines: lastCrash ?? [])
         }
+        .alert(inviteTitle, isPresented: Binding(get: { notices.invite != nil && store.playing == nil },
+                                                  set: { if !$0 { notices.invite = nil } })) {
+            Button("Join in") {
+                if let inv = notices.invite { store.joinTogether(inv) }
+                notices.invite = nil
+            }
+            Button("Not now", role: .cancel) { notices.invite = nil }
+        } message: { Text("Watch together: same picture, pause and skips on both.") }
         .fullScreenCover(item: $store.playing) { s in
             PlayerScreen(session: s).environmentObject(store).environmentObject(notices)
                 .overlay { NoticeOverlay().environmentObject(notices) }
