@@ -536,7 +536,7 @@ def _flap_watch():
     """Every few seconds: has a cat reached the flap, or gone in or out?"""
     rooms_before, home_before = {}, {}
     while True:
-        time.sleep(1)
+        time.sleep(3)
         r = _ring()
         if not r.get("hls"):
             continue
