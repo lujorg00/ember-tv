@@ -62,19 +62,12 @@ enum PlayEnd {
     case failed(String, Double)   // why, where it got to
 }
 
-/// Add-ons name their "next" items like "Next S35E2 · The Simpsons": the show's own name, and the episode they mean.
+/// Add-ons name their "next" items like "Next S35E2 · The Simpsons": just the show's name. (Which episode is next is
+/// Ember's call, from lucapi: what you last watched in Ember, else on Trakt.)
 enum CWName {
     static let prefix = try! NSRegularExpression(pattern: #"^\s*(?:up\s+)?(?:next|continue|resume)\b[^·•|]*[·•|]\s*"#, options: .caseInsensitive)
     static func clean(_ n: String) -> String {
         prefix.stringByReplacingMatches(in: n, range: NSRange(n.startIndex..., in: n), withTemplate: "")
-    }
-    static func episode(_ n: String) -> (Int, Int)? {
-        guard prefix.firstMatch(in: n, range: NSRange(n.startIndex..., in: n)) != nil,
-              let m = try? NSRegularExpression(pattern: #"S(\d+)\s*[·.]?\s*E(\d+)"#, options: .caseInsensitive)
-                .firstMatch(in: n, range: NSRange(n.startIndex..., in: n)),
-              let a = Range(m.range(at: 1), in: n), let b = Range(m.range(at: 2), in: n),
-              let s = Int(n[a]), let e = Int(n[b]) else { return nil }
-        return (s, e)
     }
 }
 
@@ -240,10 +233,6 @@ final class Store: ObservableObject {
                     if let p {
                         let left = p.minutesLeft.map { $0 <= 10 ? " · \($0)m left" : "" } ?? ""
                         label = (full.isSeries && season != nil ? "S\(season!) · E\(episode!)" : "Resume") + left
-                    } else if full.isSeries, let named = CWName.episode(m.name) {   // the add-on already says which
-                        season = named.0
-                        episode = named.1
-                        label = "Next · S\(named.0) · E\(named.1)"
                     } else if full.isSeries, let n = try? await API.feedGet("/next/\(m.id)", timeout: 6), let s = n.int("season") {
                         season = s
                         episode = n.int("episode")

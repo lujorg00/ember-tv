@@ -702,13 +702,10 @@ async function showHome() {
   hero.start(own.length ? own : slideshowFrom([...topLists, ...otherLists]));
 }
 
-/** Add-ons name their "next" items like "Next S35E2 · The Simpsons": the show's own name, and the episode they mean. */
+/** Add-ons name their "next" items like "Next S35E2 · The Simpsons": just the show's name. (Which episode is next is
+ *  Ember's call, from lucapi: what you last watched in Ember, else on Trakt.) */
 const cwPrefix = /^\s*(?:up\s+)?(?:next|continue|resume)\b[^·•|]*[·•|]\s*/i;
 function cwName(n) { return String(n || "").replace(cwPrefix, ""); }
-function cwEp(n) {
-  const m = String(n || "").match(cwPrefix) && String(n).match(/S(\d+)\s*[·.]?\s*E(\d+)/i);
-  return m ? { season: +m[1], episode: +m[2] } : null;
-}
 
 /** Continue watching: what you're part-way through (any device), then what's next, as wide cards with episode stills. */
 async function continueRow(cwCat) {
@@ -746,9 +743,7 @@ async function continueRow(cwCat) {
         label = `${it.type === "series" && season ? `S${season} · E${episode}` : "Resume"}${left && left <= 10 ? ` · ${left}m left` : ""}`;
         el.querySelector(".cw-art").insertAdjacentHTML("beforeend", `<div class="bar"><i style="width:${Math.max(3, Math.min(100, it.p.progress))}%"></i></div>`);
       } else if (it.type === "series") {
-        const named = cwEp(it.m && it.m.name);   // the add-on already says which episode is next
-        if (named) { season = named.season; episode = named.episode; label = `Next · S${season} · E${episode}`; }
-        else try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
+        try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
       }
       $(".cw-label", el).innerHTML = (label.startsWith("Next") ? "" : PLAY) + esc(label);
       const ep = season && (full.videos || []).find(x => x.season === season && x.episode === episode);
