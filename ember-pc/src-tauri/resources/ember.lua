@@ -86,7 +86,7 @@ end)
 -- anyone more than 2 s off jumps back in line.
 if o.together ~= "" and o.who ~= "" then
     local room = o.together ~= "host" and o.together or nil
-    local since, quiet_until, made = nil, 0, false
+    local since, quiet_until, made, last_fix = nil, 0, false, -100
     local ready_at = math.huge -- nothing goes to the room until you've been in it a few seconds (start-up seeks aren't yours)
     local function curl(method, path, body, cb)
         local args = { "curl", "-s", "-m", "4" }
@@ -159,7 +159,8 @@ if o.together ~= "" and o.who ~= "" then
             -- in step with the host: same pause state, and no more than 2 s apart
             if not j.you_host and mp.get_time() >= quiet_until and pos then
                 if j.paused ~= mp.get_property_bool("pause") then quiet(); mp.set_property_bool("pause", j.paused) end
-                if math.abs(pos - j.expect) > 2 then
+                if math.abs(pos - j.expect) > 2 and mp.get_time() - last_fix > 10 then -- (at most every 10 s: a slow
+                    last_fix = mp.get_time()                                             -- device isn't kept jumping)
                     quiet()
                     mp.commandv("seek", tostring(j.expect + 0.3), "absolute", "exact")
                 end

@@ -447,7 +447,7 @@ public class PlayerActivity extends Activity {
     private String tgRoom;
     private boolean tgMade = false, tgBusy = false;
     private int tgSince = -2;   // -2: not said hello yet; -1: first look (don't replay what happened before)
-    private long tgQuietUntil = 0, tgReadyAt = Long.MAX_VALUE;
+    private long tgQuietUntil = 0, tgReadyAt = Long.MAX_VALUE, tgLastFix = 0;
 
     private JSONObject tgHttp(String path, JSONObject body) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(o.get("ember-feed") + path).openConnection();
@@ -578,7 +578,10 @@ public class PlayerActivity extends Activity {
             boolean paused = j.optBoolean("paused");
             if (paused == player.getPlayWhenReady()) { tgQuiet(); player.setPlayWhenReady(!paused); }
             double expect = j.optDouble("expect", 0);
-            if (Math.abs(player.getCurrentPosition() / 1000.0 - expect) > 2) tgSeek(expect + 0.3);
+            if (Math.abs(player.getCurrentPosition() / 1000.0 - expect) > 2 && now - tgLastFix > 10_000) {   // at most every 10 s
+                tgLastFix = now;
+                tgSeek(expect + 0.3);
+            }
         }
         if (host && player.getPlayWhenReady()) tgSend("tick");
     }

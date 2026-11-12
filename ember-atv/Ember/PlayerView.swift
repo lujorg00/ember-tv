@@ -55,7 +55,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var tgWantHost = false, tgMade = false, tgBusy = false
     private var tgSince = -2              // -2: not said hello yet; -1: first look (don't replay what happened before)
     private var tgQuietUntil = Date.distantPast, tgReadyAt = Date.distantFuture
-    private var tgLastPos: Double?, tgLastAt = Date()
+    private var tgLastPos: Double?, tgLastAt = Date(), tgLastFix = Date.distantPast
 
     func begin(_ s: PlaySession, store: Store) {
         guard session == nil else { return }
@@ -538,7 +538,10 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if !host && Date() >= tgQuietUntil {   // in step with the host
             let shouldPause = (j["paused"] as? Bool) ?? false
             if shouldPause != paused { tgQuiet(); shouldPause ? core.pause() : core.play() }
-            if let e = j.dbl("expect"), abs(pos - e) > 2 { tgSeek(e + 0.3) }
+            if let e = j.dbl("expect"), abs(pos - e) > 2, Date().timeIntervalSince(tgLastFix) > 10 {   // at most every 10 s
+                tgLastFix = Date()
+                tgSeek(e + 0.3)
+            }
         }
         if host && !paused { tgSend("tick") }
     }
