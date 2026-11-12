@@ -32,7 +32,9 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.rtsp.RtspMediaSource;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -138,6 +140,7 @@ public class DimService extends AccessibilityService {
         apply(prefs.dimLevel(), false);
         main.post(clock);
         main.postDelayed(catPoll, 3000);
+        try { camWaiter.start(); } catch (IllegalThreadStateException ignored) { } // already running
         note("overlay started, lucapi at " + prefs.feedUrl());
         if (!prefs.resumeNote().isEmpty()) main.post(resumeCheck);
     }
@@ -145,6 +148,7 @@ public class DimService extends AccessibilityService {
     @Override
     public void onDestroy() {
         if (live == this) live = null;
+        camWaiter.interrupt();
         main.removeCallbacksAndMessages(null);
         net.shutdownNow();
         try {
@@ -467,7 +471,34 @@ public class DimService extends AccessibilityService {
 
     // ---------------------------------------------------------------- the cat flap camera
 
-    private String camShownId = "";
+    private volatile String camShownId = "";
+
+    /** One request always open to lucapi, answered the moment a camera pop-up starts (no waiting for the next poll). */
+    private final Thread camWaiter = new Thread(new Runnable() {
+        @Override
+        public void run() {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    String url = power != null && power.isInteractive() ? feed("/cam/wait?after=" + camShownId) : null;
+                    if (url == null) { Thread.sleep(5000); continue; }
+                    final JSONObject cam = new JSONObject(AddonClient.get(url)).optJSONObject("cam");
+                    if (cam != null) {
+                        main.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                showCam(cam);
+                            }
+                        });
+                        Thread.sleep(1000);
+                    }
+                } catch (InterruptedException e) {
+                    return;
+                } catch (Exception e) {
+                    try { Thread.sleep(5000); } catch (InterruptedException ie) { return; }
+                }
+            }
+        }
+    }, "ember-cam");
     private ExoPlayer camPlayer;
     private FrameLayout camBox;
     private long camUntil;
@@ -475,6 +506,7 @@ public class DimService extends AccessibilityService {
     /** The Ring's live view, small, bottom right, muted, for as long as lucapi says (about 45 s). */
     private void showCam(JSONObject cam) {
         String id = cam.optString("id"), url = cam.optString("url");
+        final String hls = url, rtsp = cam.optString("rtsp");
         if (id.isEmpty() || url.isEmpty() || id.equals(camShownId) || !power.isInteractive()) return;
         camShownId = id;
         long ms = Math.max(10, cam.optInt("secs", 45)) * 1000L;
@@ -528,7 +560,9 @@ public class DimService extends AccessibilityService {
         camBox.animate().alpha(1f).translationY(0).setDuration(350).start();
 
         try {
-            camPlayer = new ExoPlayer.Builder(this).build();
+            // start showing after half a second of picture, not the usual 2.5 s
+            camPlayer = new ExoPlayer.Builder(this).setLoadControl(new DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(1000, 5000, 500, 500).build()).build();
             camPlayer.setVolume(0f);
             camPlayer.setVideoTextureView(video);
             camPlayer.addListener(new Player.Listener() {
@@ -537,15 +571,26 @@ public class DimService extends AccessibilityService {
                     wait.setVisibility(View.GONE);
                 }
 
+                boolean triedHls = rtsp.isEmpty();
+
                 @Override
                 public void onPlayerError(PlaybackException e) {
+                    note("camera: couldn't play " + (triedHls ? "HLS" : "RTSP") + ": " + e.getErrorCodeName() + " " + e.getMessage());
+                    if (!triedHls && camPlayer != null) {   // the direct feed didn't work: the HLS one instead
+                        triedHls = true;
+                        playHls(camPlayer, hls);
+                        return;
+                    }
                     wait.setText("The camera didn't connect");
-                    note("camera: couldn't play: " + e.getErrorCodeName() + " " + e.getMessage());
                 }
             });
-            camPlayer.setMediaItem(new MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_M3U8)
-                    .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1500).build()).build());
-            camPlayer.prepare();
+            if (rtsp.isEmpty()) {
+                playHls(camPlayer, hls);
+            } else {   // direct from go2rtc, over TCP: about 2 s less delay than HLS
+                camPlayer.setMediaSource(new RtspMediaSource.Factory().setForceUseRtpTcp(true)
+                        .createMediaSource(MediaItem.fromUri(rtsp)));
+                camPlayer.prepare();
+            }
             camPlayer.play();
         } catch (Exception e) {
             note("camera: couldn't start the player: " + e);
@@ -554,6 +599,13 @@ public class DimService extends AccessibilityService {
         main.removeCallbacks(camEnd);
         main.postDelayed(camEnd, ms);
         scheduleDrop(ms + 1000);
+    }
+
+    private static void playHls(ExoPlayer p, String url) {
+        p.setMediaItem(new MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_M3U8)
+                .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1500).build()).build());
+        p.prepare();
+        p.play();
     }
 
     private final Runnable camEnd = new Runnable() {

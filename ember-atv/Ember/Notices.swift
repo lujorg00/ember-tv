@@ -34,16 +34,18 @@ final class Notices: ObservableObject {
         guard !running else { return }
         running = true
         Task {
-            var n = 0
             while true {
-                if n % 4 == 0 {   // every 20 s, as before
-                    if Date().timeIntervalSince(alertsAt) > 300 { await fetchAlerts() }
-                    showDue()
-                    await pollCats()
-                }
-                await pollCam()   // every 5 s, so the camera comes up while the cat's still there
-                n += 1
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Date().timeIntervalSince(alertsAt) > 300 { await fetchAlerts() }
+                showDue()
+                await pollCats()
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+        // the camera: one request always open to lucapi, answered the moment a cat reaches the flap
+        Task {
+            while true {
+                let ok = await waitCam()
+                if !ok { try? await Task.sleep(nanoseconds: 5_000_000_000) }
             }
         }
     }
@@ -91,12 +93,16 @@ final class Notices: ObservableObject {
         if !msg.isEmpty { showCat(msg.joined(separator: "  ·  ")) }
     }
 
-    private func pollCam() async {
-        guard let j = try? await API.feedGet("/cats", timeout: 4), let c = j["cam"] as? JSON,
-              let id = c.str("id"), let url = c.str("url").flatMap(URL.init(string:)), id != camShownId else { return }
+    /// false if lucapi couldn't be reached (try again in a bit)
+    private func waitCam() async -> Bool {
+        guard let j = try? await API.feedGet("/cam/wait?after=" + API.q(camShownId), timeout: 20) else { return false }
+        guard let c = j["cam"] as? JSON, let id = c.str("id"), let url = c.str("url").flatMap(URL.init(string:)),
+              id != camShownId else { return true }
         camShownId = id
         let secs = max(10, c.int("secs") ?? 45)
-        let p = AVPlayer(url: url)
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1      // start as soon as there's a second of picture
+        let p = AVPlayer(playerItem: item)
         p.isMuted = true
         p.automaticallyWaitsToMinimizeStalling = false
         p.play()
@@ -110,6 +116,7 @@ final class Notices: ObservableObject {
             p.pause()
             p.replaceCurrentItem(with: nil)
         }
+        return true
     }
 
     /// A calendar-style note, top right, one at a time (urgent ones jump the queue).

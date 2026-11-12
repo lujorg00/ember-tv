@@ -6,6 +6,7 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /status       -> cards for the projects strip on Ember's Apps page
   GET /photo/<name> -> a photo from your photos folder
   GET /cats         -> just the cats, in or out (polled often, for the pop-ups); "cam" while the Ring camera pop-up is on
+  GET /cam/wait?after=<id> -> answers as soon as a new camera pop-up starts (or after ~12 s): the TVs keep one open
   GET /cam/test     -> pops the Ring camera up on Ember TV and Apple TV now, as if a cat were at the flap
   GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
@@ -438,8 +439,12 @@ def status_cards():
 # pop up the Ring's live view for a while. lucapi's ring-mqtt (logged into Ring) turns the live view into a local stream
 # and go2rtc serves it as HLS, which both players can play. config.json: "ring": {"hls": "http://.../stream.m3u8?src=catflap",
 # "flap_rooms": ["cat_flap"], "secs": 45, "cooldown": 90}. Set up by lucapi/ring-setup.sh.
+# To cut the wait for Ring's live view (5-10 s to start), lucapi starts watching the camera itself as soon as a cat is
+# seen outside ("warm_rooms", the fence), so it's already running when the cat reaches the flap; the TVs then join in.
 _cam = {"at": 0.0, "names": [], "why": ""}
 _cam_lock = threading.Lock()
+_cam_cv = threading.Condition(_cam_lock)
+_warm = {"until": 0.0, "since": 0.0, "running": False}
 
 
 def _ring():
@@ -458,6 +463,7 @@ def cam_fire(names, why):
         if now - _cam["at"] < secs + float(_ring().get("cooldown", 90)) and why != "test":
             return
         _cam.update(at=now, names=list(names), why=why)
+        _cam_cv.notify_all()
     print(f"[ember-feed] camera pop-up: {', '.join(names)} ({why})", flush=True)
 
 
@@ -472,18 +478,70 @@ def cam_now():
         names, why, at = list(_cam["names"]), _cam["why"], _cam["at"]
     who = " & ".join(names) if names else "Cat flap"
     title = {"test": "Cat flap camera (test)", "in": f"{who} coming in", "out": f"{who} going out"}.get(why, f"{who} at the cat flap")
-    return {"id": str(int(at)), "title": title, "url": r["hls"], "secs": int(float(r.get("secs", 45)) - (time.time() - at))}
+    return {"id": str(int(at)), "title": title, "url": r["hls"], "rtsp": _cam_rtsp(),
+            "secs": int(float(r.get("secs", 45)) - (time.time() - at))}
+
+
+def _cam_rtsp():
+    """The same stream over RTSP (go2rtc on :8556): the Chromecast plays it with ~2 s less buffering than HLS."""
+    r = _ring()
+    if r.get("rtsp"):
+        return r["rtsp"]
+    host = urllib.parse.urlparse(r.get("hls", "")).hostname
+    return f"rtsp://{host}:8556/catflap" if host else ""
+
+
+def cam_wait(after, secs=12.0):
+    end = time.time() + secs
+    with _cam_cv:
+        while time.time() < end:
+            if _cam["at"] and str(int(_cam["at"])) != after and time.time() - _cam["at"] < float(_ring().get("secs", 45)):
+                break
+            _cam_cv.wait(max(0.1, end - time.time()))
+    return cam_now()
+
+
+def _cam_warm(secs):
+    """Keep the Ring's live view running (lucapi watching it, picture thrown away) for the next `secs` seconds.
+    Capped at 5 minutes in one go, so a cat lounging by the fence doesn't keep the camera streaming all evening."""
+    now = time.time()
+    if not _warm["running"]:
+        _warm["since"] = now
+    if now - _warm["since"] > 300:
+        return
+    _warm["until"] = max(_warm["until"], now + secs)
+    if _warm["running"]:
+        return
+    _warm["running"] = True
+
+    def run():
+        url = _ring().get("hls", "").replace("stream.m3u8", "stream.mp4")
+        print("[ember-feed] camera: warming up (a cat is outside)", flush=True)
+        try:
+            while time.time() < _warm["until"]:
+                try:
+                    with urllib.request.urlopen(url, timeout=15) as resp:
+                        while time.time() < _warm["until"] and resp.read(65536):
+                            pass
+                except Exception as e:
+                    print(f"[ember-feed] camera warm-up: {e}", flush=True)
+                    time.sleep(3)
+        finally:
+            _warm["running"] = False
+            print("[ember-feed] camera: warm-up over", flush=True)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def _flap_watch():
     """Every few seconds: has a cat reached the flap, or gone in or out?"""
     rooms_before, home_before = {}, {}
     while True:
-        time.sleep(3)
+        time.sleep(1)
         r = _ring()
         if not r.get("hls"):
             continue
         flap = [x.lower() for x in r.get("flap_rooms", ["cat_flap"])]
+        warm = [x.lower() for x in r.get("warm_rooms", ["fence"])]
         try:
             cats = _cats()
         except Exception:
@@ -498,6 +556,8 @@ def _flap_watch():
             elif n in home_before and home != home_before[n]:
                 hit.append(n); why = why or ("in" if home else "out")
             rooms_before[n], home_before[n] = room, home
+            if room in warm or (room in flap and not home):
+                _cam_warm(float(r.get("warm_secs", 60)))
         if hit:
             cam_fire(hit, why)
 
@@ -4133,6 +4193,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"cats": cached("cats", 3, _cats), "cam": cam_now()})
                 except Exception:
                     self._json({"cats": [], "cam": cam_now()})
+            elif path == "/cam/wait":
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._json({"cam": cam_wait((q.get("after") or [""])[0])})
+            elif path == "/cam/warm":
+                _cam_warm(60)
+                self._json({"warming": True})
             elif path == "/cam/test":
                 cam_fire([], "test")
                 self._json({"cam": cam_now() or "no camera set up (run lucapi/ring-setup.sh)"})
