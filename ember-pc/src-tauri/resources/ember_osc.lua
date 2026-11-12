@@ -8,7 +8,7 @@ local mp = require "mp"
 local msg = require "mp.msg"
 local options = require "mp.options"
 
-local opts = { next = false, accent = "F0A04B", statefile = "", fsfile = "", fs = false }
+local opts = { next = false, accent = "F0A04B", statefile = "", fsfile = "", fs = false, light = false }
 options.read_options(opts, "ember_osc")
 
 local ICON, FONT = "modernz-icons", "Segoe UI"
@@ -51,6 +51,45 @@ local function save_volume()
 end
 mp.observe_property("volume", "number", function(_, v) if v then save_volume() end end)
 mp.observe_property("mute", "bool", function() save_volume() end)
+
+-- Picture too heavy for this computer: Ember's player uses mpv's high-quality picture settings (fine on a desktop
+-- graphics card), which a laptop's built-in graphics can't keep up with at 4K, and it plays at a few frames a second.
+-- If frames keep being dropped, switch to mpv's lighter settings (what Stremio uses) and remember it for this computer.
+local lightfile = setdir and (setdir .. "/light-picture.txt") or nil
+local function go_light(why)
+    pcall(mp.commandv, "apply-profile", "fast")
+    mp.set_property("hdr-compute-peak", "no")
+    mp.set_property("hdr-contrast-recovery", "0")
+    mp.set_property("tone-mapping", "auto")
+    mp.set_property("interpolation", "no")
+    mp.set_property("video-sync", "audio")
+    if why then
+        mp.msg.warn("picture: switched to light settings (" .. why .. ")")
+        mp.osd_message("Picture switched to smooth mode for this computer", 4)
+        local f = lightfile and io.open(lightfile, "w")
+        if f then f:write("yes\n"); f:close() end
+    end
+end
+do
+    local f = lightfile and io.open(lightfile, "r")
+    if f then f:close() end
+    if opts.light or f then go_light(nil); mp.msg.info("picture: light settings (" .. (opts.light and "Settings" or "remembered for this computer") .. ")")
+    else
+        local last, bad, gone = nil, 0, false
+        mp.add_periodic_timer(3, function()
+            if gone or mp.get_property_bool("pause") or mp.get_property_bool("seeking") or mp.get_property_bool("paused-for-cache") then
+                last = nil; return
+            end
+            local d = (mp.get_property_number("frame-drop-count", 0) or 0) + (mp.get_property_number("decoder-frame-drop-count", 0) or 0)
+                + (mp.get_property_number("vo-delayed-frame-count", 0) or 0)
+            if last then
+                if d - last > 12 then bad = bad + 1 else bad = math.max(0, bad - 1) end
+                if bad >= 2 then gone = true; go_light(d - last .. " frames dropped in 3 s") end
+            end
+            last = d
+        end)
+    end
+end
 
 -- Full screen is Ember's window, not mpv's (mpv sits over Ember's page): ask Ember through a small file it watches.
 local function toggle_fullscreen()

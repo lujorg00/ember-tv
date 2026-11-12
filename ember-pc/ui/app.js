@@ -1993,7 +1993,7 @@ async function play(url, mm, season, episode, epTitle, start, chosen, retry) {
   const embed = store.get("playMode", "window") === "window";
   const next = nextEpisode(mm, season, episode);
   const opts = [`ember-feed=${feed()}`, `ember-imdb=${mm.id}`, `ember-type=${mm.type}`, `ember-season=${season ?? ""}`,
-    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`, `ember_osc-next=${next ? "yes" : "no"}`,
+    `ember-episode=${episode ?? ""}`, `ember-device=${deviceName().replace(/,/g, " ")}`, `ember_osc-next=${next ? "yes" : "no"}`, `ember_osc-light=${store.get("light", "0") === "1" ? "yes" : "no"}`,
     `ember-together=${together || ""}`, `ember-who=${deviceWho()}`, `ember-show=${String(mm.name || "").replace(/[,=]/g, " ")}`].join(",");
   const title = mm.name + (season ? `  ·  S${season} E${episode}${epTitle ? "  ·  " + epTitle : ""}` : "");
   try {
@@ -2038,6 +2038,8 @@ function showSettings() {
       <label>Best stream picker: highest quality</label>
       <label class="check"><input type="radio" name="q" value="4k"> 4K when it's available and your connection keeps up</label>
       <label class="check"><input type="radio" name="q" value="1080p"> 1080p (smaller files, safest)</label>
+      <label>Picture</label>
+      <label class="check"><input type="checkbox" id="light"> Smooth picture: lighter processing for laptops and built-in graphics (Ember switches to it by itself if frames start dropping)</label>
       <label>Sound</label>
       <label class="check"><input type="checkbox" id="pt"> Send Dolby and DTS untouched to a receiver or soundbar (HDMI only; leave off for PC speakers and headphones)</label>
       <label>Background</label>
@@ -2065,6 +2067,7 @@ function showSettings() {
   document.querySelector(`input[name=pm][value="${store.get("playMode", "window")}"]`).checked = true;
   $("#pt").checked = store.get("passthrough", "0") === "1";
   document.querySelector(`input[name=q][value="${store.get("quality", "4k")}"]`).checked = true;
+  $("#light").checked = store.get("light", "0") === "1";
   $("#motion").checked = store.get("motion", "1") === "1";
   const picksUrl = () => {
     const aio = store.get("aio"); if (!aio) return "Add your AIOStreams link above first";
@@ -2085,7 +2088,7 @@ function showSettings() {
     store.set("aio", $("#aio").value.trim());
     shareSettings(); store.set("feed", $("#feed").value.trim()); store.set("deviceName", $("#dev").value.trim().slice(0, 30));
     store.set("playMode", document.querySelector("input[name=pm]:checked").value);
-    store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0");
+    store.set("passthrough", $("#pt").checked ? "1" : "0"); store.set("quality", document.querySelector("input[name=q]:checked").value); store.set("motion", $("#motion").checked ? "1" : "0"); store.set("light", $("#light").checked ? "1" : "0");
     addonCatalogs = null; sky.start(); $("#picksUrl").value = picksUrl(); toast("Saved");
   };
 }
