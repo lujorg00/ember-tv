@@ -1584,6 +1584,13 @@ def next_episode(imdb):
         return {"season": own["season"], "episode": own["episode"], "episodeTitle": own["episodeTitle"]}
     def _n():
         p = _trakt(f"/shows/{imdb}/progress/watched?hidden=false&specials=false")
+        # the episode after the last one you watched (Trakt's own "next" is the earliest gap, which can be a
+        # season you skipped years ago)
+        le = p.get("last_episode") or {}
+        if le.get("season") and le.get("number"):
+            after = _next_after(imdb, int(le["season"]), int(le["number"]))
+            if after:
+                return after
         ne = p.get("next_episode") or {}
         if not ne:
             return {}

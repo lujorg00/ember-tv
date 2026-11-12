@@ -702,6 +702,14 @@ async function showHome() {
   hero.start(own.length ? own : slideshowFrom([...topLists, ...otherLists]));
 }
 
+/** Add-ons name their "next" items like "Next S35E2 · The Simpsons": the show's own name, and the episode they mean. */
+const cwPrefix = /^\s*(?:up\s+)?(?:next|continue|resume)\b[^·•|]*[·•|]\s*/i;
+function cwName(n) { return String(n || "").replace(cwPrefix, ""); }
+function cwEp(n) {
+  const m = String(n || "").match(cwPrefix) && String(n).match(/S(\d+)\s*[·.]?\s*E(\d+)/i);
+  return m ? { season: +m[1], episode: +m[2] } : null;
+}
+
 /** Continue watching: what you're part-way through (any device), then what's next, as wide cards with episode stills. */
 async function continueRow(cwCat) {
   const items = [];
@@ -717,7 +725,7 @@ async function continueRow(cwCat) {
   const r = h(`<section class="row fade-in"><h2>Continue <em class="acc">watching</em> <small>${items.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);
   for (const it of items.slice(0, 20)) {
-    const el = h(`<div class="cw" data-tid="${esc(it.id)}" data-ttype="${esc(it.type)}" data-tname="${esc((it.m && it.m.name) || "")}"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
+    const el = h(`<div class="cw" data-tid="${esc(it.id)}" data-ttype="${esc(it.type)}" data-tname="${esc(cwName(it.m && it.m.name))}"><div class="cw-art"><div class="cw-label"></div><button class="cw-x" title="Remove from Continue watching">✕</button></div><div class="cw-name"></div></div>`);
     strip.appendChild(el);
     $(".cw-x", el).onclick = async (e) => {
       e.stopPropagation();
@@ -731,14 +739,16 @@ async function continueRow(cwCat) {
     };
     (async () => {
       const full = { ...(it.m || {}), ...(await meta(it.type, it.id)) };
-      $(".cw-name", el).textContent = full.name || "";
+      $(".cw-name", el).textContent = cwName(full.name);
       let season = it.p && it.p.season, episode = it.p && it.p.episode, label = "";
       if (it.p) {
         const left = it.p.duration ? Math.max(1, Math.round((it.p.duration - it.p.position) / 60)) : 0;
         label = `${it.type === "series" && season ? `S${season} · E${episode}` : "Resume"}${left && left <= 10 ? ` · ${left}m left` : ""}`;
         el.querySelector(".cw-art").insertAdjacentHTML("beforeend", `<div class="bar"><i style="width:${Math.max(3, Math.min(100, it.p.progress))}%"></i></div>`);
       } else if (it.type === "series") {
-        try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
+        const named = cwEp(it.m && it.m.name);   // the add-on already says which episode is next
+        if (named) { season = named.season; episode = named.episode; label = `Next · S${season} · E${episode}`; }
+        else try { const n = await getJson(`${feed()}/next/${it.id}`, 6000); if (n.season) { season = n.season; episode = n.episode; label = `Next · S${season} · E${episode}`; } } catch (e) {}
       }
       $(".cw-label", el).innerHTML = (label.startsWith("Next") ? "" : PLAY) + esc(label);
       const ep = season && (full.videos || []).find(x => x.season === season && x.episode === episode);

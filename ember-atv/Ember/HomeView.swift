@@ -980,7 +980,7 @@ struct ContinueRow: View {
                                 PosterMenu(meta: it.meta)
                                 Button("Remove from Continue watching", role: .destructive) { store.dismiss(it.id) }
                             }
-                            Text(it.meta.name).font(.ember(24, .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)
+                            Text(CWName.clean(it.meta.name)).font(.ember(24, .semibold)).lineLimit(1).frame(width: 430, alignment: .leading)
                         }
                     }
                 }
