@@ -77,6 +77,11 @@ enum CWName {
 /// Everything the screens share. Lives on the main thread.
 @MainActor
 final class Store: ObservableObject {
+    /// Your all-time picks, by the catalogue's id (the addon renamed it "Recommended For You") or its old name.
+    nonisolated static func isAllTime(_ c: JSON) -> Bool {
+        (c.str("id") ?? "").range(of: "alltime", options: .caseInsensitive) != nil
+            || (c.str("name") ?? "").range(of: "all.?time", options: [.regularExpression, .caseInsensitive]) != nil
+    }
     @Published var aio = UserDefaults.standard.string(forKey: "aio") ?? ""
     @Published var progress: [String: Progress] = [:]
     @Published var watched: [String: String] = [:]      // imdb -> "done" | "partial"
@@ -169,7 +174,7 @@ final class Store: ObservableObject {
         let isCont = { (c: JSON) in named(c, "pick up|left off|continue") }
         let isTop = { (c: JSON) in named(c, "\\btop\\b") }
         cwCats = homeList.filter(isCont)
-        let allTime = { (c: JSON) in named(c, "all.?time") }    // those live on Films and Series instead
+        let allTime = { (c: JSON) in Store.isAllTime(c) }    // those live on Films and Series instead
         // Trending Today first (wide pictures, no numbers), then the Top 10s, then the rest
         let trend = { (c: JSON) in named(c, "trending") }
         let tops = homeList.filter { isTop($0) && !isCont($0) && !allTime($0) }
@@ -317,7 +322,7 @@ final class Store: ObservableObject {
         let plan: [(String, JSON?, Bool)] = [
             ("Trending Today", find("trending", mine, theirs), false),
             ("New \(kind) For You", find("^new .*for you", mine), false),
-            ("All Time Recommendations", find("all.?time", mine), false),
+            ("Recommended For You", mine.first(where: Store.isAllTime), false),
             ("Netflix Top \(kind)", find("netflix top", mine, theirs), true),
             ("Disney+ Top \(kind)", find("disney\\s*\\+", theirs, mine), true),
             ("Apple TV+ Top \(kind)", find("apple tv\\s*\\+", theirs, mine), true),

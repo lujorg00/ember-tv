@@ -248,6 +248,8 @@ const spoilers = () => store.get("spoilers", "0") === "1";
 const hiddenRows = () => { try { return new Set(JSON.parse(store.get("hiddenRows", "[]"))); } catch (e) { return new Set(); } };
 const setHiddenRows = (set) => store.set("hiddenRows", JSON.stringify([...set]));
 const catKey = (c) => `cat:${c.type}:${c.id}`;
+/** Your all-time picks, by the catalogue's id (the addon renamed it "Recommended For You") or its old name. */
+const isAllTime = (c) => /alltime/i.test((c && c.id) || "") || /all.?time/i.test((c && c.name) || "");
 const deviceName = () => store.get("deviceName", TV ? "Ember TV" : "Ember PC") || (TV ? "Ember TV" : "Ember PC");
 /** This device for watch together: its own id (two PCs can share a name). */
 const deviceWho = () => { let w = store.get("who"); if (!w) { w = (TV ? "tv-" : "pc-") + Math.random().toString(36).slice(2, 10); store.set("who", w); } return w; };
@@ -674,7 +676,7 @@ async function showHome() {
   // Order: continue watching, top 10s, out this week, your other rows, then the tiles.
   const slotCW = document.createElement("div"); rows.appendChild(slotCW);
   const hidden = hiddenRows();
-  const shown = cats.filter(c => !hidden.has(catKey(c)) && !/all.?time/i.test(c.name || "")); // all-time picks live on Films and Series
+  const shown = cats.filter(c => !hidden.has(catKey(c)) && !isAllTime(c)); // all-time picks live on Films and Series
   // Trending Today first (wide pictures, no numbers), then the Top 10s
   const isTrend = (c) => /trending/i.test(c.name || "");
   const tops = shown.filter(isTop).sort((a, b) => isTrend(b) - isTrend(a)), others = shown.filter(c => !isTop(c) && !isContinue(c));
@@ -1204,7 +1206,7 @@ async function showBrowse(type) {
   const plan = [
     { name: "Trending Today", cat: find(/trending/i, mine, theirs) },
     { name: `New ${kind} For You`, cat: find(/^new .*for you/i, mine) },
-    { name: "All Time Recommendations", cat: find(/all.?time/i, mine) },
+    { name: "Recommended For You", cat: mine.find(isAllTime) || null },
     { name: `Netflix Top ${kind}`, cat: find(/netflix top/i, mine, theirs), top: true },
     { name: `Disney+ Top ${kind}`, cat: find(/disney\s*\+/i, theirs, mine), top: true },
     { name: `Apple TV+ Top ${kind}`, cat: find(/apple tv\s*\+/i, theirs, mine), top: true },

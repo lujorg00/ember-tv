@@ -4498,9 +4498,10 @@ class Handler(BaseHTTPRequestHandler):
                 man = cached("addon-manifest", 3600, lambda: json.loads(http_get(up + "/manifest.json", timeout=15)))
                 name = next((c.get("name", "") for c in man.get("catalogs", [])
                              if c.get("type") == m.group(1) and c.get("id") == urllib.parse.unquote(m.group(2))), "")
-                if re.search(r"for you|all.?time|recommend", name, re.I):
+                all_time = bool(re.search(r"alltime", urllib.parse.unquote(m.group(2)), re.I) or re.search(r"all.?time", name, re.I))
+                if all_time or re.search(r"for you|recommend", name, re.I):
                     j = json.loads(body)
-                    j["metas"] = love_rerank(j.get("metas", []), m.group(1), new_only=not re.search(r"all.?time", name, re.I))
+                    j["metas"] = love_rerank(j.get("metas", []), m.group(1), new_only=not all_time)
                     body, ctype = json.dumps(j).encode(), "application/json"
                 elif m.group(1) == "series" and re.search(r"pick up|left off|continue", name, re.I):
                     # shows you finished an episode of in Ember go first, whatever Trakt knows (the apps add 'Next · S E')
