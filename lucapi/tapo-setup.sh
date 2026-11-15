@@ -68,7 +68,7 @@ c = json.load(open(p)) if os.path.exists(p) else {}
 t = c.setdefault("tapo", {})
 t.update(main="rtsp://127.0.0.1:8556/tapo", sub="rtsp://127.0.0.1:8556/tapo_sub",
          live=f"http://{ip}:1985/api/stream.m3u8?src=tapo", base=f"http://{ip}:8090")
-for k, v in {"zone": [0, 0, 1, 1], "sens": 0.04, "secs": 12, "cooldown": 60, "pre": 3}.items():
+for k, v in {"zone": [0, 0, 1, 1], "sens": 0.04, "secs": 6, "hold": 6, "cooldown": 60, "pre": 3}.items():
     t.setdefault(k, v)
 json.dump(c, open(p, "w"), indent=2); os.chmod(p, 0o600)
 PY
@@ -85,7 +85,7 @@ m = json.loads(sys.argv[1] or "{}")
 print("Recorder:", "running, %ss kept" % m.get("seconds_kept") if m.get("recording") else "NOT running yet")
 print("Motion watcher:", "running (%s frames looked at)" % m.get("frames") if m.get("frames") else "NOT running yet")
 PY
-curl -s localhost:8090/cam/test >/dev/null && echo "Sent a test pop-up to Ember TV and Apple TV (it shows for 12 s)."
+curl -s localhost:8090/cam/test >/dev/null && echo "Sent a test pop-up to Ember TV and Apple TV (it shows while there's movement)."
 echo
 echo "Last step: on your phone, open  http://$IP:8090/cam/view.jpg  (home Wi-Fi only)"
 echo "and send Claude a screenshot, so the motion box can go round the flap. Until then the whole picture counts."

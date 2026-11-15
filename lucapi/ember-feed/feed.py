@@ -486,7 +486,7 @@ def cam_extend():
     with _cam_lock:
         now = time.time()
         if now < _cam["until"]:
-            _cam["until"] = min(max(_cam["until"], now + float(t.get("hold", 4))), _cam["at"] + float(t.get("max", 90)))
+            _cam["until"] = min(max(_cam["until"], now + float(t.get("hold", 6))), _cam["at"] + float(t.get("max", 90)))
 
 
 def cam_now():
