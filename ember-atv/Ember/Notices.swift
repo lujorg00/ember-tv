@@ -217,9 +217,11 @@ struct NoticeOverlay: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        // the whole screen, so bottom right is the screen's corner (an empty ZStack has no size and sits in the middle)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if let c = notices.cam {
-                // the cat flap camera: bottom right, muted, about 45 s
+                // the cat flap camera: bottom right, muted, 12 s
                 ZStack(alignment: .topLeading) {
                     Theme.bg
                     Text("Connecting to the camera…").font(.ember(18)).foregroundStyle(Theme.muted)
