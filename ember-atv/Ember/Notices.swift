@@ -128,6 +128,7 @@ final class Notices: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(secs) * 1_000_000_000)
             guard cam?.id == id else { return }
             withAnimation(.easeIn(duration: 0.35)) { cam = nil }
+            try? await Task.sleep(nanoseconds: 600_000_000)   // the picture keeps playing while it slides away
             p.pause()
             p.replaceCurrentItem(with: nil)
         }

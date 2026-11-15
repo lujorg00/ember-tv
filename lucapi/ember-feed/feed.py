@@ -710,8 +710,9 @@ def tapo_clip(cid, kind="main"):
     """The pop-up's playlist: the recorder's pieces from `pre` seconds before the movement, growing until it's over."""
     t, at = _tapo(), int(cid)
     pre, secs = float(t.get("pre", 3)), float(t.get("secs", 30))
-    segs = [x for x in _rec_list(kind) if x[2] > at - pre and x[2] - x[1] < at + secs]
-    done = time.time() > at + secs + 2
+    # the players run a few seconds behind, so the picture carries on a little past the pop-up (never ends before it)
+    segs = [x for x in _rec_list(kind) if x[2] > at - pre and x[2] - x[1] < at + secs + pre + 3]
+    done = time.time() > at + secs + pre + 5
     target = max([2] + [int(-(-d // 1)) for _, d, _ in segs])
     out = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{target}", "#EXT-X-MEDIA-SEQUENCE:0",
            "#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"]
