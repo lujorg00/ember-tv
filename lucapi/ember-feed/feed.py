@@ -444,7 +444,7 @@ def status_cards():
 # "flap_rooms": ["cat_flap"], "secs": 45, "cooldown": 90}. Set up by lucapi/ring-setup.sh.
 # To cut the wait for Ring's live view (5-10 s to start), lucapi starts watching the camera itself as soon as a cat is
 # seen outside ("warm_rooms", the fence), so it's already running when the cat reaches the flap; the TVs then join in.
-_cam = {"at": 0.0, "names": [], "why": ""}
+_cam = {"at": 0.0, "until": 0.0, "names": [], "why": ""}   # until: when it goes (pushed on while there's movement)
 _cam_lock = threading.Lock()
 _cam_cv = threading.Condition(_cam_lock)
 _warm = {"until": 0.0, "since": 0.0, "running": False}
@@ -467,16 +467,26 @@ def cam_fire(names, why):
     with _cam_lock:
         now = time.time()
         secs = float(_camcfg().get("secs", 45))
-        if now - _cam["at"] < secs:  # already up: add the other cat to it
+        if now < _cam["until"]:  # already up: add the other cat to it
             for n in names:
                 if n not in _cam["names"]:
                     _cam["names"].append(n)
             return
-        if now - _cam["at"] < secs + float(_camcfg().get("cooldown", 90)) and why != "test":
+        if now < _cam["until"] + float(_camcfg().get("cooldown", 90)) and why != "test":
             return
-        _cam.update(at=now, names=list(names), why=why)
+        _cam.update(at=now, until=now + secs, names=list(names), why=why)
         _cam_cv.notify_all()
     print(f"[ember-feed] camera pop-up: {', '.join(names)} ({why})", flush=True)
+
+
+def cam_extend():
+    """Something's still moving at the flap: keep the pop-up up until it's been still for "hold" seconds
+    (up to "max" seconds in all)."""
+    t = _tapo()
+    with _cam_lock:
+        now = time.time()
+        if now < _cam["until"]:
+            _cam["until"] = min(max(_cam["until"], now + float(t.get("hold", 4))), _cam["at"] + float(t.get("max", 90)))
 
 
 def cam_now():
@@ -485,14 +495,14 @@ def cam_now():
     if not r.get("hls") and not r.get("main"):
         return None
     with _cam_lock:
-        if time.time() - _cam["at"] > float(r.get("secs", 45)):
+        if time.time() > _cam["until"]:
             return None
-        names, why, at = list(_cam["names"]), _cam["why"], _cam["at"]
+        names, why, at, until = list(_cam["names"]), _cam["why"], _cam["at"], _cam["until"]
     who = " & ".join(names) if names else "Cat flap"
     if not names and why in ("motion", "flap"):
         why = "plain"
     title = {"plain": "Cat flap", "test": "Cat flap camera (test)", "in": f"{who} coming in", "out": f"{who} going out"}.get(why, f"{who} at the cat flap")
-    left = int(float(r.get("secs", 45)) - (time.time() - at))
+    left = max(1, round(until - time.time()))
     if r.get("main"):  # the Tapo: a replay from a few seconds before, running on into live, else plain live
         url = f"{r['base']}/cam/clip/{int(at)}.m3u8" if _rec_ok() else r.get("live", "")
         small = f"{r['base']}/cam/clip/{int(at)}.m3u8?s=sub" if _rec_ok("sub") else url
@@ -513,7 +523,7 @@ def cam_wait(after, secs=12.0):
     end = time.time() + secs
     with _cam_cv:
         while time.time() < end:
-            if _cam["at"] and str(int(_cam["at"])) != after and time.time() - _cam["at"] < float(_camcfg().get("secs", 45)):
+            if _cam["at"] and str(int(_cam["at"])) != after and time.time() < _cam["until"]:
                 break
             _cam_cv.wait(max(0.1, end - time.time()))
     return cam_now()
@@ -694,6 +704,7 @@ def _tapo_motion():
                     quiet, run = now + 3, 0
                 elif now > quiet and level > sens:
                     _motion["peak"] = max(_motion["peak"], level)
+                    cam_extend()
                     run += 1
                     if run == 2:
                         _motion["fired"] = now
@@ -709,7 +720,8 @@ def _tapo_motion():
 def tapo_clip(cid, kind="main"):
     """The pop-up's playlist: the recorder's pieces from `pre` seconds before the movement, growing until it's over."""
     t, at = _tapo(), int(cid)
-    pre, secs = float(t.get("pre", 3)), float(t.get("secs", 30))
+    pre = float(t.get("pre", 3))
+    secs = (_cam["until"] - _cam["at"]) if int(_cam["at"]) == at else float(t.get("secs", 12))
     # the players run a few seconds behind, so the picture carries on a little past the pop-up (never ends before it)
     segs = [x for x in _rec_list(kind) if x[2] > at - pre and x[2] - x[1] < at + secs + pre + 3]
     done = time.time() > at + secs + pre + 5
@@ -4501,6 +4513,8 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/together/[A-Za-z0-9]{4}", path):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json(together_get(path.split("/")[2], int((q.get("since") or ["0"])[0]), (q.get("who") or [""])[0]))
+            elif path == "/cam/now":
+                self._json({"cam": cam_now()})
             elif path == "/cam/wait":
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._json({"cam": cam_wait((q.get("after") or [""])[0])})

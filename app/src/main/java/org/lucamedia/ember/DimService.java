@@ -628,7 +628,40 @@ public class DimService extends AccessibilityService {
         p.play();
     }
 
+    /** Time's up: unless lucapi says something's still moving at the flap (then later), slide it away. */
     private final Runnable camEnd = new Runnable() {
+        @Override
+        public void run() {
+            if (camBox == null) return;
+            final String id = camShownId, url = feed("/cam/now");
+            if (url == null) { camOut.run(); return; }
+            net.execute(new Runnable() {
+                @Override
+                public void run() {
+                    int left = 0;
+                    try {
+                        JSONObject c = new JSONObject(AddonClient.get(url)).optJSONObject("cam");
+                        if (c != null && id.equals(c.optString("id"))) left = c.optInt("secs", 0);
+                    } catch (Exception ignored) { }
+                    final int more = left;
+                    main.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (camBox == null || !id.equals(camShownId)) return;
+                            if (more <= 0) { camOut.run(); return; }
+                            long ms = more * 1000L;
+                            camUntil = System.currentTimeMillis() + ms;
+                            main.removeCallbacks(camEnd);
+                            main.postDelayed(camEnd, ms);
+                            scheduleDrop(ms + 1000);
+                        }
+                    });
+                }
+            });
+        }
+    };
+
+    private final Runnable camOut = new Runnable() {
         @Override
         public void run() {
             final FrameLayout box = camBox;

@@ -125,7 +125,14 @@ final class Notices: ObservableObject {
         Diag.log("camera: showing \(shown.title)")
         withAnimation(.easeOut(duration: 0.35)) { cam = shown }
         Task {
-            try? await Task.sleep(nanoseconds: UInt64(secs) * 1_000_000_000)
+            var wait = secs
+            while true {   // when time's up, ask lucapi: something still moving at the flap keeps it up
+                try? await Task.sleep(nanoseconds: UInt64(wait) * 1_000_000_000)
+                guard cam?.id == id else { return }
+                let now = (try? await API.feedGet("/cam/now", timeout: 4))?["cam"] as? JSON
+                guard let left = now?.int("secs"), now?.str("id") == id, left > 0 else { break }
+                wait = left
+            }
             guard cam?.id == id else { return }
             withAnimation(.easeIn(duration: 0.35)) { cam = nil }
             try? await Task.sleep(nanoseconds: 600_000_000)   // the picture keeps playing while it slides away
