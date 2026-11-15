@@ -520,7 +520,7 @@ public class DimService extends AccessibilityService {
 
     /** The Ring's live view, small, bottom right, muted, for as long as lucapi says (about 45 s). */
     private void showCam(JSONObject cam) {
-        String id = cam.optString("id"), url = cam.optString("url");
+        String id = cam.optString("id"), url = cam.optString("small", cam.optString("url"));
         final String hls = url, rtsp = cam.optString("rtsp");
         if (id.isEmpty() || url.isEmpty() || id.equals(camShownId) || !power.isInteractive()) return;
         camShownId = id;
@@ -530,7 +530,7 @@ public class DimService extends AccessibilityService {
         if (layer == null) return;
         stopCam();
         float d = getResources().getDisplayMetrics().density;
-        final int w = Math.round(400 * d), h = Math.round(225 * d), r = Math.round(18 * d);
+        final int w = Math.round(320 * d), h = Math.round(180 * d), r = Math.round(16 * d);
 
         camBox = new FrameLayout(this);
         GradientDrawable bg = new GradientDrawable();
@@ -567,8 +567,8 @@ public class DimService extends AccessibilityService {
 
         FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(w, h);
         bp.gravity = Gravity.BOTTOM | Gravity.END;
-        bp.rightMargin = Math.round(40 * d);
-        bp.bottomMargin = Math.round(36 * d);
+        bp.rightMargin = Math.round(24 * d);
+        bp.bottomMargin = Math.round(20 * d);
         camBox.setAlpha(0f);
         camBox.setTranslationY(40 * d);
         layer.addView(camBox, bp);
@@ -617,8 +617,13 @@ public class DimService extends AccessibilityService {
     }
 
     private static void playHls(ExoPlayer p, String url) {
+        // the Tapo's replay starts a few seconds back and plays on at normal speed (never pulled to the live edge);
+        // the Ring's live view sits close to live
+        MediaItem.LiveConfiguration live = url.contains("/cam/clip/")
+                ? new MediaItem.LiveConfiguration.Builder().setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build()
+                : new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1500).build();
         p.setMediaItem(new MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_M3U8)
-                .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1500).build()).build());
+                .setLiveConfiguration(live).build());
         p.prepare();
         p.play();
     }

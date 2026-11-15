@@ -495,7 +495,8 @@ def cam_now():
     left = int(float(r.get("secs", 45)) - (time.time() - at))
     if r.get("main"):  # the Tapo: a replay from a few seconds before, running on into live, else plain live
         url = f"{r['base']}/cam/clip/{int(at)}.m3u8" if _rec_ok() else r.get("live", "")
-        return {"id": str(int(at)), "title": title, "url": url, "rtsp": "", "secs": left}
+        small = f"{r['base']}/cam/clip/{int(at)}.m3u8?s=sub" if _rec_ok("sub") else url
+        return {"id": str(int(at)), "title": title, "url": url, "small": small, "rtsp": "", "secs": left}
     return {"id": str(int(at)), "title": title, "url": r["hls"], "rtsp": _cam_rtsp(), "secs": left}
 
 
@@ -592,11 +593,13 @@ TAPO_DIR = Path("/dev/shm/ember-tapo") if Path("/dev/shm").is_dir() else Path("/
 _motion = {"level": 0.0, "whole": 0.0, "peak": 0.0, "frames": 0, "last": 0.0, "fired": 0.0}
 
 
-def _rec_list():
-    """The recorder's pieces, oldest first: [(name, seconds long, finished at)]."""
+def _rec_list(kind="main"):
+    """A recorder's pieces, oldest first: [(name, seconds long, finished at)]. "main" is the full picture (Apple TV),
+    "sub" the camera's small one (Ember TV: the Chromecast plays it without effort, and the pop-up is small anyway)."""
     out, dur = [], None
+    d = TAPO_DIR / kind
     try:
-        lines = (TAPO_DIR / "live.m3u8").read_text().splitlines()
+        lines = (d / "live.m3u8").read_text().splitlines()
     except OSError:
         return out
     for ln in lines:
@@ -604,15 +607,15 @@ def _rec_list():
             dur = float(ln[8:].split(",")[0])
         elif ln and not ln.startswith("#") and dur is not None:
             try:
-                out.append((ln, dur, (TAPO_DIR / ln).stat().st_mtime))
+                out.append((ln, dur, (d / ln).stat().st_mtime))
             except OSError:
                 pass
             dur = None
     return out
 
 
-def _rec_ok():
-    segs = _rec_list()
+def _rec_ok(kind="main"):
+    segs = _rec_list(kind)
     return bool(segs) and time.time() - segs[-1][2] < 10
 
 
@@ -638,26 +641,29 @@ def _ffmpeg_watched(cmd, check, name):
         time.sleep(5)
 
 
-def _tapo_recorder():
+def _tapo_recorder(kind="main"):
+    d = TAPO_DIR / kind
+
     def cmd():
-        TAPO_DIR.mkdir(parents=True, exist_ok=True)
-        for f in TAPO_DIR.glob("*"):
+        d.mkdir(parents=True, exist_ok=True)
+        for f in d.glob("*"):
             f.unlink()
+        src = _tapo()["main"] if kind == "main" else (_tapo().get("sub") or _tapo()["main"])
         return ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "10000000",
-                "-i", _tapo()["main"], "-an", "-c:v", "copy", "-f", "hls", "-hls_time", "1", "-hls_list_size", "90",
-                "-hls_flags", "delete_segments+temp_file+omit_endlist", "-hls_segment_filename", str(TAPO_DIR / "s%07d.ts"),
-                str(TAPO_DIR / "live.m3u8")]
+                "-i", src, "-an", "-c:v", "copy", "-f", "hls", "-hls_time", "1", "-hls_list_size", "90",
+                "-hls_flags", "delete_segments+temp_file+omit_endlist", "-hls_segment_filename", str(d / "s%07d.ts"),
+                str(d / "live.m3u8")]
 
     def check(p):
         started = time.time()
         while p.poll() is None:
             time.sleep(5)
-            if time.time() - started > 30 and not _rec_ok():
-                print("[ember-feed] tapo recorder: no new picture for 10 s", flush=True)
+            if time.time() - started > 30 and not _rec_ok(kind):
+                print(f"[ember-feed] tapo recorder {kind}: no new picture for 10 s", flush=True)
                 return
     while not _tapo().get("main"):
         time.sleep(30)
-    _ffmpeg_watched(cmd, check, "recorder")
+    _ffmpeg_watched(cmd, check, "recorder " + kind)
 
 
 def _tapo_motion():
@@ -700,17 +706,17 @@ def _tapo_motion():
     _ffmpeg_watched(cmd, check, "motion")
 
 
-def tapo_clip(cid):
+def tapo_clip(cid, kind="main"):
     """The pop-up's playlist: the recorder's pieces from `pre` seconds before the movement, growing until it's over."""
     t, at = _tapo(), int(cid)
     pre, secs = float(t.get("pre", 3)), float(t.get("secs", 30))
-    segs = [x for x in _rec_list() if x[2] > at - pre and x[2] - x[1] < at + secs]
+    segs = [x for x in _rec_list(kind) if x[2] > at - pre and x[2] - x[1] < at + secs]
     done = time.time() > at + secs + 2
     target = max([2] + [int(-(-d // 1)) for _, d, _ in segs])
     out = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{target}", "#EXT-X-MEDIA-SEQUENCE:0",
            "#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"]
     for name, d, _ in segs:
-        out += [f"#EXTINF:{d:.3f},", f"/cam/seg/{name}"]
+        out += [f"#EXTINF:{d:.3f},", f"/cam/seg/{kind}/{name}"]
     if done:
         out.append("#EXT-X-ENDLIST")
     return ("\n".join(out) + "\n").encode()
@@ -4504,13 +4510,14 @@ class Handler(BaseHTTPRequestHandler):
                     and self.headers.get("CF-Connecting-IP"):
                 self._json({"error": "only at home"}, 404)   # the camera never goes out through the tunnel
             elif re.fullmatch(r"/cam/clip/\d{9,11}\.m3u8", path) and _tapo().get("main"):
-                self._bytes(tapo_clip(path.split("/")[3][:-5]), "application/vnd.apple.mpegurl")
-            elif re.fullmatch(r"/cam/seg/s\d{7}\.ts", path) and (TAPO_DIR / path.split("/")[3]).is_file():
-                self._bytes((TAPO_DIR / path.split("/")[3]).read_bytes(), "video/mp2t")
+                kind = "sub" if "s=sub" in urllib.parse.urlparse(self.path).query else "main"
+                self._bytes(tapo_clip(path.split("/")[3][:-5], kind), "application/vnd.apple.mpegurl")
+            elif re.fullmatch(r"/cam/seg/(main|sub)/s\d{7}\.ts", path) and (TAPO_DIR / path[9:]).is_file():
+                self._bytes((TAPO_DIR / path[9:]).read_bytes(), "video/mp2t")
             elif path == "/cam/view.jpg" and _tapo().get("main"):
                 self._bytes(tapo_view(), "image/jpeg")
             elif path == "/cam/motion":
-                self._json({**_motion, "recording": _rec_ok(), "zone": _tapo().get("zone"), "sens": _tapo().get("sens", 0.04),
+                self._json({**_motion, "recording": _rec_ok(), "recording_small": _rec_ok("sub"), "zone": _tapo().get("zone"), "sens": _tapo().get("sens", 0.04),
                             "seconds_kept": round(sum(d for _, d, _ in _rec_list()))})
             elif path == "/cam/test":
                 cam_fire([], "test")
@@ -4736,7 +4743,8 @@ def main():
     threading.Thread(target=lambda: (time.sleep(20), rotation()), daemon=True).start()  # Home's collections, ready early
     threading.Thread(target=_keep_home_warm, daemon=True).start()
     threading.Thread(target=_flap_watch, daemon=True).start()  # the camera pop-up, from the cat tracker
-    threading.Thread(target=_tapo_recorder, daemon=True).start()  # the Tapo: the last minute, for replays
+    threading.Thread(target=_tapo_recorder, args=("main",), daemon=True).start()  # the Tapo: the last minute, for replays
+    threading.Thread(target=_tapo_recorder, args=("sub",), daemon=True).start()
     threading.Thread(target=_tapo_motion, daemon=True).start()    # the Tapo: movement at the flap
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)

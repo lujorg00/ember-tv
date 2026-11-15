@@ -119,7 +119,7 @@ final class Notices: ObservableObject {
         item.preferredForwardBufferDuration = 1      // start as soon as there's a second of picture
         let p = AVPlayer(playerItem: item)
         p.isMuted = true
-        p.automaticallyWaitsToMinimizeStalling = false
+        p.automaticallyWaitsToMinimizeStalling = true   // the replay grows as it plays: wait for the next piece, don't freeze
         p.play()
         let shown = Cam(id: id, title: c.str("title") ?? "Cat flap", player: p)
         Diag.log("camera: showing \(shown.title)")
@@ -233,11 +233,11 @@ struct NoticeOverlay: View {
                     .background(Theme.bg.opacity(0.8), in: Capsule())
                     .padding(14)
                 }
-                .frame(width: 640, height: 360)
+                .frame(width: 512, height: 288)
                 .clipShape(RoundedRectangle(cornerRadius: 26))
                 .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.14)))
                 .shadow(color: .black.opacity(0.55), radius: 30, y: 10)
-                .padding(.trailing, 70).padding(.bottom, 56)
+                .padding(.trailing, 44).padding(.bottom, 36)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
