@@ -8,7 +8,9 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /cats         -> just the cats, in or out (polled often, for the pop-ups); "cam" while the Ring camera pop-up is on
   GET /cam/wait?after=<id> -> answers as soon as a new camera pop-up starts (or after ~12 s): the TVs keep one open
   POST /together/start, POST/GET /together/<code>, GET /together/wait -> watch together (see below)
-  GET /cam/test     -> pops the Ring camera up on Ember TV and Apple TV now, as if a cat were at the flap
+  GET /cam/test     -> pops the cat flap camera up on Ember TV and Apple TV now, as if a cat were at the flap
+  GET /cam/view.jpg -> (Tapo, at home only) a still with a grid and the motion box, to place the box by
+  GET /cam/motion   -> (Tapo) how much is moving in the box right now, and whether the recorder is running
   GET /night        -> the next shift within 36 hours (the dimmer starts earlier before early shifts)
   GET /weather      -> current weather and today's sunrise/sunset (Open-Meteo)
   GET /progress     -> where you are in each title, newest first (the progress store, merged with Trakt)
@@ -452,16 +454,25 @@ def _ring():
     return CFG.get("ring") or {}
 
 
+def _tapo():
+    return CFG.get("tapo") or {}
+
+
+def _camcfg():
+    """The camera in use: the Tapo when it's set up (lucapi/tapo-setup.sh), else the Ring."""
+    return _tapo() if _tapo().get("main") else _ring()
+
+
 def cam_fire(names, why):
     with _cam_lock:
         now = time.time()
-        secs = float(_ring().get("secs", 45))
+        secs = float(_camcfg().get("secs", 45))
         if now - _cam["at"] < secs:  # already up: add the other cat to it
             for n in names:
                 if n not in _cam["names"]:
                     _cam["names"].append(n)
             return
-        if now - _cam["at"] < secs + float(_ring().get("cooldown", 90)) and why != "test":
+        if now - _cam["at"] < secs + float(_camcfg().get("cooldown", 90)) and why != "test":
             return
         _cam.update(at=now, names=list(names), why=why)
         _cam_cv.notify_all()
@@ -470,17 +481,22 @@ def cam_fire(names, why):
 
 def cam_now():
     """What the apps get while the pop-up should be showing (else None)."""
-    r = _ring()
-    if not r.get("hls"):
+    r = _camcfg()
+    if not r.get("hls") and not r.get("main"):
         return None
     with _cam_lock:
         if time.time() - _cam["at"] > float(r.get("secs", 45)):
             return None
         names, why, at = list(_cam["names"]), _cam["why"], _cam["at"]
     who = " & ".join(names) if names else "Cat flap"
-    title = {"test": "Cat flap camera (test)", "in": f"{who} coming in", "out": f"{who} going out"}.get(why, f"{who} at the cat flap")
-    return {"id": str(int(at)), "title": title, "url": r["hls"], "rtsp": _cam_rtsp(),
-            "secs": int(float(r.get("secs", 45)) - (time.time() - at))}
+    if not names and why in ("motion", "flap"):
+        why = "plain"
+    title = {"plain": "Cat flap", "test": "Cat flap camera (test)", "in": f"{who} coming in", "out": f"{who} going out"}.get(why, f"{who} at the cat flap")
+    left = int(float(r.get("secs", 45)) - (time.time() - at))
+    if r.get("main"):  # the Tapo: a replay from a few seconds before, running on into live, else plain live
+        url = f"{r['base']}/cam/clip/{int(at)}.m3u8" if _rec_ok() else r.get("live", "")
+        return {"id": str(int(at)), "title": title, "url": url, "rtsp": "", "secs": left}
+    return {"id": str(int(at)), "title": title, "url": r["hls"], "rtsp": _cam_rtsp(), "secs": left}
 
 
 def _cam_rtsp():
@@ -496,7 +512,7 @@ def cam_wait(after, secs=12.0):
     end = time.time() + secs
     with _cam_cv:
         while time.time() < end:
-            if _cam["at"] and str(int(_cam["at"])) != after and time.time() - _cam["at"] < float(_ring().get("secs", 45)):
+            if _cam["at"] and str(int(_cam["at"])) != after and time.time() - _cam["at"] < float(_camcfg().get("secs", 45)):
                 break
             _cam_cv.wait(max(0.1, end - time.time()))
     return cam_now()
@@ -538,8 +554,9 @@ def _flap_watch():
     rooms_before, home_before = {}, {}
     while True:
         time.sleep(3)
+        tapo = bool(_tapo().get("main"))
         r = _ring()
-        if not r.get("hls"):
+        if not r.get("hls") and not tapo:
             continue
         flap = [x.lower() for x in r.get("flap_rooms", ["cat_flap"])]
         warm = [x.lower() for x in r.get("warm_rooms", ["fence"])]
@@ -557,10 +574,156 @@ def _flap_watch():
             elif n in home_before and home != home_before[n]:
                 hit.append(n); why = why or ("in" if home else "out")
             rooms_before[n], home_before[n] = room, home
-            if room in warm or (room in flap and not home):
+            if not tapo and (room in warm or (room in flap and not home)):
                 _cam_warm(float(r.get("warm_secs", 60)))
         if hit:
             cam_fire(hit, why)
+
+
+# ------------------------------------------------------------------ the Tapo camera inside the cat flap
+# The Tapo streams all the time (go2rtc on lucapi keeps the one connection to it; lucapi/tapo-setup.sh sets it up).
+#  - The recorder copies the main stream into 1-second pieces in memory (/dev/shm), keeping the last minute or so.
+#  - The motion watcher looks at the small stream 5 times a second, only inside the box round the flap ("zone", fractions
+#    of the picture: [left, top, right, bottom]). A change over "sens" of the box in two frames running is a cat. When
+#    most of the whole picture changes at once (the night vision switching on or off, a light), it's ignored.
+#  - The pop-up plays /cam/clip/<id>.m3u8: from "pre" seconds before the movement, then on through live.
+# config.json "tapo": {"main", "sub", "live", "base", "zone": [0,0,1,1], "sens": 0.04, "secs": 30, "cooldown": 60, "pre": 3}
+TAPO_DIR = Path("/dev/shm/ember-tapo") if Path("/dev/shm").is_dir() else Path("/tmp/ember-tapo")
+_motion = {"level": 0.0, "whole": 0.0, "peak": 0.0, "frames": 0, "last": 0.0, "fired": 0.0}
+
+
+def _rec_list():
+    """The recorder's pieces, oldest first: [(name, seconds long, finished at)]."""
+    out, dur = [], None
+    try:
+        lines = (TAPO_DIR / "live.m3u8").read_text().splitlines()
+    except OSError:
+        return out
+    for ln in lines:
+        if ln.startswith("#EXTINF:"):
+            dur = float(ln[8:].split(",")[0])
+        elif ln and not ln.startswith("#") and dur is not None:
+            try:
+                out.append((ln, dur, (TAPO_DIR / ln).stat().st_mtime))
+            except OSError:
+                pass
+            dur = None
+    return out
+
+
+def _rec_ok():
+    segs = _rec_list()
+    return bool(segs) and time.time() - segs[-1][2] < 10
+
+
+def _ffmpeg_watched(cmd, check, name):
+    """Runs ffmpeg until it stops or `check` says it has stalled; then again, for good."""
+    while True:
+        try:
+            p = subprocess.Popen(cmd(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if name == "motion" else subprocess.DEVNULL,
+                                 stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            print("[ember-feed] tapo: ffmpeg isn't installed (sudo apt install ffmpeg)", flush=True)
+            time.sleep(60)
+            continue
+        threading.Thread(target=lambda pr=p: [print(f"[ember-feed] tapo {name}: {l.decode(errors='ignore').strip()}", flush=True)
+                                              for l in pr.stderr], daemon=True).start()
+        check(p)
+        try:
+            p.kill()
+        except Exception:
+            pass
+        p.wait()
+        print(f"[ember-feed] tapo {name}: stopped, starting again in 5 s", flush=True)
+        time.sleep(5)
+
+
+def _tapo_recorder():
+    def cmd():
+        TAPO_DIR.mkdir(parents=True, exist_ok=True)
+        for f in TAPO_DIR.glob("*"):
+            f.unlink()
+        return ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "10000000",
+                "-i", _tapo()["main"], "-an", "-c:v", "copy", "-f", "hls", "-hls_time", "1", "-hls_list_size", "90",
+                "-hls_flags", "delete_segments+temp_file+omit_endlist", "-hls_segment_filename", str(TAPO_DIR / "s%07d.ts"),
+                str(TAPO_DIR / "live.m3u8")]
+
+    def check(p):
+        started = time.time()
+        while p.poll() is None:
+            time.sleep(5)
+            if time.time() - started > 30 and not _rec_ok():
+                print("[ember-feed] tapo recorder: no new picture for 10 s", flush=True)
+                return
+    while not _tapo().get("main"):
+        time.sleep(30)
+    _ffmpeg_watched(cmd, check, "recorder")
+
+
+def _tapo_motion():
+    W, H = 96, 54
+    t = _tapo()
+    x0, y0, x1, y1 = (t.get("zone") or [0, 0, 1, 1])
+    zone = [y * W + x for y in range(int(y0 * H), max(int(y0 * H) + 1, int(y1 * H)))
+            for x in range(int(x0 * W), max(int(x0 * W) + 1, int(x1 * W)))]
+    sens, step = float(t.get("sens", 0.04)), 22
+
+    def cmd():
+        return ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "10000000",
+                "-i", t.get("sub") or t["main"], "-an", "-vf", f"fps=5,scale={W}:{H},format=gray", "-f", "rawvideo", "-"]
+
+    def check(p):
+        prev, run, quiet = None, 0, 0.0
+        while True:
+            buf = p.stdout.read(W * H)
+            if not buf or len(buf) < W * H:
+                return
+            now = time.time()
+            _motion["frames"] += 1; _motion["last"] = now
+            if prev is not None:
+                whole = sum(1 for a, b in zip(buf[::4], prev[::4]) if abs(a - b) > step) / len(buf[::4])
+                level = sum(1 for i in zone if abs(buf[i] - prev[i]) > step) / len(zone)
+                _motion["level"], _motion["whole"] = round(level, 3), round(whole, 3)
+                if whole > 0.5:            # the picture changed all over: night vision or a light, not a cat
+                    quiet, run = now + 3, 0
+                elif now > quiet and level > sens:
+                    _motion["peak"] = max(_motion["peak"], level)
+                    run += 1
+                    if run == 2:
+                        _motion["fired"] = now
+                        cam_fire([], "motion")
+                else:
+                    run = 0
+            prev = buf
+    while not _tapo().get("main"):
+        time.sleep(30)
+    _ffmpeg_watched(cmd, check, "motion")
+
+
+def tapo_clip(cid):
+    """The pop-up's playlist: the recorder's pieces from `pre` seconds before the movement, growing until it's over."""
+    t, at = _tapo(), int(cid)
+    pre, secs = float(t.get("pre", 3)), float(t.get("secs", 30))
+    segs = [x for x in _rec_list() if x[2] > at - pre and x[2] - x[1] < at + secs]
+    done = time.time() > at + secs + 2
+    target = max([2] + [int(-(-d // 1)) for _, d, _ in segs])
+    out = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{target}", "#EXT-X-MEDIA-SEQUENCE:0",
+           "#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"]
+    for name, d, _ in segs:
+        out += [f"#EXTINF:{d:.3f},", f"/cam/seg/{name}"]
+    if done:
+        out.append("#EXT-X-ENDLIST")
+    return ("\n".join(out) + "\n").encode()
+
+
+def tapo_view():
+    """A still from the camera with a 10 x 10 grid and the motion box on it (red), to set the box by."""
+    x0, y0, x1, y1 = (_tapo().get("zone") or [0, 0, 1, 1])
+    vf = (f"drawgrid=w=iw/10:h=ih/10:t=1:c=white@0.5,"
+          f"drawbox=x=iw*{x0}:y=ih*{y0}:w=iw*{x1 - x0}:h=ih*{y1 - y0}:c=red:t=6")
+    return subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", "http://127.0.0.1:1985/api/frame.jpeg?src=tapo",
+                           "-vf", vf, "-frames:v", "1", "-f", "image2", "-c:v", "mjpeg", "-"],
+                          capture_output=True, timeout=20).stdout
 
 
 # ------------------------------------------------------------------ watch together
@@ -4231,6 +4394,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _bytes(self, body, ctype):
+        self.send_response(200 if body else 503)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -4328,9 +4500,21 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/cam/warm":
                 _cam_warm(60)
                 self._json({"warming": True})
+            elif path.startswith("/cam/") and path.split("/")[2] in ("clip", "seg", "view.jpg", "motion") \
+                    and self.headers.get("CF-Connecting-IP"):
+                self._json({"error": "only at home"}, 404)   # the camera never goes out through the tunnel
+            elif re.fullmatch(r"/cam/clip/\d{9,11}\.m3u8", path) and _tapo().get("main"):
+                self._bytes(tapo_clip(path.split("/")[3][:-5]), "application/vnd.apple.mpegurl")
+            elif re.fullmatch(r"/cam/seg/s\d{7}\.ts", path) and (TAPO_DIR / path.split("/")[3]).is_file():
+                self._bytes((TAPO_DIR / path.split("/")[3]).read_bytes(), "video/mp2t")
+            elif path == "/cam/view.jpg" and _tapo().get("main"):
+                self._bytes(tapo_view(), "image/jpeg")
+            elif path == "/cam/motion":
+                self._json({**_motion, "recording": _rec_ok(), "zone": _tapo().get("zone"), "sens": _tapo().get("sens", 0.04),
+                            "seconds_kept": round(sum(d for _, d, _ in _rec_list()))})
             elif path == "/cam/test":
                 cam_fire([], "test")
-                self._json({"cam": cam_now() or "no camera set up (run lucapi/ring-setup.sh)"})
+                self._json({"cam": cam_now() or "no camera set up (run lucapi/tapo-setup.sh)"})
             elif path == "/night":
                 self._json(night())
             elif path == "/shuffle":
@@ -4551,7 +4735,9 @@ def main():
     start_jellyfin_proxy()
     threading.Thread(target=lambda: (time.sleep(20), rotation()), daemon=True).start()  # Home's collections, ready early
     threading.Thread(target=_keep_home_warm, daemon=True).start()
-    threading.Thread(target=_flap_watch, daemon=True).start()  # the Ring camera pop-up
+    threading.Thread(target=_flap_watch, daemon=True).start()  # the camera pop-up, from the cat tracker
+    threading.Thread(target=_tapo_recorder, daemon=True).start()  # the Tapo: the last minute, for replays
+    threading.Thread(target=_tapo_motion, daemon=True).start()    # the Tapo: movement at the flap
     srv = ThreadingHTTPServer(("0.0.0.0", CFG["port"]), Handler)
     print(f"[ember-feed] listening on :{CFG['port']}", flush=True)
     srv.serve_forever()
