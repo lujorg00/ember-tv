@@ -76,6 +76,12 @@ enum API {
         return await catalog(c)
     }
 
+    /// A list's raw entries (with lucapi's extras, such as when you last watched each).
+    static func catalogJSON(_ c: JSON) async throws -> [JSON] {
+        guard let type = c.str("type"), let id = c.str("id") else { return [] }
+        return try await feedGet("/addon/catalog/\(type)/\(q(id)).json", timeout: 30).arr("metas")
+    }
+
     static func catalog(_ c: JSON) async -> [Meta] {
         guard let type = c.str("type"), let id = c.str("id") else { return [] }
         let j = try? await feedGet("/addon/catalog/\(type)/\(q(id)).json", timeout: 30)

@@ -716,13 +716,17 @@ function cwName(n) { return String(n || "").replace(cwPrefix, ""); }
 async function continueRow(cwCat) {
   const items = [];
   const seen = new Set();
-  for (const [id, p] of Object.entries(progress)) { items.push({ id, type: p.type, p }); seen.add(id); }
-  items.sort((a, b) => (b.p.pausedAt || "").localeCompare(a.p.pausedAt || ""));
+  const when = (s) => { const t = Date.parse(s || ""); return isNaN(t) ? 0 : t; };
+  for (const [id, p] of Object.entries(progress)) { items.push({ id, type: p.type, p, at: when(p.pausedAt) }); seen.add(id); }
   let gone = {};
   try { gone = (await getJson(`${feed()}/progress/dismissed`, 5000)).dismissed || {}; } catch (e) {}
   for (const c of [].concat(cwCat || [])) {
-    try { for (const m of await catalogRow(c)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || c.type, m }); seen.add(m.id); } } catch (e) {}
+    try { for (const m of await catalogRow(c)) if (!seen.has(m.id) && !gone[m.id]) { items.push({ id: m.id, type: m.type || c.type, m, at: when(m.watchedAt) }); seen.add(m.id); } } catch (e) {}
   }
+  // most recently watched first, whether you stopped part-way or finished an episode (then it's the next one);
+  // anything with no time keeps the list's own order, after
+  items.forEach((it, i) => it.i = i);
+  items.sort((a, b) => (b.at - a.at) || (a.i - b.i));
   if (!items.length) return null;
   const r = h(`<section class="row fade-in"><h2>Continue <em class="acc">watching</em> <small>${items.length}</small></h2><div class="strip"></div></section>`);
   const strip = $(".strip", r);

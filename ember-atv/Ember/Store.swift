@@ -78,6 +78,13 @@ enum PlayEnd {
 /// Add-ons name their "next" items like "Next S35E2 · The Simpsons": just the show's name. (Which episode is next is
 /// Ember's call, from lucapi: what you last watched in Ember, else on Trakt.)
 enum CWName {
+    /// "2026-11-15T21:04:10+00:00" (lucapi) or "2026-11-15T21:04:10.000Z" (Trakt); no time: the distant past
+    static func date(_ s: String) -> Date {
+        let f = ISO8601DateFormatter()
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s) ?? .distantPast
+    }
     static let prefix = try! NSRegularExpression(pattern: #"^\s*(?:up\s+)?(?:next|continue|resume)\b[^·•|]*[·•|]\s*"#, options: .caseInsensitive)
     static func clean(_ n: String) -> String {
         prefix.stringByReplacingMatches(in: n, range: NSRange(n.startIndex..., in: n), withTemplate: "")
@@ -230,22 +237,29 @@ final class Store: ObservableObject {
 
     /// Continue watching: part-way through (any device), newest first, then what's next from your addon's list.
     func loadContinue() async {
-        var items: [(Meta, Progress?)] = []
+        var items: [(Meta, Progress?, Date)] = []
         var seen = Set<String>()
-        for (id, p) in progress.sorted(by: { $0.value.pausedAt > $1.value.pausedAt }) {
-            items.append((Meta(["id": id, "type": p.type]), p))
+        for (id, p) in progress {
+            items.append((Meta(["id": id, "type": p.type]), p, CWName.date(p.pausedAt)))
             seen.insert(id)
         }
         let gone = (try? await API.feedGet("/progress/dismissed", timeout: 5))?.obj("dismissed") ?? [:]
         for c in cwCats {
-            for m in await API.catalog(c) where !seen.contains(m.id) && gone[m.id] == nil {
-                items.append((m, nil))
+            let raw = (try? await API.catalogJSON(c)) ?? []
+            for (m, j) in zip(raw.map { Meta($0, type: c.str("type") ?? "series") }, raw)
+                where !m.id.isEmpty && !seen.contains(m.id) && gone[m.id] == nil {
+                items.append((m, nil, CWName.date(j.str("watchedAt") ?? "")))
                 seen.insert(m.id)
             }
         }
+        // most recently watched first, whether you stopped part-way or finished an episode (then it's the next one);
+        // anything with no time keeps the list's own order, after
+        items = items.enumerated().sorted { a, b in
+            a.element.2 != b.element.2 ? a.element.2 > b.element.2 : a.offset < b.offset
+        }.map { ($0.element.0, $0.element.1, $0.element.2) }
         let list = Array(items.prefix(20))
         let built = await withTaskGroup(of: (Int, CWItem).self, returning: [CWItem].self) { g in
-            for (i, (m, p)) in list.enumerated() {
+            for (i, (m, p, _)) in list.enumerated() {
                 g.addTask {
                     let full = await MetaCache.shared.full(m)
                     var season = p?.season, episode = p?.episode

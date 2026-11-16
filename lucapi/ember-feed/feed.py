@@ -4949,6 +4949,17 @@ class Handler(BaseHTTPRequestHandler):
                     have = {x.get("id") for x in j.get("metas", [])}
                     own = [{"id": u["imdb"], "type": "series", "name": ""} for u in up_next() if u["imdb"] not in have]
                     j["metas"] = own + j.get("metas", [])
+                    # when you last watched each (any episode, any device), so the apps can put Continue watching
+                    # in the order you watched things, mixing these with what you're part-way through
+                    ids = [x.get("id") for x in j["metas"] if x.get("id")]
+                    if ids:
+                        with _db_lock:
+                            last = dict(db().execute(
+                                f"SELECT imdb, MAX(updated) FROM positions WHERE imdb IN ({','.join('?' * len(ids))}) GROUP BY imdb",
+                                ids).fetchall())
+                        for x in j["metas"]:
+                            if last.get(x.get("id")):
+                                x["watchedAt"] = datetime.fromtimestamp(last[x["id"]], TZ).isoformat()
                     body, ctype = json.dumps(j).encode(), "application/json"
             except Exception as e:
                 print(f"[ember-feed] love steering skipped: {e}", flush=True)
