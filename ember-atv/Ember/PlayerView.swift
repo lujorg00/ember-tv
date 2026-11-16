@@ -79,7 +79,9 @@ final class PlayerModel: ObservableObject, MPVEvents {
         })
     }
 
-    var hasNext: Bool { session?.next != nil }
+    var hasNext: Bool { session?.next != nil || !(session?.yt?.queue.isEmpty ?? true) }
+    var isYouTube: Bool { session?.yt != nil }
+    private var sponsorSkipped = Set<Int>()
     var title: String { session?.title ?? "" }
 
     // MARK: mpv
@@ -135,12 +137,12 @@ final class PlayerModel: ObservableObject, MPVEvents {
         guard !done else { return }
         if error { return fail(started ? "kept stalling" : "wouldn't play") }
         // a two-minute "this file is unavailable" video from the service instead of the episode: try the next stream
-        if let s = session, !s.trailer, dur > 0, dur < 180, (s.meta.runtimeMinutes ?? 30) >= 10 {
+        if let s = session, !s.trailer, s.yt == nil, dur > 0, dur < 180, (s.meta.runtimeMinutes ?? 30) >= 10 {
             return fail("was unavailable")
         }
         // the stream just stopped well before the end (the connection dropped and the player took it as the end of
         // the file): don't count it as watched or drop back to the details page - carry on from here on the next stream
-        if let s = session, !s.trailer, started, dur > 600, pos < dur - 300, pos / dur < 0.9 {
+        if let s = session, !s.trailer, s.yt == nil, started, dur > 600, pos < dur - 300, pos / dur < 0.9 {
             Diag.log("player: ended early at \(Int(pos))s of \(Int(dur))s")
             return fail("stopped early")
         }
@@ -159,6 +161,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if controls && now > controlsUntil && !paused { controls = false }
         if intro && now > introUntil { intro = false }
         creditsTick()
+        sponsorTick()
         togetherTick()
         // once a minute while playing: how smoothly it's going (dropped and late frames), for the log on lucapi
         ticks += 1
@@ -186,8 +189,19 @@ final class PlayerModel: ObservableObject, MPVEvents {
     /// Streams mostly don't say, and guessing cut the end off shows that play right to the last seconds
     /// (Law & Order: SVU), so otherwise the card only appears for the last 20 seconds and the next episode
     /// starts when this one has actually finished.
+    /// YouTube: jump over the sponsor reads SponsorBlock knows about (each once; going back into one plays it).
+    private func sponsorTick() {
+        guard let y = session?.yt, started, !paused else { return }
+        for (i, seg) in y.sponsor.enumerated() where !sponsorSkipped.contains(i) && pos >= seg[0] && pos < seg[1] - 1 {
+            sponsorSkipped.insert(i)
+            core.seek(to: seg[1])
+            tgSay("Skipped sponsor")
+            return
+        }
+    }
+
     private func creditsTick() {
-        guard hasNext, started, dur > 300 else { return }
+        guard session?.yt == nil, hasNext, started, dur > 300 else { return }
         let marked = creditsChapter
         let creditsAt = marked ?? (dur - 20)
         if pos < creditsAt {
@@ -329,7 +343,7 @@ final class PlayerModel: ObservableObject, MPVEvents {
     /// Your last choices for this show (or film) put back; English subtitles fetched from OpenSubtitles
     /// (the same source as Stremio's) when the file has none of its own.
     private func setupTracks() {
-        guard let s = session, !s.trailer else { return }
+        guard let s = session, !s.trailer, s.yt == nil else { return }
         let saved = UserDefaults.standard.dictionary(forKey: tracksKey) as? [String: String] ?? [:]
         if let a = saved["audio"], !a.isEmpty, let t = tracks.first(where: { $0.type == "audio" && $0.lang == a && !$0.selected }) {
             core.set("aid", String(t.id))
@@ -549,6 +563,10 @@ final class PlayerModel: ObservableObject, MPVEvents {
     func report(_ state: String, finished: Bool = false) {
         guard let s = session, !s.trailer, started, pos > 1 else { return }
         lastReport = Date()
+        if let y = s.yt {   // YouTube: where you are (the red bars), and into your YouTube history
+            API.fire("/yt/progress", ["id": y.id, "position": pos, "duration": dur, "state": state, "finished": finished])
+            return
+        }
         var b: JSON = ["imdb": s.meta.id, "type": s.meta.isSeries ? "series" : "movie", "position": pos,
                        "device": API.deviceName, "state": state, "finished": finished]
         if dur > 0 { b["duration"] = dur }
@@ -562,11 +580,13 @@ struct MPVView: UIViewControllerRepresentable {
     let model: PlayerModel
     let url: URL
     let start: Double
+    var audio: String? = nil
     var hdr = false
     func makeUIViewController(context: Context) -> MPVHostController {
         let c = MPVHostController(core: model.core)
         c.url = url
         c.start = start
+        c.audio = audio
         c.hdr = hdr
         return c
     }
@@ -594,7 +614,7 @@ struct PlayerScreen: View {
             if let url = URL(string: session.stream.url) {
                 // HDR output (experimental, Settings): only for streams named HDR / Dolby Vision. Otherwise HDR is
                 // converted to a normal picture, which is what's been reliable.
-                MPVView(model: model, url: url, start: session.start,
+                MPVView(model: model, url: url, start: session.start, audio: session.yt?.audio,
                         hdr: UserDefaults.standard.bool(forKey: "hdrOutput")
                             && session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
             }
@@ -694,6 +714,9 @@ struct PlayerScreen: View {
                 .overlay(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(session.meta.name).font(.ember(40, .semibold)).lineLimit(1)
+                        if let ch = session.yt?.channel, !ch.isEmpty {
+                            Text(ch).font(.ember(26, .medium)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                        }
                         if let se = session.season, let ep = session.episode {
                             Text("S\(se) E\(ep)" + (session.epTitle.isEmpty ? "" : "  ·  " + session.epTitle))
                                 .font(.ember(26, .medium)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
@@ -719,14 +742,14 @@ struct PlayerScreen: View {
                 }
             Spacer()
             VStack(alignment: .leading, spacing: 26) {
-                Timeline(model: model, focused: focus == .bar)
+                Timeline(model: model, focused: focus == .bar, tint: session.yt != nil ? YT.red : Theme.accent)
                     .focusable()
                     .focused($focus, equals: .bar)
                     .onMoveCommand { d in
                         switch d {
                         case .left: model.skip(-10)
                         case .right: model.skip(10)
-                        case .down: focus = .subs; model.showControls()
+                        case .down: focus = session.yt == nil ? .subs : .next; model.showControls()
                         default: model.showControls()
                         }
                     }
@@ -734,14 +757,16 @@ struct PlayerScreen: View {
                         if model.scrubbing { model.scrubCommit() } else { model.togglePause(); model.showControls() }
                     }
                 HStack(spacing: 24) {
+                    if session.yt == nil {
                     Button { showSubs = true; model.refreshTracks() } label: { Label("Subtitles", systemImage: "captions.bubble") }
                             .buttonStyle(EmberButtonStyle(primary: false))
                         .focused($focus, equals: .subs)
                     Button { showAudio = true; model.refreshTracks() } label: { Label("Audio", systemImage: "speaker.wave.2") }
                             .buttonStyle(EmberButtonStyle(primary: false))
                         .focused($focus, equals: .audio)
+                    }
                     if model.hasNext {
-                        Button { model.playNext() } label: { Label("Next episode", systemImage: "forward.end.fill") }
+                        Button { model.playNext() } label: { Label(session.yt != nil ? "Next video" : "Next episode", systemImage: "forward.end.fill") }
                             .buttonStyle(EmberButtonStyle(primary: false))
                             .focused($focus, equals: .next)
                     }
@@ -789,6 +814,7 @@ struct PlayerScreen: View {
 struct Timeline: View {
     @ObservedObject var model: PlayerModel
     let focused: Bool
+    var tint: Color = Theme.accent
     var body: some View {
         VStack(spacing: 14) {
             GeometryReader { g in
@@ -796,8 +822,8 @@ struct Timeline: View {
                 let sf = model.dur > 0 ? min(1, max(0, (model.scrubTo ?? 0) / model.dur)) : 0
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.3)).frame(height: focused ? 12 : 8)
-                    Capsule().fill(Theme.accent).frame(width: max(8, g.size.width * f), height: focused ? 12 : 8)
-                    Circle().fill(model.scrubbing ? Theme.accent : focused ? .white : Theme.accent)
+                    Capsule().fill(tint).frame(width: max(8, g.size.width * f), height: focused ? 12 : 8)
+                    Circle().fill(model.scrubbing ? tint : focused ? .white : tint)
                         .frame(width: focused ? 34 : 18, height: focused ? 34 : 18)
                         .shadow(color: .black.opacity(0.5), radius: 6)
                         .offset(x: g.size.width * f - (focused ? 17 : 9))

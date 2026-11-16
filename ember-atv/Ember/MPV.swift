@@ -37,6 +37,7 @@ final class MPVHostController: UIViewController {
     let core: MPVCore
     var url: URL?
     var start: Double = 0
+    var audio: String?      // a separate audio stream (YouTube sends picture and sound apart)
     var hdr = false
 
     init(core: MPVCore) {
@@ -56,7 +57,7 @@ final class MPVHostController: UIViewController {
         Diag.log("mpv: creating (hdr output \(hdr ? "on" : "off"))")
         core.setup(layer: &metalLayer, hdr: hdr)
         Diag.log("mpv: ready")
-        if let url { core.load(url, start: start) }
+        if let url { core.load(url, start: start, audio: audio) }
     }
 
     override func viewDidLayoutSubviews() {
@@ -130,9 +131,13 @@ final class MPVCore {
         }, Unmanaged.passUnretained(self).toOpaque())
     }
 
-    func load(_ url: URL, start: Double) {
+    func load(_ url: URL, start: Double, audio: String? = nil) {
         guard let mpv else { return }
         mpv_set_property_string(mpv, "start", start > 1 ? String(Int(start)) : "none")
+        if let audio, !audio.isEmpty {   // added whole (a list "set" would split the link at its colons)
+            command(["change-list", "audio-files", "clr", ""])
+            command(["change-list", "audio-files", "append", audio])
+        }
         Diag.log("mpv: loading from \(Int(start))s")
         command(["loadfile", url.absoluteString, "replace"])
     }

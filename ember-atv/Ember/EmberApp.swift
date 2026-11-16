@@ -61,6 +61,8 @@ struct RootView: View {
                     .tabItem { Label("Films", systemImage: "film") }.tag(1)
                 BrowseView(type: "series")
                     .tabItem { Label("Series", systemImage: "play.rectangle.on.rectangle") }.tag(2)
+                YouTubeView()
+                    .tabItem { Label("YouTube", systemImage: "play.rectangle.fill") }.tag(7)
                 SearchView()
                     .tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(3)
                 WhatToWatchView()

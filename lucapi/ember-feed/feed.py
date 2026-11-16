@@ -23,6 +23,8 @@ ember-feed: the small service on lucapi that feeds Ember on the TV.
   GET /watched -> {imdb: "done" | "partial"} for the badges on posters
   GET /similar/<movie|series>/<imdb> -> "You may also like" (TMDB recommendations)
   GET /trailer/<movie|series>/<imdb> -> {"yt": YouTube id} of its trailer (TMDB), for "Watch trailer"
+  GET /yt/feed/<home|subs|later|history>, /yt/search?q=, /yt/channel/<id>, /yt/play/<id>, /yt/prep/<id>, /yt/status,
+      POST /yt/progress -> YouTube inside Ember (see the YouTube section)
   GET /trailer/<movie|series>/<imdb>/play -> {"url": a stream of that trailer Ember's own player can play} (needs yt-dlp)
   POST /progress/watched -> mark a film or episodes (a season, a whole show) watched or unwatched; also on Trakt
   GET /next/<imdb>  -> the next episode of a show (Trakt)
@@ -3710,8 +3712,10 @@ def trailer(typ, imdb):
 
 
 def _ytdlp():
-    exe = shutil.which("yt-dlp") or str(Path.home() / ".local/bin/yt-dlp")
-    return [exe] if Path(exe).exists() else ["python3", "-m", "yt_dlp"]
+    # the one youtube-setup.sh keeps up to date first (the system's own is usually too old for YouTube)
+    mine = Path.home() / ".local/bin/yt-dlp"
+    exe = str(mine) if mine.exists() else (shutil.which("yt-dlp") or "")
+    return [exe] if exe and Path(exe).exists() else ["python3", "-m", "yt_dlp"]
 
 
 def trailer_play(typ, imdb):
@@ -3734,6 +3738,219 @@ def trailer_play(typ, imdb):
         return cached(f"trailerplay:{yt}", 3 * 3600, build)
     except Exception as e:
         return {"yt": yt, "url": "", "error": str(e)}
+
+
+# ------------------------------------------------------------------ YouTube, inside Ember (Apple TV)
+# yt-dlp on the Pi does the YouTube side: your recommendations, subscriptions, Watch later and history (with your
+# YouTube sign-in, ~/ember-feed/yt-cookies.txt, set up by lucapi/youtube-setup.sh), search, channels, and the video's
+# own streams, which Ember's player plays directly (no YouTube player, so no ads). SponsorBlock skips sponsor bits.
+# YouTube's stream links are tied to your home's address, so the Apple TV can use them; kept a couple of hours.
+YT_COOKIES = HERE / "yt-cookies.txt"
+YT_PROGRESS = HERE / "yt-progress.json"
+YT_FEEDS = {"home": ":ytrec", "subs": ":ytsubs", "later": ":ytwatchlater", "history": ":ythis"}
+YT_FORMAT = "bv*[height<=1080][vcodec^=avc1]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b"
+_yt_cookie_lock = threading.Lock()   # yt-dlp writes the sign-in back when it's done: one at a time
+_yt_prog_lock = threading.Lock()
+_yt_marked = {}
+
+
+def _yt_cmd(*args, cookies=False):
+    cmd = _ytdlp() + ["--no-warnings", "--ignore-config"]
+    deno = Path.home() / ".deno/bin/deno"
+    if deno.exists():
+        cmd += ["--js-runtimes", f"deno:{deno}"]
+    if cookies and YT_COOKIES.exists():
+        cmd += ["--cookies", str(YT_COOKIES)]
+    return cmd + list(args)
+
+
+def _yt_run(args, cookies=False, timeout=90):
+    def go():
+        out = subprocess.run(_yt_cmd(*args, cookies=cookies), capture_output=True, text=True, timeout=timeout)
+        if out.returncode != 0 and not out.stdout.strip():
+            raise RuntimeError(((out.stderr or "yt-dlp failed").strip().splitlines() or ["yt-dlp failed"])[-1][:300])
+        return json.loads(out.stdout)
+    if cookies and YT_COOKIES.exists():
+        with _yt_cookie_lock:
+            return go()
+    return go()
+
+
+def _yt_progress():
+    try:
+        return json.loads(YT_PROGRESS.read_text())
+    except Exception:
+        return {}
+
+
+def _yt_ago(e):
+    ts = e.get("timestamp") or e.get("release_timestamp")
+    if not ts and e.get("upload_date"):
+        try:
+            ts = datetime.strptime(e["upload_date"], "%Y%m%d").timestamp()
+        except Exception:
+            ts = None
+    if not ts:
+        return ""
+    d = max(0, time.time() - ts)
+    for secs, word in ((31536000, "year"), (2592000, "month"), (604800, "week"), (86400, "day"), (3600, "hour"), (60, "minute")):
+        if d >= secs:
+            n = int(d // secs)
+            return f"{n} {word}{'' if n == 1 else 's'} ago"
+    return "just now"
+
+
+def _yt_views(n):
+    if not n:
+        return ""
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if n >= div:
+            v = n / div
+            return f"{v:.1f}".rstrip("0").rstrip(".") + suf + " views" if v < 10 else f"{int(v)}{suf} views"
+    return f"{int(n)} view{'' if n == 1 else 's'}"
+
+
+def _yt_item(e, prog):
+    vid = e.get("id") or ""
+    url = e.get("url") or ""
+    if not re.fullmatch(r"[\w-]{11}", vid) or "/shorts/" in url:
+        return None
+    dur = e.get("duration")
+    live = e.get("live_status") in ("is_live", "is_upcoming") or e.get("is_live")
+    p = prog.get(vid) or {}
+    frac = 0.0
+    if p.get("duration"):
+        frac = 1.0 if p.get("finished") else min(1.0, float(p.get("position", 0)) / float(p["duration"]))
+    return {"id": vid, "title": e.get("title") or "", "channel": e.get("channel") or e.get("uploader") or "",
+            "channel_id": e.get("channel_id") or e.get("uploader_id") or "", "duration": dur,
+            "views": _yt_views(e.get("view_count")), "ago": _yt_ago(e), "live": bool(live),
+            "upcoming": e.get("live_status") == "is_upcoming",
+            "thumb": f"https://i.ytimg.com/vi/{vid}/hq720.jpg", "thumb2": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg",
+            "progress": round(frac, 3)}
+
+
+def _yt_list(target, n=72, cookies=False):
+    j = _yt_run(["--flat-playlist", "-J", "--playlist-end", str(n), target], cookies=cookies)
+    prog = _yt_progress()
+    items = [x for x in (_yt_item(e, prog) for e in (j.get("entries") or []) if isinstance(e, dict)) if x]
+    return {"items": items, "name": j.get("channel") or j.get("title") or ""}
+
+
+def yt_feed(which):
+    if which not in YT_FEEDS:
+        return {"items": [], "error": "unknown feed"}
+    if not YT_COOKIES.exists():
+        return {"items": [], "error": "YouTube isn't signed in on lucapi yet (run lucapi/youtube-setup.sh)"}
+    ttl = {"home": 900, "subs": 600, "later": 120, "history": 60}[which]
+    try:
+        r = cached(f"yt:{which}", ttl, lambda: _yt_list(YT_FEEDS[which], 90 if which == "home" else 72, cookies=True))
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+    prog = _yt_progress()   # the red bars as they are now, not as they were when the list was fetched
+    for it in r["items"]:
+        p = prog.get(it["id"]) or {}
+        if p.get("duration"):
+            it["progress"] = 1.0 if p.get("finished") else round(min(1.0, float(p.get("position", 0)) / float(p["duration"])), 3)
+    return r
+
+
+def yt_search(q):
+    q = q.strip()[:120]
+    if not q:
+        return {"items": []}
+    try:
+        return cached(f"yt:search:{q.lower()}", 1800, lambda: _yt_list(f"ytsearch40:{q}", 40))
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
+def yt_channel(cid):
+    try:
+        return cached(f"yt:channel:{cid}", 1800, lambda: _yt_list(f"https://www.youtube.com/channel/{cid}/videos", 60))
+    except Exception as e:
+        return {"items": [], "error": str(e)}
+
+
+def _yt_sponsor(vid):
+    """SponsorBlock: the paid-for bits other viewers marked (sponsor reads, self-promotion), to skip."""
+    try:
+        cats = urllib.parse.quote(json.dumps(["sponsor", "selfpromo"]))
+        segs = json.loads(http_get(f"https://sponsor.ajay.app/api/skipSegments?videoID={vid}&categories={cats}", timeout=6))
+        return [[float(x["segment"][0]), float(x["segment"][1])] for x in segs if x.get("actionType", "skip") == "skip"]
+    except Exception:
+        return []   # 404: nothing marked
+
+
+def _yt_resolve(vid):
+    url = f"https://www.youtube.com/watch?v={vid}"
+    try:
+        j = _yt_run(["-J", "--no-playlist", "-f", YT_FORMAT, url])
+    except Exception:
+        j = _yt_run(["-J", "--no-playlist", "-f", YT_FORMAT, url], cookies=True)   # age-restricted and the like
+    fmts = j.get("requested_formats") or []
+    video = fmts[0]["url"] if fmts else j.get("url", "")
+    audio = fmts[1]["url"] if len(fmts) > 1 else ""
+    if not video:
+        raise RuntimeError("no stream found")
+    return {"id": vid, "video": video, "audio": audio, "title": j.get("title") or "", "channel": j.get("channel") or "",
+            "channel_id": j.get("channel_id") or "", "duration": j.get("duration"), "live": bool(j.get("is_live")),
+            "height": (fmts[0] if fmts else j).get("height"), "sponsor": _yt_sponsor(vid),
+            "thumb": f"https://i.ytimg.com/vi/{vid}/hq720.jpg", "description": (j.get("description") or "")[:600]}
+
+
+def yt_play(vid):
+    try:
+        r = dict(cached(f"yt:play:{vid}", 2 * 3600, lambda: _yt_resolve(vid)))
+    except Exception as e:
+        return {"error": str(e)}
+    p = _yt_progress().get(vid) or {}
+    pos = float(p.get("position", 0))
+    dur = float(p.get("duration") or r.get("duration") or 0)
+    r["position"] = pos if (not p.get("finished") and pos > 15 and (not dur or pos < dur - 20)) else 0
+    return r
+
+
+def yt_prep(vid):
+    """Looked at a video for a moment: get its streams ready, so it starts quickly if it's picked."""
+    threading.Thread(target=lambda: yt_play(vid), daemon=True).start()
+    return {"ok": True}
+
+
+def yt_progress_report(body):
+    vid = str(body.get("id", ""))
+    if not re.fullmatch(r"[\w-]{11}", vid):
+        return {"error": "bad id"}
+    with _yt_prog_lock:
+        prog = _yt_progress()
+        prog[vid] = {"position": float(body.get("position", 0)), "duration": float(body.get("duration") or 0),
+                     "finished": bool(body.get("finished")), "at": time.time()}
+        if len(prog) > 3000:   # the oldest go
+            for k in sorted(prog, key=lambda k: prog[k].get("at", 0))[:500]:
+                prog.pop(k, None)
+        YT_PROGRESS.write_text(json.dumps(prog))
+    # into your YouTube history (what the recommendations learn from), once you've watched a bit
+    if float(body.get("position", 0)) > 20 and YT_COOKIES.exists() and time.time() - _yt_marked.get(vid, 0) > 6 * 3600:
+        _yt_marked[vid] = time.time()
+
+        def mark():
+            try:
+                subprocess.run(_yt_cmd("--mark-watched", "--simulate", "--no-playlist", "-f", "ba/b",
+                                       f"https://www.youtube.com/watch?v={vid}", cookies=True),
+                               capture_output=True, timeout=120)
+                with _cache_lock:
+                    _cache.pop("yt:history", None)
+            except Exception as e:
+                print(f"[ember-feed] youtube: couldn't add {vid} to history: {e}", flush=True)
+        threading.Thread(target=mark, daemon=True).start()
+    return {"ok": True}
+
+
+def yt_status():
+    try:
+        v = subprocess.run(_ytdlp() + ["--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+    except Exception:
+        v = ""
+    return {"signed_in": YT_COOKIES.exists(), "ytdlp": v, "deno": (Path.home() / ".deno/bin/deno").exists()}
 
 
 CLIENT_LOG = HERE / "client.log"
@@ -4452,6 +4669,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(min(n, 65536)) or b"{}")
             if path == "/progress/report":
                 self._json(report(body))
+            elif path == "/yt/progress":
+                self._json(yt_progress_report(body))
             elif path == "/progress/dismiss":
                 self._json(dismiss(body))
             elif path == "/watchlist":
@@ -4595,6 +4814,21 @@ class Handler(BaseHTTPRequestHandler):
             elif re.fullmatch(r"/similar/(movie|series)/tt\d+", path):
                 _, _, typ, imdb = path.split("/")
                 self._json(similar(typ, imdb))
+            elif path.startswith("/yt/"):
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                parts = path.split("/")
+                if path == "/yt/status":
+                    self._json(yt_status())
+                elif len(parts) == 4 and parts[2] == "feed":
+                    self._json(yt_feed(parts[3]))
+                elif path == "/yt/search":
+                    self._json(yt_search((q.get("q") or [""])[0]))
+                elif len(parts) == 4 and parts[2] == "channel" and re.fullmatch(r"UC[\w-]{22}", parts[3]):
+                    self._json(yt_channel(parts[3]))
+                elif len(parts) == 4 and parts[2] in ("play", "prep") and re.fullmatch(r"[\w-]{11}", parts[3]):
+                    self._json(yt_play(parts[3]) if parts[2] == "play" else yt_prep(parts[3]))
+                else:
+                    self._json({"error": "not found"}, 404)
             elif re.fullmatch(r"/trailer/(movie|series)/tt\d+/play", path):
                 _, _, typ, imdb, _ = path.split("/")
                 self._json(trailer_play(typ, imdb))

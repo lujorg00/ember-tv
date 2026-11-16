@@ -49,6 +49,8 @@ struct PlaySession: Identifiable {
     var trailer = false
     /// watch together: "host" (start a room once it's playing) or the room's code (joining one)
     var together = ""
+    /// a YouTube video (then there's no season, trailer or stream ranking)
+    var yt: YTPlay? = nil
     var stream: Ranked { ranked[n] }
     var next: Video? { (season != nil && episode != nil) ? meta.next(after: season!, episode!) : nil }
     var title: String {
@@ -56,6 +58,15 @@ struct PlaySession: Identifiable {
         guard let s = season, let e = episode else { return meta.name }
         return "\(meta.name)  ·  S\(s) E\(e)\(epTitle.isEmpty ? "" : "  ·  " + epTitle)"
     }
+}
+
+struct YTPlay {
+    let id: String
+    let audio: String
+    let channel: String
+    let sponsor: [[Double]]
+    /// what plays next on its own, as on YouTube: the rest of the row it was picked from
+    var queue: [JSON]
 }
 
 enum PlayEnd {
@@ -545,6 +556,40 @@ final class Store: ObservableObject {
     }
 
     /// One you picked: played as it is, no switching to another if it stalls.
+    /// A YouTube video, in Ember's player: lucapi finds its streams (yt-dlp); `queue` plays on after it.
+    func playYouTube(_ v: JSON, queue: [JSON] = []) {
+        guard !picking, let id = v.str("id") else { return }
+        picking = true
+        loadGen += 1
+        let gen = loadGen
+        Task {
+            defer { picking = false }
+            loading = LoadState(art: v.str("thumb").flatMap(URL.init(string:)), logo: nil, title: v.str("title") ?? "",
+                                sub: v.str("channel") ?? "", steps: ["Getting the video from YouTube", "Starting playback"])
+            let r = try? await API.feedGet("/yt/play/\(id)", timeout: 90)
+            guard gen == loadGen else { return }
+            guard let r, let video = r.str("video"), !video.isEmpty else {
+                loading = nil
+                say("That video wouldn't load\(r?.str("error").map { ": " + $0 } ?? ".")")
+                return
+            }
+            loading?.step = 1
+            let meta = Meta(["id": "yt:" + id, "type": "movie", "name": r.str("title") ?? v.str("title") ?? "",
+                             "background": r.str("thumb") ?? v.str("thumb") ?? ""])
+            let sponsor = (r["sponsor"] as? [[Any]] ?? []).compactMap { a -> [Double]? in
+                let n = a.compactMap { ($0 as? NSNumber)?.doubleValue }
+                return n.count == 2 ? n : nil
+            }
+            var ps = PlaySession(meta: meta, season: nil, episode: nil, epTitle: "", start: r.dbl("position") ?? 0,
+                                 ranked: [Ranked(["url": video, "name": "YouTube"])])
+            ps.yt = YTPlay(id: id, audio: r.str("audio") ?? "", channel: r.str("channel") ?? v.str("channel") ?? "",
+                           sponsor: sponsor, queue: queue)
+            playing = ps
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if gen == loadGen { loading = nil }
+        }
+    }
+
     func playChosen(_ m: Meta, season: Int?, episode: Int?, epTitle: String, start: Double, stream: Ranked) {
         Task {
             let full = await MetaCache.shared.full(m)
@@ -555,6 +600,17 @@ final class Store: ObservableObject {
     func playerEnded(_ how: PlayEnd) {
         guard let s = playing else { return }
         playing = nil
+        if let y = s.yt {   // YouTube: on to the next in the row, as YouTube does; or say it wouldn't play
+            switch how {
+            case .next:
+                if let n = y.queue.first {
+                    Task { try? await Task.sleep(nanoseconds: 500_000_000); playYouTube(n, queue: Array(y.queue.dropFirst())) }
+                }
+            case .failed(let why, _): say("That video \(why).")
+            case .stopped: break
+            }
+            return
+        }
         switch how {
         case .stopped:
             if !s.trailer { refreshAfterPlay() }
