@@ -107,8 +107,8 @@ struct YouTubeView: View {
 
 struct YTRailStyle: ButtonStyle {
     let selected: Bool
-    func makeBody(configuration: Configuration) -> some View { Body(configuration: configuration, selected: selected) }
-    private struct Body: View {
+    func makeBody(configuration: Configuration) -> some View { RailBody(configuration: configuration, selected: selected) }
+    private struct RailBody: View {
         let configuration: Configuration
         let selected: Bool
         @Environment(\.isFocused) private var focused
