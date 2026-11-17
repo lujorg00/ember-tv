@@ -833,3 +833,8 @@ img.ttl-logo.lift, img.tp-logo.lift { filter: brightness(var(--lift, 2)) drop-sh
 .tg-invite .tg-t { font-size: 18px; line-height: 1.35; margin-bottom: 16px; }
 .tg-invite .btns { display: flex; gap: 10px; }
 @keyframes tgIn { from { opacity: 0; transform: translateY(24px); } }
+
+/* Zoomed cards showed a hairline of picture below the shade at the bottom edge (sub-pixel rounding while scaled):
+   the shade reaches a pixel past every edge (the card's rounded clip trims it), and the card is drawn as one layer. */
+.cw-art::after, .t10-art::after, .tile.art::after, .spot::before, .tvs::before { inset: -2px; }
+.cw-art, .t10-art, .tile.art, .spot, .tvs { backface-visibility: hidden; }
