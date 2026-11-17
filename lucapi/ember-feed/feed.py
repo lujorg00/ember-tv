@@ -1775,12 +1775,23 @@ def _progress():
         rows = [_row(r) for r in db().execute(
             "SELECT * FROM positions ORDER BY updated DESC").fetchall()]
     gone = _dismissed()
+    # the furthest episode of each show you've finished, on any device: a part-way episode before it is left behind
+    # (you've moved on), so Continue watching shows the next episode instead of resuming an old one
+    furthest = {}
+    for r in rows:
+        if r["type"] == "series" and r["finished"] and r["season"] is not None:
+            se = (r["season"], r["episode"] or 0)
+            if se > furthest.get(r["imdb"], (-1, -1)):
+                furthest[r["imdb"]] = se
     out, done = {}, set()
     for r in rows:
         if r["imdb"] in out or r["imdb"] in done:
             continue
         if gone.get(r["imdb"], 0) >= r["updated"]:
             continue  # you removed it; it comes back if you watch it again
+        if (r["type"] == "series" and not r["finished"] and r["season"] is not None
+                and (r["season"], r["episode"] or 0) < furthest.get(r["imdb"], (-1, -1))):
+            continue
         if r["finished"]:
             # the latest thing for this title is finished: nothing to resume (the continue row shows the next episode)
             done.add(r["imdb"])
@@ -1830,8 +1841,14 @@ def up_next():
                 "SELECT * FROM positions WHERE type='series' AND source='ember' AND updated>? ORDER BY updated DESC",
                 (cutoff,)).fetchall()]
         gone = _dismissed()
-        latest = {}
+        furthest = {}
         for r in rows:
+            if r["finished"] and r["season"] is not None:
+                furthest[r["imdb"]] = max(furthest.get(r["imdb"], (-1, -1)), (r["season"], r["episode"] or 0))
+        latest = {}
+        for r in rows:   # a part-way episode before the furthest one you've finished doesn't count (you've moved on)
+            if not r["finished"] and r["season"] is not None and (r["season"], r["episode"] or 0) < furthest.get(r["imdb"], (-1, -1)):
+                continue
             latest.setdefault(r["imdb"], r)
         out = []
         for imdb, r in latest.items():
