@@ -159,6 +159,8 @@ final class PlayerModel: ObservableObject, MPVEvents {
         if let b = bufferingSince, now.timeIntervalSince(b) > 12 { return fail("kept stalling") }
         if started && !paused && now.timeIntervalSince(lastReport) > 15 { report("playing") }
         if controls && now > controlsUntil && !paused { controls = false }
+        // a slide left open (finger lifted, never clicked) for half a minute: back to where it was, playing again
+        if scrubbing && now.timeIntervalSince(lastScrub) > 30 { scrubCancel() }
         if intro && now > introUntil { intro = false }
         creditsTick()
         sponsorTick()
@@ -235,6 +237,9 @@ final class PlayerModel: ObservableObject, MPVEvents {
         guard started, dur > 0, !done, !upNext else { return }
         lastScrub = Date()
         if scrubTo == nil {
+            Diag.log("player: slide started at \(Int(pos))s")
+            skipTarget = nil
+            skipStreak = 0
             scrubTo = pos
             playAfterScrub = !paused
             core.pause()
@@ -270,10 +275,15 @@ final class PlayerModel: ObservableObject, MPVEvents {
         Diag.log("player: scrubbed to \(Int(t))s")
         core.command(["seek", String(format: "%.1f", t), "absolute"])
         pos = t
+        skipTarget = nil   // a quick press straight after mustn't jump from where the presses had got to before
+        skipStreak = 0
         endScrub()
     }
 
-    func scrubCancel() { endScrub() }
+    func scrubCancel() {
+        Diag.log("player: slide cancelled")
+        endScrub()
+    }
 
     private func endScrub() {
         scrubTo = nil
@@ -308,7 +318,10 @@ final class PlayerModel: ObservableObject, MPVEvents {
             self.skipStreak = 0
         }
     }
-    func togglePause() { core.togglePause() }
+    func togglePause() {
+        if scrubbing { scrubCommit(); return }
+        core.togglePause()
+    }
     func refreshTracks() { tracks = core.tracks(); subDelay = core.double("sub-delay") }
     func selectSubtitle(_ t: Track?) {
         core.set("sid", t.map { String($0.id) } ?? "no")
@@ -749,7 +762,9 @@ struct PlayerScreen: View {
                         switch d {
                         case .left: model.skip(-10)
                         case .right: model.skip(10)
-                        case .down: focus = session.yt == nil ? .subs : .next; model.showControls()
+                        case .down:
+                            if model.scrubbing { return }
+                            focus = session.yt == nil ? .subs : .next; model.showControls()
                         default: model.showControls()
                         }
                     }

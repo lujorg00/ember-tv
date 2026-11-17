@@ -12,6 +12,7 @@ final class Thumbnailer {
     private let url: URL
     private var opened = false
     private var seekingTo: Double?
+    private var seekedAt = Date.distantPast
     private var wanted: Double?
     private var cache: [Int: UIImage] = [:]       // by 4-second step
     private let w = 480, h = 270
@@ -32,7 +33,9 @@ final class Thumbnailer {
             if let hit = self.cache[Thumbnailer.bucket(t)] { self.deliver(t, hit); return }
             self.wanted = t
             if !self.opened { self.open(at: t); return }
-            if self.seekingTo == nil { self.seek(t) }
+            // a seek that never brought a frame (it landed on the same picture, or the network hiccuped) mustn't
+            // freeze the previews for the rest of the film: after 2.5 s, ask again
+            if self.seekingTo == nil || Date().timeIntervalSince(self.seekedAt) > 2.5 { self.seek(t) }
         }
     }
 
@@ -81,6 +84,7 @@ final class Thumbnailer {
             t.q.async { t.drain() }
         }, me)
         seekingTo = t
+        seekedAt = Date()
         mpv_set_property_string(m, "start", String(format: "%.1f", t))
         command(["loadfile", url.absoluteString, "replace"])
         Diag.log("thumbs: opened for previews")
@@ -103,6 +107,7 @@ final class Thumbnailer {
 
     private func seek(_ t: Double) {
         seekingTo = t
+        seekedAt = Date()
         command(["seek", String(format: "%.1f", t), "absolute+keyframes"])
     }
 
