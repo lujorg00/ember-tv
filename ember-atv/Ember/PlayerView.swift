@@ -175,9 +175,9 @@ final class PlayerModel: ObservableObject, MPVEvents {
     private var ticks = 0
 
     // MARK: smooth picture
-    // Big streams (4K remuxes with HDR or Dolby Vision, Atmos) can be more than the picture processing keeps up
-    // with: HDR peak measuring and contrast recovery are run on every frame. When frames start dropping (more
-    // than 10 in 3 seconds, twice running), those are switched off for the rest of the video. Logged on lucapi.
+    // With HDR output on (the default), HDR goes to the TV as HDR and none of this is needed. Only when it's
+    // converted to a normal picture (HDR output off, or the TV not in HDR) can the conversion fall behind on a big
+    // 4K stream: then, if frames keep dropping, the costly brightness measuring is switched off. Logged on lucapi.
     private var lightOn = false
     private var dropMark = -1
     private var dropStrikes = 0
@@ -185,7 +185,9 @@ final class PlayerModel: ObservableObject, MPVEvents {
         core.int("frame-drop-count") + core.int("decoder-frame-drop-count") + core.int("vo-delayed-frame-count")
     }
     private func smoothTick() {
-        guard started, !paused, !lightOn, !buffering, ticks % 3 == 0 else { return }
+        guard started, !paused, !lightOn, !buffering, ticks % 3 == 0,
+              (core.string("video-params/gamma") ?? "") == "pq" || (core.string("video-params/gamma") ?? "") == "hlg",
+              core.string("video-target-params/gamma").map({ $0 != "pq" && $0 != "hlg" }) ?? true else { return }
         let d = dropped()
         defer { dropMark = d }
         guard dropMark >= 0 else { return }
@@ -197,14 +199,6 @@ final class PlayerModel: ObservableObject, MPVEvents {
         Diag.log("smooth picture: on (\(why))")
         core.set("hdr-compute-peak", "no")
         core.set("hdr-contrast-recovery", "0")
-        core.set("tone-mapping", "auto")
-        core.set("deband", "no")
-        core.set("dither", "no")
-        core.set("correct-downscaling", "no")
-        core.set("scale", "bilinear")
-        core.set("dscale", "bilinear")
-        core.set("cscale", "bilinear")
-        core.set("video-sync", "audio")
     }
 
     /// Where the credits start, when the file's chapters say so ("Credits", "End Credits", "Outro"...).
@@ -662,7 +656,7 @@ struct PlayerScreen: View {
                 // HDR output (experimental, Settings): only for streams named HDR / Dolby Vision. Otherwise HDR is
                 // converted to a normal picture, which is what's been reliable.
                 MPVView(model: model, url: url, start: session.start, audio: session.yt?.audio,
-                        hdr: UserDefaults.standard.bool(forKey: "hdrOutput")
+                        hdr: (UserDefaults.standard.object(forKey: "hdrOutput") as? Bool ?? true)
                             && session.stream.badges.contains { ["HDR", "HDR10+", "Dolby Vision"].contains($0) }).ignoresSafeArea()
             }
             if model.buffering { ProgressView().scaleEffect(1.8).tint(.white) }

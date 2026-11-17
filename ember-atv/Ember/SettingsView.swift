@@ -4,7 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var notices: Notices
     @AppStorage("feed") private var feed = ""
-    @AppStorage("hdrOutput") private var hdrOutput = false
+    @AppStorage("hdrOutput") private var hdrOutput = true
 
     var body: some View {
         NavigationStack {
@@ -39,9 +39,9 @@ struct SettingsView: View {
                         }
                     }
                     Section {
-                        Toggle("HDR output (experimental)", isOn: $hdrOutput)
+                        Toggle("HDR output", isOn: $hdrOutput)
                     } header: { Text("Picture") } footer: {
-                        Text("Off: HDR and Dolby Vision are converted to a normal picture (reliable). On: sent to the TV as HDR; if streams then crash or look wrong, turn it off.")
+                        Text("On (best): HDR and Dolby Vision go to the TV as HDR, at full quality. Needs Match Content > Match Dynamic Range on in the Apple TV's Video and Audio settings. Off: converted to a normal picture.")
                     }
                     Section {
                         Button("Test notifications") {
