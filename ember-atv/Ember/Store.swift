@@ -80,6 +80,8 @@ enum PlayEnd {
 enum CWName {
     /// "2026-11-15T21:04:10+00:00" (lucapi) or "2026-11-15T21:04:10.000Z" (Trakt); no time: the distant past
     static func date(_ s: String) -> Date {
+        // lucapi's times carry microseconds ("21:04:10.123456+00:00"), which Apple's reader won't take: drop them
+        let s = s.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
         let f = ISO8601DateFormatter()
         if let d = f.date(from: s) { return d }
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

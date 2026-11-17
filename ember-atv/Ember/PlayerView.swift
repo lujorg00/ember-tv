@@ -167,11 +167,45 @@ final class PlayerModel: ObservableObject, MPVEvents {
         togetherTick()
         // once a minute while playing: how smoothly it's going (dropped and late frames), for the log on lucapi
         ticks += 1
+        smoothTick()
         if started && !paused && ticks % 60 == 0 {
             Diag.log("frames: \(String(format: "%.3f", core.double("container-fps")))fps on a \(String(format: "%.2f", core.double("display-fps")))Hz screen, dropped \(core.int("frame-drop-count")) + \(core.int("decoder-frame-drop-count")) decoding, late \(core.int("vo-delayed-frame-count")), mistimed \(core.int("mistimed-frame-count"))")
         }
     }
     private var ticks = 0
+
+    // MARK: smooth picture
+    // Big streams (4K remuxes with HDR or Dolby Vision, Atmos) can be more than the picture processing keeps up
+    // with: HDR peak measuring and contrast recovery are run on every frame. When frames start dropping (more
+    // than 10 in 3 seconds, twice running), those are switched off for the rest of the video. Logged on lucapi.
+    private var lightOn = false
+    private var dropMark = -1
+    private var dropStrikes = 0
+    private func dropped() -> Int {
+        core.int("frame-drop-count") + core.int("decoder-frame-drop-count") + core.int("vo-delayed-frame-count")
+    }
+    private func smoothTick() {
+        guard started, !paused, !lightOn, !buffering, ticks % 3 == 0 else { return }
+        let d = dropped()
+        defer { dropMark = d }
+        guard dropMark >= 0 else { return }
+        if d - dropMark > 10 { dropStrikes += 1 } else { dropStrikes = 0 }
+        if dropStrikes >= 2 { goLight("\(d - dropMark) frames dropped in 3 s") }
+    }
+    private func goLight(_ why: String) {
+        lightOn = true
+        Diag.log("smooth picture: on (\(why))")
+        core.set("hdr-compute-peak", "no")
+        core.set("hdr-contrast-recovery", "0")
+        core.set("tone-mapping", "auto")
+        core.set("deband", "no")
+        core.set("dither", "no")
+        core.set("correct-downscaling", "no")
+        core.set("scale", "bilinear")
+        core.set("dscale", "bilinear")
+        core.set("cscale", "bilinear")
+        core.set("video-sync", "audio")
+    }
 
     /// Where the credits start, when the file's chapters say so ("Credits", "End Credits", "Outro"...).
     private func findCreditsChapter() -> Double? {
