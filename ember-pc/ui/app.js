@@ -562,6 +562,8 @@ function niceName(name) {
 function homeRowName(name, type) {
   name = niceName(name);
   if (/\b(films?|movies?|series|shows?|tv)\b/i.test(name)) return name;
+  // watchlists say which in their title: "Film Watchlist", "Series Watchlist"
+  if (/watchlist/i.test(name)) return name.replace(/watchlist/i, `${type === "movie" ? "Film" : "Series"} Watchlist`);
   return { name, kind: type === "movie" ? "Films" : "Series" };
 }
 

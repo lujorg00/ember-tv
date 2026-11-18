@@ -212,8 +212,14 @@ final class Store: ObservableObject {
                     let raw = c.str("name") ?? c.str("id") ?? ""
                     let name = niceName(raw)
                     let says = name.range(of: "\\b(films?|movies?|series|shows?|tv)\\b", options: [.regularExpression, .caseInsensitive]) != nil
-                    let kind: String? = says ? nil : (c.str("type") == "movie" ? "Films" : "Series")
-                    var r = RowData(id: "\(c.str("type") ?? ""):\(c.str("id") ?? "")", title: name, kind: kind, metas: metas, top: top)
+                    var kind: String? = says ? nil : (c.str("type") == "movie" ? "Films" : "Series")
+                    var title = name
+                    // watchlists say which in their title: "Film Watchlist", "Series Watchlist"
+                    if !says, let r = title.range(of: "watchlist", options: .caseInsensitive) {
+                        title.replaceSubrange(r, with: c.str("type") == "movie" ? "Film Watchlist" : "Series Watchlist")
+                        kind = nil
+                    }
+                    var r = RowData(id: "\(c.str("type") ?? ""):\(c.str("id") ?? "")", title: title, kind: kind, metas: metas, top: top)
                     r.wide = raw.range(of: "watchlist", options: .caseInsensitive) != nil
                     r.numbered = !trending
                     return (i, r)
