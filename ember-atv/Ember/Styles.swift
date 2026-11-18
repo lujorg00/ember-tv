@@ -30,7 +30,7 @@ private struct EmberButtonBody<L: View>: View {
             .background { if round { Circle().fill(fill) } else { Capsule().fill(fill) } }
             .overlay { if !focused && !primary { (round ? AnyShape(Circle()) : AnyShape(Capsule())).stroke(.white.opacity(0.12), lineWidth: 1) } }
             .scaleEffect(pressed ? 0.95 : focused ? (round ? 1.1 : 1.05) : 1)
-            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 16, y: 8)
+            .shadowIf(focused, color: .black.opacity(0.45), radius: 16, y: 8)
             .animation(.easeOut(duration: 0.16), value: focused)
     }
 }
@@ -91,9 +91,18 @@ struct LiftCardStyle: ButtonStyle {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white.opacity(focused ? 0.55 : 0), lineWidth: 2))
                 .scaleEffect(configuration.isPressed ? 1.0 : focused ? 1.06 : 1)
-                .shadow(color: .black.opacity(focused ? 0.55 : 0.3), radius: focused ? 22 : 8, y: focused ? 14 : 4)
+                // a shadow only under the focused card: one per poster in every row cost a drawing pass each
+                .shadowIf(focused, color: .black.opacity(0.55), radius: 22, y: 14)
                 .animation(.easeOut(duration: 0.2), value: focused)
                 .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
         }
+    }
+}
+
+
+extension View {
+    /// A shadow that isn't drawn at all when it's off (a see-through shadow still costs a drawing pass).
+    @ViewBuilder func shadowIf(_ on: Bool, color: Color, radius: CGFloat, x: CGFloat = 0, y: CGFloat = 0) -> some View {
+        if on { self.shadow(color: color, radius: radius, x: x, y: y) } else { self }
     }
 }

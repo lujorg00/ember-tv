@@ -17,11 +17,11 @@ struct AmbientBackground: View {
             glow
             // stopped while something's playing: these pages are still there under the player, and drawing them took
             // graphics time from the video (steppy playback)
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: store.playing != nil)) { tl in
+            // 15 frames a second: plenty for slow drifting, and half the work while you move around the menus
+            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: store.playing != nil)) { tl in
                 Canvas { ctx, size in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let W = size.width, H = size.height
-                    if mode == .day { ctx.addFilter(.blur(radius: 1.4)) }   // the dust glows softly, no hard edges
                     for p in parts {
                         if mode == .day {
                             // motes of dust drifting slowly down through the light at the top right

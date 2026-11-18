@@ -415,11 +415,13 @@ struct TitleArt: View {
                     }
                 }
                     .frame(maxWidth: width, maxHeight: height, alignment: .bottomLeading)
-                    .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
+                    // big logos (the top of Home, a film's page) keep their shadow; the small ones on cards sit on a
+                    // dark fade already, and a shadow on each was a drawing pass per card
+                    .shadowIf(height >= 100, color: .black.opacity(0.6), radius: 18, y: 4)
                     .transition(.opacity)
             } else if meta.logoURL == nil || failed {
                 Text(meta.name).font(.ember(nameSize, .bold)).lineLimit(2).frame(maxWidth: width, alignment: .leading)
-                    .shadow(color: .black.opacity(0.6), radius: 18, y: 4)
+                    .shadowIf(height >= 100, color: .black.opacity(0.6), radius: 18, y: 4)
                     .transition(.opacity)
             } else {
                 Color.clear

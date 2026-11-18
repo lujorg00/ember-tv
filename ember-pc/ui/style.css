@@ -837,3 +837,15 @@ img.ttl-logo.lift, img.tp-logo.lift { filter: brightness(var(--lift, 2)) drop-sh
 /* Zoomed cards showed a hairline of picture below the shade at the bottom edge (sub-pixel rounding while scaled):
    the shade reaches a pixel past every edge (the card's rounded clip trims it). */
 .cw-art::after, .t10-art::after, .tile.art::after, .spot::before, .tvs::before { inset: -2px; }
+
+
+/* Ember TV speed: the Chromecast redraws every shadow and filter on a card each frame it moves, so on the TV the
+   cards rest without shadows, the focused one gets its ring (no soft shadow) and only its size animates, and logos
+   on cards are drawn without the drop shadow (they sit on a dark fade anyway). */
+.tv .poster, .tv .t10-art, .tv .cw-art, .tv .tile, .tv .tile .face, .tv .epc .thumb, .tv .apptile, .tv .spot, .tv .tvs { box-shadow: none; }
+.tv .poster.tvf, .tv .t10.tvf .t10-art, .tv .cw.tvf .cw-art, .tv .tile.tvf, .tv .tile.tvf .face, .tv .epc.tvf .thumb, .tv .apptile.tvf {
+  box-shadow: 0 0 0 4px var(--accent) !important; transition: transform .15s !important; }
+.tv img.ttl-logo, .tv img.tp-logo, .tv .spot-logo, .tv .bmk, .tv .tile.brand img { filter: none; }
+.tv img.ttl-logo.dark, .tv img.tp-logo.dark, .tv .tile.brand.ink-w img { filter: brightness(0) invert(1); }
+.tv img.ttl-logo.lift, .tv img.tp-logo.lift { filter: brightness(var(--lift, 2)); }
+.tv .tile.brand.ink-k img { filter: brightness(0); }

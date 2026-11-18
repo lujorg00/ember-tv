@@ -2119,6 +2119,7 @@ fetchSharedSettings();
 const sky = (() => {
   const cv = $("#sky"), g = cv.getContext("2d"), glow = $("#glow");
   let mode = "night", parts = [], flakes = [], raf = 0, paused = false, last = 0, rise = 7 * 60, set = 17 * 60;
+  let holdUntil = 0;
   // on the Chromecast: a third of the size and 12 frames a second, so rows still scroll smoothly over it
   const size = () => { const k = TV ? 3 : 2; cv.width = Math.round(innerWidth / k); cv.height = Math.round(innerHeight / k); };
   const pickMode = () => {
@@ -2159,7 +2160,7 @@ const sky = (() => {
   };
   const draw = (t) => {
     raf = requestAnimationFrame(draw);
-    if (paused || t - last < (TV ? 80 : 50)) return; // 20 fps is plenty for this (12 on the TV)
+    if (paused || t < holdUntil || t - last < (TV ? 80 : 50)) return; // 20 fps is plenty for this (12 on the TV)
     last = t;
     const W = cv.width, H = cv.height, s = t / 1000;
     g.clearRect(0, 0, W, H);
@@ -2204,8 +2205,11 @@ const sky = (() => {
   addEventListener("resize", () => { size(); });
   setInterval(() => { if (pickMode() !== mode) start(); }, 60000);
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
-  return { start, pause: (p) => { paused = p; } };
+  return { start, pause: (p) => { paused = p; }, hold: (ms) => { holdUntil = performance.now() + ms; } };
 })();
+// Ember TV: the sky stands still while you move around (and for a moment after), so the Chromecast spends
+// everything on moving the focus and scrolling the rows
+if (TV) document.addEventListener("keydown", () => sky.hold(900), true);
 window.emberSky = sky; // Ember TV stops the sky while its player is up, so the video gets the whole of the Chromecast
 
 // ---------------------------------------------------------------- full screen (button top right, or F11)
