@@ -52,8 +52,8 @@ import java.util.concurrent.Executors;
 /**
  * Ember's layer over everything on screen (Stremio, YouTube, the screensaver):
  *  - the dimmer: a see-through black layer, cycled Off -> Dim -> Heavy by one remote button (the Netflix button,
- *    learnt in Ember settings). Automatic: Dim at 11:30pm, Heavy at midnight, lifted at 8am. Before an early shift
- *    (starting before 10am) each step comes an hour earlier, with a note saying when the shift is.
+ *    learnt in Ember settings). Nothing dims on its own; before an early shift (starting before 10am) a note at
+ *    10:30pm says when the shift is.
  *  - notes: small pills top-right - "You were at 10:50" when something you were part-way through starts playing,
  *    "Winnie came in" / "Elvis went out" from the cat flap, and calendar and reminder alerts (10 seconds each,
  *    12h / 1h / 30 min before and getting more urgent; early shifts 9h before with when to be up).
@@ -201,8 +201,7 @@ public class DimService extends AccessibilityService {
     // ---------------------------------------------------------------- the schedule
 
     /**
-     * Times are counted from noon, so one night runs noon -> noon: Dim, then Heavy, then lift at 8am. Each step happens
-     * once a night and never brightens what you've set; at 8am an automatic dim lifts, one you set yourself stays.
+     * Times are counted from noon, so one night runs noon -> noon.
      */
     private void checkSchedule() {
         Calendar now = Calendar.getInstance();
@@ -220,13 +219,15 @@ public class DimService extends AccessibilityService {
         int shift = early ? EARLY_BY : 0;
         int dimAt = DIM_AT - 12 * 60 - shift, heavyAt = HEAVY_AT - 12 * 60 - shift, liftAt = LIFT_AT + 12 * 60;
 
-        if (t >= heavyAt && t < liftAt) {
-            if (step("heavy:" + night, 2) && early) shiftNote();
-        } else if (t >= dimAt && t < liftAt) {
-            if (step("dim:" + night, 1) && early) shiftNote();
-        } else if (prefs.dimAuto()) {
+        // No automatic dimming any more (you asked for it off): the dimmer is the remote button only. A dim the
+        // schedule put on before this version is lifted. The early-shift note still comes at the old Dim time.
+        if (prefs.dimAuto()) {
             prefs.setDimAuto(false);
             apply(0, false);
+        }
+        if (early && t >= dimAt && t < liftAt && !("note:" + night).equals(prefs.dimAutoNight())) {
+            prefs.setDimAutoNight("note:" + night);
+            shiftNote();
         }
     }
 
