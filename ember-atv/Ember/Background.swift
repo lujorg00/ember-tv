@@ -7,6 +7,7 @@ struct AmbientBackground: View {
     struct Particle { let x, y, r, s, p: Double }
 
     @EnvironmentObject var store: Store
+    @ObservedObject private var scroll = ScrollQuiet.shared
     @State private var mode: Mode = .night
     @State private var parts: [Particle] = []
     @State private var flakes: [Particle] = []     // December: light snow over whichever scene is showing
@@ -18,7 +19,7 @@ struct AmbientBackground: View {
             // stopped while something's playing: these pages are still there under the player, and drawing them took
             // graphics time from the video (steppy playback)
             // 15 frames a second: plenty for slow drifting, and half the work while you move around the menus
-            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: store.playing != nil)) { tl in
+            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: store.playing != nil || scroll.moving)) { tl in
                 Canvas { ctx, size in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let W = size.width, H = size.height
@@ -135,4 +136,22 @@ enum Grain {
         else { return UIImage() }
         return UIImage(cgImage: cg)
     }()
+}
+
+
+/// While a page scrolls up or down, the moving background holds still, so all the Apple TV's effort goes on the scroll.
+final class ScrollQuiet: ObservableObject {
+    static let shared = ScrollQuiet()
+    @Published var moving = false
+}
+
+extension View {
+    @ViewBuilder func quietWhileScrolling() -> some View {
+        if #available(tvOS 18.0, *) {
+            self.onScrollPhaseChange { _, phase in
+                let m = phase != .idle
+                if ScrollQuiet.shared.moving != m { ScrollQuiet.shared.moving = m }
+            }
+        } else { self }
+    }
 }

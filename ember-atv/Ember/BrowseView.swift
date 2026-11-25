@@ -18,7 +18,9 @@ struct BrowseView: View {
           ZStack {
             AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 30) {
+                // every row made once, up front (each row's cards are still made as they come into view): a lazy
+                // stack built and threw away whole rows while you scrolled up and down, which is what jittered
+                VStack(alignment: .leading, spacing: 30) {
                     if !hero.isEmpty { HeroView(items: hero, pageName: name) }
                     ForEach(rows) { r in
                         if r.top { TopRow(row: r) } else if r.wide { WallRow(row: r) } else { SpotRow(row: r) }
@@ -29,6 +31,7 @@ struct BrowseView: View {
                 .padding(.bottom, 80)
             }
             .scrollClipDisabled()
+            .quietWhileScrolling()
             .ignoresSafeArea()
           }
             .environment(\.focusMemory, $focusKey)

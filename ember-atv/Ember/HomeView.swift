@@ -12,7 +12,9 @@ struct HomeView: View {
           ZStack {
             AmbientBackground()
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 30) {
+                // every row made once, up front (each row's cards are still made as they come into view): a lazy
+                // stack built and threw away whole rows while you scrolled up and down, which is what jittered
+                VStack(alignment: .leading, spacing: 30) {
                     if !store.hero.isEmpty { HeroView(items: store.hero) }
                     if !store.cw.isEmpty { ContinueRow(items: store.cw) }
                     // the two watchlists (films, series) sit side by side, where the first of them comes
@@ -61,6 +63,7 @@ struct HomeView: View {
                 .padding(.bottom, 80)
             }
             .scrollClipDisabled()
+            .quietWhileScrolling()
             .ignoresSafeArea()
           }
             .environment(\.focusMemory, $focusKey)
